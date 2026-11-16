@@ -16,6 +16,10 @@ export const GLOSSARY = {
   avgSession: 'Average length of sessions that lasted more than 0 seconds.',
   firstTouch: 'Credits an order to the very first visit of the buyer (the campaign that brought them), not just the session where they paid.',
   engaged: 'Sessions with 5+ events or a product view.',
+  repeat: 'A customer who ordered on at least two different days. Several orders on the same day (split or retried orders) do not count.',
+  ltv: 'Lifetime value: total revenue from a customer so far. Young business, so this is early and will grow.',
+  reachable: 'People with a phone number on file (from login or checkout), so they can be contacted.',
+  nudge: 'Orders whose basket is 70-99% of the chosen threshold: a small add-on would push them over it.',
   segment: 'Where a person is in the journey: Buyer, Abandoned checkout, Cart no checkout, Quiz done, Engaged browser or Visitor.',
 }
 

@@ -49,14 +49,16 @@ export const pct = (v, d = 1) => (v === null || v === undefined ? '–' : (v * 1
 export const dt = (v) => {
   if (!v) return '–'
   const d = new Date(v)
-  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
 }
+export const tod = (v) => (v ? new Date(v).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }) : '–')
 export const day = (v) => (v ? new Date(v + (String(v).length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '–')
 export const dur = (s) => {
   if (!s && s !== 0) return '–'
   if (s < 60) return `${Math.round(s)}s`
   if (s < 3600) return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
-  return `${(s / 3600).toFixed(1)}h`
+  if (s < 86400) return `${(s / 3600).toFixed(1)}h`
+  return `${(s / 86400).toFixed(1)}d`
 }
 export const KEY_LABEL = {
   product_view: 'Product view', add_to_cart: 'Add to cart', view_cart: 'View cart', checkout_view: 'Checkout',

@@ -34,6 +34,14 @@ RAW_SCHEMAS = {
         "visitor_id": "VARCHAR", "user_id": "VARCHAR", "guest_session_id": "VARCHAR", "session_id": "VARCHAR",
         "linked_at": "TIMESTAMPTZ",
     },
+    "raw_catalog_roopsee": {
+        "product_uid": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
+        "product_type_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE",
+    },
+    "raw_catalog_master": {
+        "product_id": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
+        "category_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE",
+    },
     "raw_customer_address": {
         "id": "BIGINT", "user_id": "VARCHAR", "city": "VARCHAR", "state": "VARCHAR", "pincode": "VARCHAR",
         "is_default": "BOOLEAN", "created_at": "TIMESTAMPTZ", "latitude": "DOUBLE", "longitude": "DOUBLE",

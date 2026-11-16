@@ -312,12 +312,66 @@ def sessions(date_from: str | None = None, date_to: str | None = None, include_e
 
 @app.get("/api/sessions/{session_id}")
 def session_detail(session_id: str):
-    s = q("SELECT * FROM sessions WHERE session_id = ?", [session_id])
-    if not s:
+    """Everything about one session: attribution, device, the ordered event timeline, pages, orders, and the person it belongs to."""
+    rows = q("SELECT * FROM sessions WHERE session_id = ?", [session_id])
+    if not rows:
         raise HTTPException(404, "session not found")
-    ev = q("""SELECT timezone('Asia/Kolkata', ts) AS at, event_name, event_key, page_type, path, product_name, brand, amount, search_term, city_n, ip
-              FROM events_clean WHERE session_id = ? ORDER BY ts, id LIMIT 600""", [session_id])
-    return {"session": s[0], "events": ev}
+    s = rows[0]
+    events = q("""SELECT timezone('Asia/Kolkata', ts) AS at, event_name, event_key, page_type, path, product_name, brand, amount, search_term, city_n, ip
+                  FROM events_clean WHERE session_id = ? ORDER BY ts, id LIMIT 3000""", [session_id])
+    pages = q("""SELECT path, any_value(page_type) AS page_type, min(timezone('Asia/Kolkata', ts)) AS first_at, count(*) AS events,
+                 count(*) FILTER (WHERE is_pageview) AS views FROM events_clean WHERE session_id = ? GROUP BY path ORDER BY first_at""", [session_id])
+    types = q("""SELECT event_name, any_value(event_key) AS event_key, count(*) AS n FROM events_clean WHERE session_id = ?
+                 GROUP BY event_name ORDER BY n DESC LIMIT 25""", [session_id])
+    extra = one("""SELECT any_value(browser_n) AS browser,
+                   first(utm_content ORDER BY ts) FILTER (WHERE utm_content IS NOT NULL) AS utm_content,
+                   first(utm_term ORDER BY ts) FILTER (WHERE utm_term IS NOT NULL) AS utm_term,
+                   first(referrer_host ORDER BY ts) FILTER (WHERE referrer_host IS NOT NULL) AS referrer
+                   FROM events_clean WHERE session_id = ?""", [session_id])
+    orders = q("""SELECT o.order_id, o.ts, o.total, o.status, o.payment_method, o.coupon_code, o.items_count, o.is_valid, o.is_test,
+                  (SELECT string_agg(l.product_name, ' | ') FROM order_lines l WHERE l.order_id = o.order_id) AS items
+                  FROM orders_clean o WHERE o.session_id = ? ORDER BY o.ts""", [session_id])
+    pkey = s["user_id"] or s["visitor_key"]
+    person = one("SELECT person_key, name, phone10, email, segment, sessions, is_registered FROM users_360 WHERE person_key = ?", [pkey])
+    prev_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at < ? ORDER BY started_at DESC LIMIT 1", [pkey, s["started_at"]])
+    next_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at > ? ORDER BY started_at ASC LIMIT 1", [pkey, s["started_at"]])
+    return {"session": s, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders,
+            "person": {**person, "person_key": pkey} if person else {"person_key": pkey}, "prev": prev_s or None, "next": next_s or None}
+
+
+# ------------------------------------------------------------------ person profile (all sessions, browsers, times, orders of one person)
+@app.get("/api/person")
+def person_profile(key: str):
+    """`key` is a person key: the account id for logged-in people, or the browser id for anonymous visitors."""
+    sess = q("""WITH s0 AS (SELECT * FROM sessions WHERE coalesce(user_id, visitor_key) = ?),
+                b AS (SELECT session_id, any_value(browser_n) AS browser FROM events_clean WHERE session_id IN (SELECT session_id FROM s0) GROUP BY 1)
+                SELECT s0.session_id, s0.started_at, s0.ended_at, s0.duration_s, s0.events, s0.pageviews, s0.visitor_key, s0.device, s0.platform, s0.is_app,
+                       s0.channel, s0.source, s0.medium, s0.campaign, s0.landing_path, s0.city, s0.region, s0.ip, s0.key_events, s0.stage,
+                       s0.is_excluded, s0.excl_reason, b.browser
+                FROM s0 LEFT JOIN b USING (session_id) ORDER BY s0.started_at DESC""", [key])
+    profile = one("SELECT * FROM users_360 WHERE person_key = ?", [key])
+    if not sess and not profile:
+        raise HTTPException(404, "person not found")
+    browsers = {}
+    for r in sess:
+        b = browsers.setdefault(r["visitor_key"], {"visitor_key": r["visitor_key"], "sessions": 0, "events": 0, "first_seen": r["started_at"], "last_seen": r["started_at"],
+                                                   "device": r["device"], "platform": r["platform"], "browser": r["browser"], "is_app": r["is_app"]})
+        b["sessions"] += 1
+        b["events"] += r["events"]
+        b["first_seen"] = min(b["first_seen"], r["started_at"])
+        b["last_seen"] = max(b["last_seen"], r["started_at"])
+    ips = q("""SELECT ip, count(*) AS events, count(DISTINCT session_id) AS sessions, min(ts) AS first_seen, max(ts) AS last_seen, any_value(city_n) AS city
+               FROM events_clean WHERE ip IS NOT NULL AND session_id IN (SELECT session_id FROM sessions WHERE coalesce(user_id, visitor_key) = ?)
+               GROUP BY 1 ORDER BY events DESC LIMIT 15""", [key])
+    orders = q("""SELECT o.order_id, o.ts, o.total, o.status, o.payment_method, o.coupon_code, o.items_count, o.is_valid, o.is_test, o.is_excluded, o.session_id,
+                  (SELECT string_agg(l.product_name, ' | ') FROM order_lines l WHERE l.order_id = o.order_id) AS items
+                  FROM orders_clean o WHERE o.user_id = ? ORDER BY o.ts DESC""", [key])
+    daily = q("SELECT date_ist AS d, count(*) AS sessions, sum(events) AS events FROM sessions WHERE coalesce(user_id, visitor_key) = ? GROUP BY 1 ORDER BY 1", [key])
+    totals = {"sessions": len(sess), "events": sum(r["events"] for r in sess), "pageviews": sum(r["pageviews"] for r in sess),
+              "seconds": sum(r["duration_s"] or 0 for r in sess), "browsers": len(browsers), "ips": len(ips),
+              "devices": len({(r["device"], r["platform"], r["is_app"]) for r in sess})}
+    return {"person_key": key, "profile": profile or None, "totals": totals, "sessions": sess, "browsers": sorted(browsers.values(), key=lambda b: b["last_seen"], reverse=True),
+            "ips": ips, "orders": orders, "daily": daily}
 
 
 @app.get("/api/users")
@@ -577,7 +631,265 @@ def insights(date_from: str | None = None, date_to: str | None = None, include_e
         on = bool(q("SELECT 1 FROM exclusions WHERE kind='rule' AND value='staff_orders' AND active"))
         add("info", f"{so['n']} orders (₹{so['v']:,.0f}) came from admin / staff accounts",
             ("They are excluded from every number here." if on else "They are counted as real customer orders.") + " Change this in Exclusions.", "exclusions")
+    # 10. basket size, returning customers, reachable quiz audience
+    bk = basket(date_from, date_to, include_excluded, 499)["kpis"]
+    if bk["single_item_orders"] >= 10 and bk["aov_single"] and bk["aov_multi"] > 1.2 * bk["aov_single"]:
+        add("info", f"Orders with 2+ items are worth {(bk['aov_multi'] / bk['aov_single'] - 1) * 100:.0f}% more",
+            f"{bk['single_item_orders']} of {bk['orders']} orders ({bk['single_item_orders'] / bk['orders'] * 100:.0f}%) have a single item: ₹{bk['aov_single']:,.0f} vs ₹{bk['aov_multi']:,.0f} for bigger baskets. Bundles and add-ons are the AOV lever.", "basket")
+    lt = loyalty(include_excluded)["kpis"]
+    if lt["customers"] >= 20:
+        add("info", f"{lt['repeat_customers']} of {lt['customers']} customers ({lt['repeat_rate'] * 100:.0f}%) have come back on another day",
+            f"They account for {lt['repeat_revenue_share'] * 100:.0f}% of revenue. Orders placed several times on the same day are not counted as repeat.", "loyalty")
+    au = {a["id"]: a for a in audiences(include_excluded)["audiences"]}
+    qa = au.get("quiz_no_buy")
+    if qa and qa["reachable"] >= 20:
+        add("warn", f"{qa['reachable']} people finished the quiz, left a phone number, and never bought",
+            f"{qa['people']} quiz finishers in the last 60 days have no order; these {qa['reachable']} can be contacted. Quiz users convert far better than other visitors.", "audiences")
     return {"kpis": k, "prev": prev, "prev_range": pr, "insights": out}
+
+
+
+# ------------------------------------------------------------------ basket & AOV lab
+def _order_filter(d_from, d_to, include_excluded, a="c", dated=True):
+    w = [f"{a}.is_valid"]
+    args = []
+    if dated:
+        w.append(f"{a}.date_ist BETWEEN ? AND ?")
+        args += [d_from or "2000-01-01", d_to or "2999-12-31"]
+    if not include_excluded:
+        w.append(f"NOT {a}.is_excluded")
+    return " AND ".join(w), args
+
+
+@app.get("/api/basket")
+def basket(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, threshold: int = 499):
+    ow, oa = _order_filter(date_from, date_to, include_excluded, "c")
+    lw, la = _order_filter(date_from, date_to, include_excluded, "l")
+    k = one(f"""SELECT count(*) orders, coalesce(avg(total),0) aov, coalesce(median(total),0) median_aov, coalesce(avg(items_count),0) items_per_order,
+        count(*) FILTER (WHERE items_count = 1) single_item_orders, coalesce(sum(revenue),0) revenue,
+        coalesce(avg(total) FILTER (WHERE items_count = 1),0) aov_single, coalesce(avg(total) FILTER (WHERE items_count >= 2),0) aov_multi
+        FROM orders_clean c WHERE {ow}""", oa)
+    by_size = q(f"""SELECT CASE WHEN items_count >= 4 THEN '4+' ELSE items_count::VARCHAR END AS items, count(*) orders, avg(total) aov, sum(revenue) revenue
+        FROM orders_clean c WHERE {ow} GROUP BY 1 ORDER BY 1""", oa)
+    bands = q(f"""SELECT CASE WHEN products_total < 300 THEN '1. under 300' WHEN products_total < 500 THEN '2. 300-499' WHEN products_total < 800 THEN '3. 500-799'
+        WHEN products_total < 1200 THEN '4. 800-1199' ELSE '5. 1200+' END AS band, count(*) orders, coalesce(sum(revenue),0) revenue
+        FROM orders_clean c WHERE {ow} GROUP BY 1 ORDER BY 1""", oa)
+    products = q(f"""SELECT product_name, any_value(brand) brand, any_value(product_type) product_type, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue
+        FROM order_lines l WHERE {lw} GROUP BY product_name ORDER BY revenue DESC LIMIT 12""", la)
+    brands = q(f"""SELECT any_value(brand) brand, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue
+        FROM order_lines l WHERE {lw} GROUP BY lower(brand) ORDER BY revenue DESC LIMIT 10""", la)
+    types = q(f"""SELECT product_type, any_value(category) category, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue
+        FROM order_lines l WHERE {lw} GROUP BY product_type ORDER BY revenue DESC LIMIT 12""", la)
+    cover = one(f"SELECT coalesce(100.0 * sum(line_total) FILTER (WHERE brand <> 'Unknown') / nullif(sum(line_total),0), 0) brand_known_pct, coalesce(100.0 * sum(line_total) FILTER (WHERE NOT type_inferred) / nullif(sum(line_total),0), 0) catalog_type_pct FROM order_lines l WHERE {lw}", la)
+    pairs = q(f"""WITH t AS (SELECT DISTINCT order_id, product_type FROM order_lines l WHERE {lw} AND product_type NOT IN ('Other','Unknown'))
+        SELECT a.product_type AS a, b.product_type AS b, count(*) orders FROM t a JOIN t b ON a.order_id = b.order_id AND a.product_type < b.product_type
+        GROUP BY 1,2 HAVING count(*) >= 2 ORDER BY 3 DESC, 1 LIMIT 10""", la)
+    coupons = q(f"""SELECT coalesce(split_part(c.coupon_code, ',', 1), '(no coupon)') coupon, count(*) orders, avg(c.total) aov, avg(c.products_total) avg_basket,
+        avg(try_cast(o.coupon_discount AS DOUBLE)) avg_discount FROM orders_clean c JOIN raw_orders o ON lower(o.id) = c.order_id
+        WHERE {ow} GROUP BY 1 ORDER BY 2 DESC LIMIT 10""", oa)
+    t = int(threshold)
+    sim = one(f"""SELECT count(*) orders, count(*) FILTER (WHERE products_total >= ?) at_or_above,
+        count(*) FILTER (WHERE products_total < ? AND products_total >= ? * 0.7) near,
+        coalesce(sum(? - products_total) FILTER (WHERE products_total < ? AND products_total >= ? * 0.7), 0) gap_value
+        FROM orders_clean c WHERE {ow}""", [t, t, t, t, t, t, *oa])
+    cw = "s.date_ist BETWEEN ? AND ?" + ("" if include_excluded else " AND NOT s.is_excluded")
+    ab = one(f"""SELECT count(*) FILTER (WHERE cart_value >= ?) at_or_above, count(*) FILTER (WHERE cart_value < ? AND cart_value >= ? * 0.7) near,
+        count(*) FILTER (WHERE cart_value IS NULL) unknown FROM checkout ck JOIN sessions s USING (session_id)
+        WHERE {cw} AND ck.outcome IN ('checkout_abandoned','payment_abandoned')""", [t, t, t, date_from or "2000-01-01", date_to or "2999-12-31"])
+    return {"kpis": k, "by_size": by_size, "bands": bands, "products": products, "brands": brands, "types": types, "coverage": cover,
+            "pairs": pairs, "coupons": coupons, "threshold": {"value": t, "orders": sim, "abandoned": ab}}
+
+
+# ------------------------------------------------------------------ retention & lifetime value (all-time; date range does not apply)
+@app.get("/api/loyalty")
+def loyalty(include_excluded: bool = False):
+    ow, _ = _order_filter(None, None, include_excluded, "c", dated=False)
+    base = f"SELECT c.user_id, c.ts, c.revenue, c.order_id FROM orders_clean c WHERE {ow}"
+    cust = f"SELECT user_id, count(*) n, count(DISTINCT timezone('Asia/Kolkata', ts)::DATE) AS ndays, sum(revenue) rev, min(ts) first_at, max(ts) last_at FROM ({base}) GROUP BY 1"
+    k = one(f"""SELECT count(*) customers, count(*) FILTER (WHERE ndays >= 2) repeat_customers, count(*) FILTER (WHERE n >= 2 AND ndays = 1) same_day_multi,
+        count(*) FILTER (WHERE n >= 2) multi_order_customers, coalesce(sum(rev),0) revenue,
+        coalesce(sum(rev) FILTER (WHERE ndays >= 2),0) repeat_revenue, coalesce(avg(n),0) orders_per_customer, coalesce(avg(rev),0) ltv FROM ({cust})""")
+    k["repeat_rate"] = ratio(k["repeat_customers"], k["customers"])
+    k["repeat_revenue_share"] = ratio(k["repeat_revenue"], k["revenue"])
+    dist = q(f"SELECT CASE WHEN n >= 4 THEN '4+' ELSE n::VARCHAR END AS orders, count(*) customers, sum(rev) revenue FROM ({cust}) GROUP BY 1 ORDER BY 1")
+    gaps = q(f"""WITH g AS (SELECT date_diff('hour', lag(ts) OVER (PARTITION BY user_id ORDER BY ts), ts) / 24.0 AS d FROM ({base}))
+        SELECT CASE WHEN d < 1 THEN '1. same day' WHEN d <= 7 THEN '2. within a week' WHEN d <= 30 THEN '3. 8-30 days' WHEN d <= 60 THEN '4. 31-60 days' ELSE '5. 60+ days' END AS gap,
+        count(*) orders FROM g WHERE d IS NOT NULL GROUP BY 1 ORDER BY 1""")
+    median_gap = one(f"SELECT median(d) AS d FROM (SELECT date_diff('hour', lag(ts) OVER (PARTITION BY user_id ORDER BY ts), ts) / 24.0 AS d FROM ({base})) WHERE d IS NOT NULL").get("d")
+    by_channel = q(f"""SELECT coalesce(u.first_channel, 'Unknown') channel, count(*) customers, sum(c.n) orders, sum(c.rev) revenue, avg(c.rev) ltv,
+        count(*) FILTER (WHERE c.ndays >= 2) repeaters FROM ({cust}) c LEFT JOIN users_360 u ON u.user_id = c.user_id GROUP BY 1 ORDER BY revenue DESC""")
+    cohorts = q(f"""WITH o AS (SELECT user_id, ts, revenue, date_trunc('month', timezone('Asia/Kolkata', min(ts) OVER (PARTITION BY user_id)))::DATE AS cohort,
+                        date_diff('month', date_trunc('month', timezone('Asia/Kolkata', min(ts) OVER (PARTITION BY user_id))), date_trunc('month', timezone('Asia/Kolkata', ts))) AS m FROM ({base}))
+        SELECT cohort, count(DISTINCT user_id) customers, m, sum(revenue) revenue FROM o GROUP BY 1,3 ORDER BY 1,3""")
+    coh = {}
+    for r in cohorts:
+        c = coh.setdefault(str(r["cohort"]), {"cohort": r["cohort"], "customers": r["customers"], "months": {}})
+        c["customers"] = max(c["customers"], r["customers"])
+        c["months"][r["m"]] = r["revenue"]
+    for c in coh.values():
+        run, out = 0.0, {}
+        for m in sorted(c["months"]):
+            run += c["months"][m]
+            out[m] = round(run / c["customers"], 1)
+        c["months"] = out
+    as_of = one("SELECT max(date_ist) AS d FROM sessions")["d"]
+    recency = q(f"""SELECT CASE WHEN dd <= 30 THEN '1. bought in last 30 days' WHEN dd <= 60 THEN '2. 31-60 days ago' WHEN dd <= 90 THEN '3. 61-90 days ago' ELSE '4. over 90 days ago' END AS bucket,
+        count(*) customers, count(*) FILTER (WHERE ndays >= 2) repeaters, sum(rev) revenue
+        FROM (SELECT n, ndays, rev, date_diff('day', timezone('Asia/Kolkata', last_at)::DATE, ?::DATE) dd FROM ({cust})) GROUP BY 1 ORDER BY 1""", [str(as_of)])
+    lw, _ = _order_filter(None, None, include_excluded, "l", dated=False)
+    reordered = q(f"""SELECT product_name, any_value(brand) brand, count(*) repeat_customers, sum(orders) orders FROM (
+        SELECT user_id, product_name, any_value(brand) AS brand, count(DISTINCT order_id) orders FROM order_lines l WHERE {lw} GROUP BY 1,2 HAVING count(DISTINCT order_id) >= 2) GROUP BY product_name ORDER BY 3 DESC, 4 DESC LIMIT 8""")
+    return {"as_of": as_of, "kpis": k, "dist": dist, "gaps": gaps, "median_gap_days": median_gap, "by_channel": by_channel,
+            "cohorts": list(coh.values()), "recency": recency, "reordered": reordered}
+
+
+# ------------------------------------------------------------------ audiences (who can we reach, and with what)
+AUDIENCES = [
+    ("abandoned_checkout", "Left checkout, never ordered", "Opened checkout in the last 30 days but did not buy.",
+     "Send a reminder with the exact cart; offer help with payment or delivery questions.", "p.segment = 'Abandoned checkout' AND p.days_seen <= 30"),
+    ("cart_no_checkout", "Added to cart, never reached checkout", "Added something to the cart in the last 30 days but never opened checkout.",
+     "Remind them what is in the cart; highlight free delivery or a first-order offer.", "p.segment = 'Cart, no checkout' AND p.days_seen <= 30"),
+    ("quiz_no_buy", "Finished the skin quiz, never bought", "Completed the quiz in the last 60 days with no order.",
+     "Send their routine from the quiz as a bundle; this group is warmer than average.", "p.quiz_sessions > 0 AND p.orders = 0 AND p.days_seen <= 60"),
+    ("signed_up_no_order", "Signed up, never ordered", "Registered at least a day ago and has never placed an order.",
+     "Welcome offer or a simple 'start with this' pick for their skin type.", "p.is_registered AND p.orders = 0 AND p.days_since_signup >= 1"),
+    ("recent_buyers", "Bought in the last 14 days", "Fresh customers: best moment for a referral ask or a complementary product.",
+     "Ask for a referral; cross-sell a product that goes with what they bought.", "p.orders >= 1 AND p.days_order <= 14"),
+    ("second_order_due", "First-timers due a second order", "Exactly one order, placed 25-75 days ago.",
+     "Reorder reminder for what they bought, plus a routine add-on.", "p.orders = 1 AND p.days_order BETWEEN 25 AND 75"),
+    ("lapsed_repeat", "Repeat buyers gone quiet", "Two or more orders, but nothing in the last 45 days.",
+     "Win-back with a personal note; they are your most valuable customers.", "p.orders >= 2 AND p.days_order > 45"),
+    ("top_spenders", "Top spenders", "Customers in the top quarter by lifetime spend.",
+     "VIP treatment: early access, free gift, referral reward.", "p.orders >= 1 AND p.revenue >= (SELECT quantile_cont(revenue, 0.75) FROM users_360 WHERE orders >= 1 AND NOT is_excluded)"),
+]
+
+
+def _audience_base(include_excluded: bool) -> str:
+    return f"""
+    WITH as_of AS (SELECT max(date_ist) AS d FROM sessions),
+    ab AS (SELECT coalesce(s.user_id, s.visitor_key) AS person_key, max(c.checkout_at) AS last_checkout_at, arg_max(c.cart_value, c.checkout_at) AS last_cart_value
+           FROM checkout c JOIN sessions s USING (session_id) WHERE c.outcome IN ('checkout_abandoned','payment_abandoned') GROUP BY 1)
+    SELECT u.person_key, u.user_id, u.name, nullif(u.phone10, '') AS phone10, u.email, u.is_registered, u.segment, u.city, u.state, u.first_channel,
+           u.orders, u.revenue, u.quiz_sessions, u.cart_sessions, u.skin_type, u.age_bucket, u.first_seen, u.last_seen, u.last_order_at, u.signed_up_at,
+           ab.last_checkout_at, ab.last_cart_value,
+           date_diff('day', timezone('Asia/Kolkata', u.last_seen)::DATE, (SELECT d FROM as_of)) AS days_seen,
+           date_diff('day', timezone('Asia/Kolkata', u.last_order_at)::DATE, (SELECT d FROM as_of)) AS days_order,
+           date_diff('day', timezone('Asia/Kolkata', u.signed_up_at)::DATE, (SELECT d FROM as_of)) AS days_since_signup
+    FROM users_360 u LEFT JOIN ab ON ab.person_key = u.person_key
+    WHERE u.role IS NULL OR u.role NOT IN ('admin','rider','doctor')""" + ("" if include_excluded else " AND NOT u.is_excluded")
+
+
+@app.get("/api/audiences")
+def audiences(include_excluded: bool = False):
+    base = _audience_base(include_excluded)
+    out = []
+    for aid, title, desc, action, cond in AUDIENCES:
+        r = one(f"SELECT count(*) people, count(p.phone10) reachable, coalesce(sum(p.last_cart_value),0) cart_value, coalesce(sum(p.revenue),0) revenue FROM ({base}) p WHERE {cond}")
+        out.append({"id": aid, "title": title, "description": desc, "action": action, **r})
+    totals = one(f"SELECT count(*) people, count(p.phone10) reachable, count(*) FILTER (WHERE p.is_registered) registered FROM ({base}) p")
+    return {"audiences": out, "totals": totals, "as_of": one("SELECT max(date_ist) AS d FROM sessions")["d"]}
+
+
+@app.get("/api/audiences/{aid}/people")
+def audience_people(aid: str, include_excluded: bool = False, only_reachable: bool = False, limit: int = 50, offset: int = 0):
+    spec = next((a for a in AUDIENCES if a[0] == aid), None)
+    if not spec:
+        raise HTTPException(404, "unknown audience")
+    base = _audience_base(include_excluded)
+    cond = spec[4] + (" AND p.phone10 IS NOT NULL" if only_reachable else "")
+    total = one(f"SELECT count(*) n FROM ({base}) p WHERE {cond}")["n"]
+    rows = q(f"""SELECT p.person_key, p.name, p.phone10, p.email, p.city, p.state, p.segment, p.first_channel, p.orders, p.revenue, p.skin_type, p.age_bucket,
+        p.last_seen, p.last_order_at, p.last_checkout_at, p.last_cart_value, p.days_seen, p.days_order
+        FROM ({base}) p WHERE {cond} ORDER BY (p.phone10 IS NULL), p.last_seen DESC LIMIT ? OFFSET ?""", [limit, offset])
+    return {"id": aid, "title": spec[1], "description": spec[2], "action": spec[3], "total": total, "rows": rows}
+
+
+
+# ------------------------------------------------------------------ time series (sparklines + current vs previous period)
+def _series(lo: str, hi: str, include_excluded: bool) -> dict:
+    """Daily metrics for [lo, hi] on a gap-free date spine (days without data are zeros, so periods align by position)."""
+    w, a = sess_where(lo, hi, include_excluded)
+    ow = "date_ist BETWEEN ? AND ? AND is_valid" + ("" if include_excluded else " AND NOT is_excluded")
+    srows = {str(r["d"]): r for r in q(f"""SELECT date_ist AS d, count(*) sessions, count(DISTINCT coalesce(user_id, visitor_key)) people,
+        count(*) FILTER (WHERE f_cart) carts, count(*) FILTER (WHERE f_checkout) checkouts, count(*) FILTER (WHERE is_bounce) bounced
+        FROM sessions s WHERE {w} GROUP BY 1""", a)}
+    orows = {str(r["d"]): r for r in q(f"SELECT date_ist AS d, count(*) orders, coalesce(sum(revenue),0) revenue FROM orders_clean WHERE {ow} GROUP BY 1", a)}
+    d0, d1 = date.fromisoformat(lo), date.fromisoformat(hi)
+    dates, m = [], {k: [] for k in ("sessions", "people", "carts", "checkouts", "orders", "revenue", "cart_rate", "aov", "bounce_rate")}
+    d = d0
+    while d <= d1:
+        k = d.isoformat()
+        sr, orr = srows.get(k, {}), orows.get(k, {})
+        ses, car, orders, rev = sr.get("sessions", 0), sr.get("carts", 0), orr.get("orders", 0), float(orr.get("revenue", 0) or 0)
+        dates.append(k)
+        m["sessions"].append(ses)
+        m["people"].append(sr.get("people", 0))
+        m["carts"].append(car)
+        m["checkouts"].append(sr.get("checkouts", 0))
+        m["orders"].append(orders)
+        m["revenue"].append(round(rev, 2))
+        m["cart_rate"].append(round(car / ses, 4) if ses else 0)
+        m["aov"].append(round(rev / orders, 2) if orders else 0)
+        m["bounce_rate"].append(round(sr.get("bounced", 0) / ses, 4) if ses else 0)
+        d += timedelta(days=1)
+    return {"dates": dates, "m": m}
+
+
+@app.get("/api/timeseries")
+def timeseries(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    lo = date_from or str(one("SELECT min(date_ist) AS d FROM sessions")["d"])
+    hi = date_to or str(one("SELECT max(date_ist) AS d FROM sessions")["d"])
+    cur = _series(lo, hi, include_excluded)
+    pr = prev_range(date_from, date_to)
+    prev = _series(pr[0], pr[1], include_excluded) if pr else None
+    return {"dates": cur["dates"], "current": cur["m"], "prev_dates": prev["dates"] if prev else None, "previous": prev["m"] if prev else None}
+
+
+# ------------------------------------------------------------------ generic report table (sort / search / totals)
+REPORT_DIMS = {
+    "channel": "s.channel",
+    "source_medium": "s.source || ' / ' || s.medium",
+    "campaign": "s.campaign",
+    "device": "coalesce(CASE WHEN s.is_app THEN 'Android app' ELSE s.device END, 'Unknown')",
+    "landing": "s.landing_type",
+    "state": "coalesce(s.region, 'Unknown')",
+    "city": "coalesce(s.city, 'Unknown')",
+    "country": "coalesce(s.country, 'Unknown')",
+}
+REPORT_SORTS = {"dim": "dim", "sessions": "sessions", "people": "people", "carts": "carts", "checkouts": "checkouts", "orders": "orders",
+                "revenue": "revenue", "avg_duration": "avg_duration", "cart_rate": "carts::DOUBLE / sessions", "bounce_rate": "bounced::DOUBLE / sessions"}
+REPORT_METRICS = """count(*) AS sessions, count(DISTINCT coalesce(s.user_id, s.visitor_key)) AS people, count(*) FILTER (WHERE s.f_cart) AS carts,
+    count(*) FILTER (WHERE s.f_checkout) AS checkouts, count(*) FILTER (WHERE s.is_bounce) AS bounced,
+    coalesce(avg(s.duration_s) FILTER (WHERE s.duration_s > 0), 0) AS avg_duration, coalesce(sum(o.orders), 0) AS orders, coalesce(sum(o.revenue), 0) AS revenue"""
+
+
+def _derive(r: dict) -> dict:
+    r["cart_rate"] = ratio(r["carts"], r["sessions"])
+    r["bounce_rate"] = ratio(r["bounced"], r["sessions"])
+    return r
+
+
+@app.get("/api/report")
+def report(dimension: str = "channel", date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False,
+           sort: str = "sessions", direction: str = "desc", search: str | None = None, limit: int = 10, offset: int = 0, min_sessions: int = 1):
+    """One row per value of the chosen dimension, with a totals row. Orders are credited to the session they were placed in."""
+    if dimension not in REPORT_DIMS:
+        raise HTTPException(400, f"dimension must be one of {list(REPORT_DIMS)}")
+    order_by = REPORT_SORTS.get(sort, "sessions")
+    direction = "ASC" if direction.lower() == "asc" else "DESC"
+    expr = REPORT_DIMS[dimension]
+    w, a = sess_where(date_from, date_to, include_excluded)
+    ords = f"(SELECT session_id, count(*) AS orders, sum(revenue) AS revenue FROM orders_clean WHERE is_valid {'' if include_excluded else 'AND NOT is_excluded'} GROUP BY 1)"
+    base = f"FROM sessions s LEFT JOIN {ords} o ON o.session_id = s.session_id WHERE {w}"
+    sq, sa = "", []
+    if search:
+        sq, sa = f" AND ({expr}) ILIKE ?", [f"%{search}%"]
+    limit = max(1, min(int(limit), 200))
+    ms = max(1, int(min_sessions))
+    rows = q(f"SELECT {expr} AS dim, {REPORT_METRICS} {base}{sq} GROUP BY 1 HAVING count(*) >= ? ORDER BY {order_by} {direction} NULLS LAST, dim LIMIT ? OFFSET ?", [*a, *sa, ms, limit, max(0, offset)])
+    groups = one(f"SELECT count(*) AS n FROM (SELECT {expr} AS g {base}{sq} GROUP BY 1 HAVING count(*) >= ?)", [*a, *sa, ms])["n"]
+    totals = one(f"SELECT {REPORT_METRICS} {base}{sq}", [*a, *sa])
+    return {"dimension": dimension, "rows": [_derive(r) for r in rows], "totals": _derive(totals) if totals else None, "groups": groups}
 
 
 # ------------------------------------------------------------------ static dashboard (after `npm run build`)

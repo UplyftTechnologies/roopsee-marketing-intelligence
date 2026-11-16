@@ -80,6 +80,22 @@ UUID_RE = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA
 
 MACROS = r"""
 CREATE OR REPLACE MACRO initcap(s) AS array_to_string(list_transform(string_split(lower(s), ' '), lambda x: upper(x[1]) || x[2:]), ' ');
+CREATE OR REPLACE MACRO product_kind(n) AS CASE
+  WHEN lower(n) LIKE '%sunscreen%' OR lower(n) LIKE '%spf%' THEN 'Sunscreen'
+  WHEN lower(n) LIKE '%cleans%' OR lower(n) LIKE '%face wash%' OR lower(n) LIKE '%facewash%' THEN 'Cleanser'
+  WHEN lower(n) LIKE '%serum%' OR lower(n) LIKE '%ampoule%' OR lower(n) LIKE '%booster%' OR lower(n) LIKE '%essence%' THEN 'Serum'
+  WHEN lower(n) LIKE '%moisturi%' OR lower(n) LIKE '%cream%' OR lower(n) LIKE '%lotion%' THEN 'Moisturiser'
+  WHEN lower(n) LIKE '%toner%' OR lower(n) LIKE '%mist%' THEN 'Toner'
+  WHEN lower(n) LIKE '%mask%' THEN 'Mask'
+  WHEN lower(n) LIKE '%lip%' OR lower(n) LIKE '%tint%' THEN 'Lip'
+  WHEN lower(n) LIKE '%shampoo%' OR lower(n) LIKE '%conditioner%' OR lower(n) LIKE '%hair%' THEN 'Hair'
+  WHEN lower(n) LIKE '%body%' THEN 'Body'
+  WHEN lower(n) LIKE '%kajal%' OR lower(n) LIKE '%eyeliner%' OR lower(n) LIKE '%mascara%' OR lower(n) LIKE '%blush%'
+       OR lower(n) LIKE '%foundation%' OR lower(n) LIKE '%concealer%' OR lower(n) LIKE '%compact%' THEN 'Makeup'
+  ELSE 'Other' END;
+CREATE OR REPLACE MACRO kind_category(k) AS CASE
+  WHEN k IN ('Sunscreen','Cleanser','Serum','Moisturiser','Toner','Mask') THEN 'Face'
+  WHEN k IN ('Lip','Hair','Body','Makeup') THEN k ELSE 'Other' END;
 CREATE OR REPLACE MACRO qs(link, key) AS nullif(url_decode(replace(regexp_extract(link, '[?&]' || key || '=([^&#]*)', 1), '+', ' ')), '');
 CREATE OR REPLACE MACRO age_bucket(a) AS CASE
   WHEN a IS NULL OR trim(a) = '' THEN NULL
@@ -365,6 +381,44 @@ SELECT o.*, (o.is_placed AND NOT o.is_test) AS is_valid,
 FROM o LEFT JOIN sessions s ON s.session_id = o.session_id;
 """
 
+STEP_PRODUCTS = """
+CREATE OR REPLACE TABLE dim_products AS
+SELECT product_uid AS product_id, product_name, brand, category_l1, product_type_l2 AS product_type, mrp, selling_price
+FROM raw_catalog_roopsee WHERE product_uid IS NOT NULL
+UNION ALL
+SELECT product_id, product_name, brand, category_l1, category_l2, mrp, selling_price
+FROM raw_catalog_master WHERE product_id IS NOT NULL AND product_id NOT IN (SELECT product_uid FROM raw_catalog_roopsee WHERE product_uid IS NOT NULL);
+
+-- one row per product line on every order (order flags copied from orders_clean so the same filters apply).
+-- Order lines use several product-id schemes; brand / kind fall back to the name stored on the line.
+CREATE OR REPLACE TABLE order_lines AS
+WITH l AS (SELECT lower(o.id) AS order_id, unnest(from_json(o.items, '["JSON"]')) AS j FROM raw_orders o WHERE o.items IS NOT NULL),
+brands AS (
+  SELECT DISTINCT lower(trim(brand)) AS b, trim(brand) AS brand FROM dim_products WHERE brand IS NOT NULL AND length(trim(brand)) > 2
+  UNION
+  SELECT DISTINCT lower(trim(json_extract_string(j, '$.brand_name'))), trim(json_extract_string(j, '$.brand_name')) FROM l
+  WHERE length(trim(coalesce(json_extract_string(j, '$.brand_name'), ''))) > 2),
+x AS (
+  SELECT c.order_id, c.user_id, c.ts, c.date_ist, c.is_valid, c.is_excluded, c.is_staff_order, c.total AS order_total, c.items_count,
+    json_extract_string(l.j, '$.id') AS product_id,
+    coalesce(nullif(json_extract_string(l.j, '$.name'), ''), d.product_name, 'Unknown product') AS product_name,
+    nullif(json_extract_string(l.j, '$.brand_name'), '') AS brand_raw,
+    d.brand AS brand_cat, d.category_l1 AS cat_cat, d.product_type AS type_cat,
+    coalesce(try_cast(json_extract_string(l.j, '$.qty') AS INTEGER), 1) AS qty,
+    coalesce(try_cast(json_extract_string(l.j, '$.price') AS DOUBLE), 0) AS price,
+    (d.product_id IS NOT NULL) AS in_catalog
+  FROM l JOIN orders_clean c ON c.order_id = l.order_id
+  LEFT JOIN dim_products d ON d.product_id = json_extract_string(l.j, '$.id'))
+SELECT x.order_id, x.user_id, x.ts, x.date_ist, x.is_valid, x.is_excluded, x.is_staff_order, x.order_total, x.items_count,
+  x.product_id, x.product_name,
+  coalesce(x.brand_raw, x.brand_cat, (SELECT bl.brand FROM brands bl WHERE lower(x.product_name) LIKE bl.b || '%' ORDER BY length(bl.b) DESC LIMIT 1), 'Unknown') AS brand,
+  coalesce(x.cat_cat, kind_category(product_kind(x.product_name))) AS category,
+  replace(initcap(coalesce(x.type_cat, product_kind(x.product_name))), 'Moisturizer', 'Moisturiser') AS product_type,
+  (x.cat_cat IS NULL) AS type_inferred,
+  x.qty, x.price, x.price * x.qty AS line_total, x.in_catalog
+FROM x;
+"""
+
 STEP_CHECKOUT = """
 CREATE OR REPLACE TABLE checkout AS
 WITH e AS (
@@ -416,7 +470,7 @@ q AS (
     JOIN (SELECT DISTINCT person_key, user_id, session_id FROM sp) sp
       ON (q.user_id IS NOT NULL AND lower(q.user_id) = sp.user_id) OR (q.guest_session_id IS NOT NULL AND q.guest_session_id = sp.session_id))
   WHERE rn = 1)
-SELECT a.person_key, a.user_id, u.name, coalesce(a.phone10, right(regexp_replace(coalesce(u.phone_no,''), '[^0-9]', '', 'g'), 10)) AS phone10,
+SELECT a.person_key, a.user_id, u.name, nullif(coalesce(a.phone10, right(regexp_replace(coalesce(u.phone_no,''), '[^0-9]', '', 'g'), 10)), '') AS phone10,
   u.email, u.role, u.created_at AS signed_up_at, (a.user_id IS NOT NULL) AS is_registered,
   a.first_seen, a.last_seen, a.sessions, a.events, a.pageviews,
   a.first_channel, a.first_campaign, a.first_source, a.first_medium, a.first_date, a.first_landing,
@@ -482,7 +536,7 @@ def run(con) -> dict:
             con.execute(sql)
             _log(f"{name}: {time.time() - t:.1f}s")
         t = time.time(); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
-        for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS),
+        for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS),
                           ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS)]:
             t = time.time()
             con.execute(sql)

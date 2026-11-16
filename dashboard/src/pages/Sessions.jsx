@@ -1,77 +1,7 @@
 import { useEffect, useState } from 'react'
-import { KEY_LABEL, api, dt, dur, num, useApi, useFilters } from '../api'
+import { KEY_LABEL, dt, dur, num, useApi, useFilters } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table } from '../ui'
-
-const STAGE = ['Browsed', 'Viewed product', 'Added to cart', 'Reached checkout', 'Started payment', 'Ordered']
-const STAGE_TONE = ['', '', 'warn', 'warn', 'serious', 'good']
-
-/** Adds one exclusion and reloads; the API re-applies it in the background. */
-export function useQuickExclude() {
-  const f = useFilters()
-  const [msg, setMsg] = useState('')
-  const exclude = async (kind, value, note) => {
-    if (!value) return
-    try {
-      const r = await api('/exclusions', { method: 'POST', body: { kind, value, note } })
-      setMsg(r.added ? `Excluded ${kind} “${value}” – rebuilding…` : `${kind} “${value}” is already in the exclusion list`)
-      f.reloadMeta()
-    } catch (e) { setMsg(`Failed: ${e.message}`) }
-  }
-  return { exclude, msg }
-}
-
-export function SessionDrawer({ id, onClose }) {
-  const [d, setD] = useState(null)
-  const { exclude, msg } = useQuickExclude()
-  useEffect(() => { api(`/sessions/${encodeURIComponent(id)}`).then(setD).catch(() => setD({ error: true })) }, [id])
-  const s = d?.session
-  return (
-    <>
-      <div className="drawer-bg" onClick={onClose} />
-      <aside className="drawer">
-        <div className="card-head"><h3>Session {id.slice(0, 18)}…</h3><button className="btn small" onClick={onClose}>Close</button></div>
-        {!d && <div className="empty">Loading…</div>}
-        {d?.error && <div className="banner err">Session not found</div>}
-        {s && (
-          <>
-            <dl className="kv">
-              <dt>Started</dt><dd>{dt(s.started_at)} · {dur(s.duration_s)} · {s.events} events</dd>
-              <dt>Source</dt><dd>{s.channel} — {s.source} / {s.medium} / {s.campaign}</dd>
-              <dt>Landing</dt><dd className="mono">{s.landing_path}</dd>
-              <dt>Place / device</dt><dd>{[s.city, s.region, s.country].filter(Boolean).join(', ') || '–'} · {s.is_app ? 'Android app' : s.device} · {s.platform}</dd>
-              <dt>IP</dt><dd className="mono">{s.ip || '–'}</dd>
-              <dt>Browser id</dt><dd className="mono">{s.visitor_key}</dd>
-              <dt>User id</dt><dd className="mono">{s.user_id || '–'}</dd>
-              <dt>Phone</dt><dd className="mono">{s.phone10 || '–'}</dd>
-              <dt>Journey</dt><dd>{s.key_events || '–'}</dd>
-              <dt>Status</dt><dd>{s.is_excluded ? <Badge tone="bad">Excluded: {s.excl_reason}</Badge> : <Badge tone="good">Counted</Badge>}</dd>
-            </dl>
-            <Card title="Exclude from analytics" sub="adds a rule on the Exclusions tab (editable there). Browser/user/phone rules also remove every other session of that person." style={{ marginTop: 14 }}>
-              <div className="chip-row">
-                <button className="btn small" onClick={() => exclude('session_id', s.session_id, 'from session drawer')}>This session</button>
-                <button className="btn small" disabled={!s.visitor_key} onClick={() => exclude('visitor_id', s.visitor_key, 'from session drawer')}>This browser</button>
-                <button className="btn small" disabled={!s.ip} onClick={() => exclude('ip', s.ip, 'from session drawer')}>This IP</button>
-                <button className="btn small" disabled={!s.user_id} onClick={() => exclude('user_id', s.user_id, 'from session drawer')}>This user</button>
-                <button className="btn small" disabled={!s.phone10} onClick={() => exclude('phone', s.phone10, 'from session drawer')}>This phone</button>
-              </div>
-              {msg && <div className="muted" style={{ marginTop: 8 }}>{msg}</div>}
-            </Card>
-            <h3 style={{ margin: '16px 0 8px' }}>Timeline</h3>
-            <div className="timeline">
-              {d.events.map((e, i) => (
-                <div key={i} className={`tl-item ${e.event_key ? 'key' : ''}`}>
-                  <span className="muted">{new Date(e.at).toLocaleTimeString('en-IN')}</span>{' '}
-                  <b>{e.event_key ? KEY_LABEL[e.event_key] || e.event_key : e.event_name}</b>{' '}
-                  <span className="muted">{e.event_key ? `(${e.event_name}) ` : ''}{e.path}{e.product_name ? ` · ${e.product_name}` : ''}{e.amount ? ` · ₹${e.amount}` : ''}{e.search_term ? ` · “${e.search_term}”` : ''}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </aside>
-    </>
-  )
-}
+import { STAGE, STAGE_TONE } from '../shared'
 
 export default function Sessions() {
   const f = useFilters()
@@ -81,7 +11,6 @@ export default function Sessions() {
   const [stage, setStage] = useState(0)
   const [only, setOnly] = useState('counted')
   const [offset, setOffset] = useState(0)
-  const [open, setOpen] = useState(null)
   const limit = 50
   const s = useApi('/sessions', { search, channel: channel === 'All' ? undefined : channel, min_stage: stage || undefined, only_excluded: only === 'excluded' || undefined, limit, offset })
   useEffect(() => setOffset(0), [search, stage, only, channel])
@@ -95,9 +24,9 @@ export default function Sessions() {
       <Chips value={channel} onChange={setChannel} options={['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']} />
       <Loading state={s}>
         {({ rows, total }) => (
-          <Card title={`${num(total)} sessions`} sub="click a row for the full event timeline and one-click exclusion"
+          <Card title={`${num(total)} sessions`} sub="click a row for the full session: every step, device, source and the person behind it"
             right={<ExportBtn name="sessions" rows={rows} fields={[['Started', 'started_at'], ['Name', 'name'], ['Phone', 'phone10'], ['Journey', 'key_events'], ['Channel', 'channel'], ['Campaign', 'campaign'], ['City', 'city'], ['Device', 'device'], ['Events', 'events'], ['Seconds', 'duration_s'], ['IP', 'ip'], ['Session id', 'session_id']]} />}>
-            <Table onRow={(r) => setOpen(r.session_id)} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} cols={[
+            <Table onRow={(r) => f.go('session', { key: r.session_id })} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} cols={[
               { label: 'Started', render: (r) => dt(r.started_at) },
               { label: 'Who', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
               { label: 'Journey', render: (r) => <span title={r.key_events}>{r.key_events ? r.key_events.split(' > ').map((k) => KEY_LABEL[k] || k).join(' → ') : <span className="muted">{r.events} event{r.events === 1 ? '' : 's'}, no key action</span>}</span> },
@@ -112,7 +41,6 @@ export default function Sessions() {
           </Card>
         )}
       </Loading>
-      {open && <SessionDrawer id={open} onClose={() => setOpen(null)} />}
     </>
   )
 }

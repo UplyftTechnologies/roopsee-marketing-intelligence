@@ -25,6 +25,11 @@ SMALL_TABLES = {  # raw table -> (supabase table, columns to select)
     "raw_quiz_results": ("quiz_results", None),
     "raw_visitor_links": ("visitor_identity_links", None),
     "raw_customer_address": ("customer_address", None),
+    "raw_catalog_roopsee": ("roopsee_products", None),
+    # master catalog has columns like "Product-id" / "Product Name": alias them to snake_case in the request
+    "raw_catalog_master": ("master_products",
+                           'product_id:"Product-id",product_name:"Product Name",brand:Brand,category_l1:"Category L1",'
+                           'category_l2:"Category L2",mrp:MRP,selling_price:"Selling Price"'),
 }
 
 
@@ -111,11 +116,11 @@ def extract_events(con) -> int:
 
 def extract_small(con) -> None:
     sb = ReadOnlySupabase()
-    for raw, (src, _) in SMALL_TABLES.items():
+    for raw, (src, select_override) in SMALL_TABLES.items():
         schema = RAW_SCHEMAS[raw]
         rows, off = [], 0
         while True:
-            params = {"select": ",".join(schema), "limit": PAGE, "offset": off}
+            params = {"select": select_override or ",".join(schema), "limit": PAGE, "offset": off}
             if "id" in schema:  # stable paging
                 params["order"] = "id.asc"
             page = sb.select(src, params)

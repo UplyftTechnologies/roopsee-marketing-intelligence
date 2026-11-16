@@ -1,6 +1,9 @@
 import { useState } from 'react'
-import { inr, num, pct, useApi, useFilters } from '../api'
-import { Kpi, Loading, delta } from '../ui'
+import { inr, num, useApi, useFilters } from '../api'
+import { Card, Loading } from '../ui'
+import { METRICS } from '../metrics'
+import { Scorecard, ScorecardStrip } from '../components/Scorecard'
+import MetricChart from '../components/MetricChart'
 
 const GROUPS = [
   { key: 'attention', title: 'Needs attention', tones: ['bad', 'warn'], blurb: 'Things that are costing you customers or money' },
@@ -8,6 +11,7 @@ const GROUPS = [
   { key: 'know', title: 'Good to know', tones: ['info'], blurb: 'Context that helps you decide' },
 ]
 const ICON = { bad: '■', warn: '◆', good: '▲', info: '●' }
+const CARDS = ['sessions', 'cart_rate', 'orders', 'revenue']
 
 function Tip() {
   const [hide, setHide] = useState(() => { try { return localStorage.getItem('tip-dismissed') === '1' } catch { return false } })
@@ -15,9 +19,9 @@ function Tip() {
   return (
     <div className="banner ok">
       <div>
-        <b>How to read this dashboard.</b> Pick a date range at the top – everything compares with the period before it.
-        The cards below are generated from your data; click <b>Open</b> to jump to the exact rows behind a finding.
-        Staff, test and bot traffic is hidden by default (change it any time in <b>Exclusions</b>).
+        <b>How to read this dashboard.</b> Pick a date range at the top: every number compares with the period before it.
+        The cards below are generated from your data; <b>Open</b> jumps to the rows behind a finding.
+        Staff, test and bot traffic is hidden by default (change it from the “Internal traffic” menu).
       </div>
       <div className="spacer" />
       <button className="btn small" onClick={() => { try { localStorage.setItem('tip-dismissed', '1') } catch { /* ignore */ } setHide(true) }}>Got it</button>
@@ -25,44 +29,76 @@ function Tip() {
   )
 }
 
+function MiniList({ title, rows, fmt, onRow, state }) {
+  const max = Math.max(1, ...rows.map((r) => r.value))
+  return (
+    <Card title={title}>
+      {state?.error ? <div className="muted">Could not load</div> : !state?.data ? <div className="skeleton" style={{ height: 150 }} /> : rows.length === 0 ? <div className="muted">Nothing in this range</div> : (
+        <div className="mini-list">
+          {rows.map((r) => (
+            <div key={r.name} className="mini-row" style={{ cursor: onRow ? 'pointer' : 'default' }} onClick={onRow ? () => onRow(r) : undefined}>
+              <span className="name" title={r.name}>{r.name}</span><span className="val">{fmt(r.value)}</span>
+              <span className="mini-bar"><i style={{ width: `${(r.value / max) * 100}%` }} /></span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function Home() {
   const f = useFilters()
-  const s = useApi('/insights')
+  const ins = useApi('/insights')
+  const ts = useApi('/timeseries')
+  const chan = useApi('/report', { dimension: 'channel', limit: 6 })
+  const city = useApi('/report', { dimension: 'city', limit: 8, min_sessions: 5 })
+  const prod = useApi('/basket')
+  const [metric, setMetric] = useState('sessions')
   return (
-    <Loading state={s}>
-      {({ kpis: k, prev: p, insights }) => {
-        const d = (key, kind) => (f.compare && p ? delta(k[key], p[key], kind) : null)
-        return (
-          <>
-            <Tip />
-            <div className="kpis">
-              <Kpi big label="Sessions" help="sessions" value={num(k.sessions)} d={d('sessions')} note={`${num(k.people)} people`} />
-              <Kpi big label="Add-to-cart rate" help="cartRate" value={pct(k.cart_rate)} d={d('cart_rate', 'rate')} note={`${num(k.cart_sessions)} sessions`} />
-              <Kpi big label="Orders" help="orders" value={num(k.orders)} d={d('orders')} note={`${pct(k.order_cvr, 2)} of sessions`} />
-              <Kpi big label="Revenue" help="revenue" value={inr(k.revenue)} d={d('revenue')} note={`AOV ${inr(k.aov)}`} />
-            </div>
-            {GROUPS.map((g) => {
-              const items = insights.filter((i) => g.tones.includes(i.tone))
-              if (!items.length) return null
-              return (
-                <section key={g.key}>
-                  <div className="section-head"><h2>{g.title}</h2><span className="muted">{g.blurb}</span></div>
-                  <div className="insight-grid">
-                    {items.map((i, n) => (
-                      <article key={n} className={`insight ${i.tone}`}>
-                        <div className="insight-title"><span className={`tone ${i.tone}`} aria-hidden>{ICON[i.tone]}</span>{i.title}</div>
-                        <p>{i.detail}</p>
-                        {i.tab && <button className="btn small" onClick={() => f.go(i.tab, i.filters)}>Open →</button>}
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              )
-            })}
-            {insights.length === 0 && <div className="empty">Not enough data in this range to generate findings. Try a wider date range.</div>}
-          </>
-        )
-      }}
+    <Loading state={ins}>
+      {({ kpis, prev, insights }) => (
+        <>
+          <Tip />
+          <ScorecardStrip>
+            {CARDS.map((k) => (
+              <Scorecard key={k} metric={k} kpis={kpis} prev={prev} compare={f.compare} spark={ts.data?.current[METRICS[k].series]} active={metric === k} onClick={() => setMetric(k)} />
+            ))}
+          </ScorecardStrip>
+          <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
+            {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} height={230} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 250 }} />}
+          </Card>
+
+          {GROUPS.map((g) => {
+            const items = insights.filter((i) => g.tones.includes(i.tone))
+            if (!items.length) return null
+            return (
+              <section key={g.key}>
+                <div className="section-head"><h2>{g.title}</h2><span className="muted">{g.blurb}</span></div>
+                <div className="insight-grid">
+                  {items.map((i, n) => (
+                    <article key={n} className={`insight ${i.tone}`}>
+                      <div className="insight-title"><span className={`tone ${i.tone}`} aria-hidden>{ICON[i.tone]}</span>{i.title}</div>
+                      <p>{i.detail}</p>
+                      {i.tab && <button className="btn small" onClick={() => f.go(i.tab, i.filters)}>Open →</button>}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+          {insights.length === 0 && <div className="empty">Not enough data in this range to generate findings. Try a wider date range.</div>}
+
+          <div className="grid g3">
+            <MiniList title="Top channels · sessions" state={chan} fmt={num}
+              rows={(chan.data?.rows || []).map((r) => ({ name: r.dim, value: r.sessions }))} onRow={(r) => f.go('sessions', { channel: r.name })} />
+            <MiniList title="Top cities · sessions" state={city} fmt={num}
+              rows={(city.data?.rows || []).filter((r) => r.dim !== 'Unknown').slice(0, 6).map((r) => ({ name: r.dim, value: r.sessions }))} onRow={(r) => f.go('sessions', { search: r.name })} />
+            <MiniList title="Top products · revenue" state={prod} fmt={inr}
+              rows={(prod.data?.products || []).slice(0, 6).map((p) => ({ name: p.product_name, value: p.revenue }))} onRow={() => f.go('basket')} />
+          </div>
+        </>
+      )}
     </Loading>
   )
 }
