@@ -11,53 +11,63 @@ Supabase (production, READ-ONLY REST)
                        └─ dashboard/   React + Recharts
 ```
 
-## Quick start
+## Quick start (macOS, Linux, Windows – terminal only)
 
-**Double-click `start.bat`.** That's it. It sets up whatever is missing, starts the dashboard and opens
-http://127.0.0.1:8000 in your browser. To stop: press `Ctrl+C` in its window, or double-click `stop.bat`.
+**You need:** Python 3.11+, Node.js LTS (only once, to build the UI) and the `.env` file in this folder.
+On a Mac: `brew install python node`.
 
-What it does for you (each step is skipped when already done, so later starts take a few seconds):
+```bash
+cd roopsee-marketing-intelligence
+python3 run.py            # on Windows: python run.py
+```
 
-1. checks Python 3.10+ and that `.env` has the production Supabase URL and key
+That one command sets up whatever is missing, starts the dashboard and opens http://127.0.0.1:8000 in your browser.
+Stop it with **Ctrl+C** in that terminal (or `python3 run.py --stop` from another one).
+
+What it does for you – each step is skipped once done, so later starts take a few seconds:
+
+1. checks the Python version and that `.env` has the production Supabase URL and key
 2. creates `.venv` and installs the Python packages
-3. builds the React dashboard (needs [Node.js LTS](https://nodejs.org/) once; rebuilds only when the UI source changed)
+3. builds the React dashboard (rebuilds only when the UI source changed)
 4. **first run only:** downloads your event data from Supabase (read-only, about 4–5 minutes), then builds the analytics tables
 5. starts the server and opens the browser. If it is already running, it just opens the page
 
-Needs on a new machine: **Python 3.10+** and **Node.js LTS** (Node only to build the UI), plus the `.env` file.
-
-Options (also work as `python run.py ...`):
+`.env` is not in git, so on a new machine copy it into this folder yourself.
 
 | Command | Does |
 |---|---|
-| `start.bat --refresh` | pull the newest events first, then start |
-| `start.bat --no-browser` | don't open a browser tab |
-| `start.bat --rebuild-ui` | force a rebuild of the dashboard UI |
-| `set MI_PORT=8010` before starting | use another port if 8000 is taken |
+| `python3 run.py --refresh` | pull the newest events first, then start |
+| `python3 run.py --no-browser` | don't open a browser tab |
+| `python3 run.py --rebuild-ui` | force a rebuild of the dashboard UI |
+| `python3 run.py --stop` | stop a running dashboard |
+| `MI_PORT=8010 python3 run.py` | use another port (Windows PowerShell: `$env:MI_PORT=8010; python run.py`) |
 
 Day to day you rarely need `--refresh`: the **Refresh data** button in the dashboard pulls only the new events
 (about a minute) and rebuilds.
 
 ### Manual / developer commands
 
-```powershell
-.venv\Scripts\python -m mi.cli serve        # server only (UI must already be built)
-.venv\Scripts\python -m mi.cli all          # extract + transform from the command line
-cd dashboard; npm run dev                   # hot-reload UI on http://localhost:5173 (proxies /api to :8000)
+Use `.venv/bin/python` on macOS/Linux or `.venv\Scripts\python` on Windows:
+
+```bash
+.venv/bin/python -m mi.cli serve        # server only (UI must already be built)
+.venv/bin/python -m mi.cli all          # extract + transform from the command line
+cd dashboard && npm run dev             # hot-reload UI on http://localhost:5173 (proxies /api to :8000)
 ```
 
-CLI: `python -m mi.cli {extract | transform | all | serve}`. DuckDB allows one writer, so stop the dashboard
-before using `extract` / `transform` from the CLI (or just use the buttons in the dashboard).
+`python -m mi.cli {extract | transform | all | serve}`. DuckDB allows one writer, so stop the dashboard
+before using `extract` / `transform` from the command line (or just use the buttons in the dashboard).
 
 ### Troubleshooting
 
 | Message | Fix |
 |---|---|
-| "Python was not found" | install Python 3.10+ and tick **Add python.exe to PATH** |
-| "Node.js is required once" | install the Node.js LTS from nodejs.org, then run again |
+| `command not found: python` (macOS) | use `python3` – macOS has no plain `python` |
+| "Python 3.11 or newer is required" | macOS: `brew install python`; otherwise https://www.python.org/downloads/ (the macOS built-in python3 is usually too old) |
+| "Node.js is required once" | macOS: `brew install node`; otherwise https://nodejs.org/ (LTS), then run again |
 | "PRODUCT_SUPABASE_URL is missing" | add the production URL and service key to `.env` |
-| "Port 8000 is used by another program" | close that program, or `set MI_PORT=8010` and start again |
-| Page shows "No analytics tables yet" | press **Refresh data**, or run `start.bat --refresh` |
+| "Port 8000 is used by another program" | close that program, or start with `MI_PORT=8010` |
+| Page shows "No analytics tables yet" | press **Refresh data**, or run `python3 run.py --refresh` |
 
 ## Safety
 

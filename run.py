@@ -1,14 +1,20 @@
-"""One-command launcher for Roopsee Marketing Intelligence.
+#!/usr/bin/env python3
+"""One-command launcher for Roopsee Marketing Intelligence (macOS, Linux and Windows).
 
-    python run.py                 set everything up if needed, start the dashboard, open the browser
-    python run.py --refresh       pull the newest events from Supabase first (read-only), then start
-    python run.py --no-browser    don't open a browser tab
-    python run.py --rebuild-ui    force a rebuild of the React dashboard
+    python3 run.py                 set everything up if needed, start the dashboard, open the browser
+    python3 run.py --refresh       pull the newest events from Supabase first (read-only), then start
+    python3 run.py --no-browser    don't open a browser tab
+    python3 run.py --rebuild-ui    force a rebuild of the React dashboard
+    python3 run.py --stop          stop a running dashboard (useful if it was started in the background)
+
+(On Windows use `python` instead of `python3`.)
 
 Safe to run repeatedly: every step is skipped when it is already done, and if the dashboard is
-already running it just opens it.  Stop with Ctrl+C (or stop.bat if it was started in the background).
+already running it just opens it.  Stop it with Ctrl+C in its terminal, or `--stop` from another one.
+Use a different port with the MI_PORT environment variable.
 """
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -19,10 +25,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DASH = ROOT / "dashboard"
+DATA = ROOT / "data"
+PID_FILE = DATA / "server.pid"
 IS_WIN = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
 VENV_PY = ROOT / ".venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
 PORT = int(os.environ.get("MI_PORT", "8000"))
 URL = f"http://127.0.0.1:{PORT}"
+MIN_PY = (3, 11)
+PY = "python" if IS_WIN else "python3"
 
 
 def say(msg: str) -> None:
@@ -55,9 +66,71 @@ def is_our_dashboard() -> bool:
         return False
 
 
+def port_hint() -> str:
+    return f"MI_PORT=8010 {PY} run.py" if not IS_WIN else "set MI_PORT=8010   then   python run.py"
+
+
+# ------------------------------------------------------------------ stop
+def pids_on_port(port: int) -> set:
+    """PIDs listening on the port (netstat on Windows, lsof on macOS/Linux)."""
+    pids = set()
+    try:
+        if IS_WIN:
+            out = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True).stdout
+            for line in out.splitlines():
+                p = line.split()
+                if len(p) >= 5 and p[3] == "LISTENING" and p[1].endswith(f":{port}"):
+                    pids.add(int(p[4]))
+        else:
+            out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True).stdout
+            pids = {int(x) for x in out.split()}
+    except (OSError, ValueError):
+        pass
+    return pids
+
+
+def kill_tree(pid: int) -> None:
+    try:
+        if IS_WIN:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        pass
+
+
+def stop_dashboard() -> int:
+    if not port_in_use():
+        print(f"The dashboard is not running on port {PORT}.")
+        PID_FILE.unlink(missing_ok=True)
+        return 0
+    if not is_our_dashboard():
+        die(f"Port {PORT} is in use, but not by this dashboard, so I won't touch it.")
+    pids = pids_on_port(PORT)
+    if PID_FILE.exists():
+        try:
+            pids.add(int(PID_FILE.read_text().strip()))
+        except ValueError:
+            pass
+    for pid in pids:
+        kill_tree(pid)
+    for _ in range(20):
+        if not port_in_use():
+            PID_FILE.unlink(missing_ok=True)
+            print("Dashboard stopped.")
+            return 0
+        time.sleep(0.5)
+    die(f"Could not stop the dashboard (PIDs {sorted(pids) or 'unknown'}). Close its terminal window or end the process manually.")
+    return 1
+
+
+# ------------------------------------------------------------------ setup steps
 def check_prereqs() -> None:
-    if sys.version_info < (3, 10):
-        die(f"Python 3.10 or newer is required (found {sys.version.split()[0]}). Install it from https://www.python.org/downloads/")
+    if sys.version_info < MIN_PY:
+        have = sys.version.split()[0]
+        hint = ("Install a current Python with Homebrew:  brew install python   (or download from https://www.python.org/downloads/), "
+                "then run it with python3 again.") if IS_MAC else "Install it from https://www.python.org/downloads/"
+        die(f"Python {MIN_PY[0]}.{MIN_PY[1]} or newer is required (you have {have}). {hint}")
     env = ROOT / ".env"
     if not env.exists():
         die("The .env file is missing. Create it next to run.py with at least:\n"
@@ -96,7 +169,8 @@ def ensure_ui(force: bool) -> None:
         if (DASH / "dist" / "index.html").exists():
             print("\nNote: Node.js (npm) was not found, so the dashboard UI was not rebuilt. Using the existing build.")
             return
-        die("Node.js is required once to build the dashboard UI. Install the LTS version from https://nodejs.org/ and run again.")
+        hint = "brew install node" if IS_MAC else "https://nodejs.org/"
+        die(f"Node.js is required once to build the dashboard UI. Install the LTS version ({hint}) and run again.")
     if not (DASH / "node_modules").exists():
         say("Installing dashboard packages (one time, about a minute)...")
         run("npm install --no-audit --no-fund", cwd=DASH, shell=True)
@@ -106,14 +180,15 @@ def ensure_ui(force: bool) -> None:
 
 def data_state() -> str:
     """'empty' (no events yet) | 'raw' (events but no analytics tables) | 'ready'."""
-    if not (ROOT / "data" / "mi.duckdb").exists():
+    db = DATA / "mi.duckdb"
+    if not db.exists():
         return "empty"
-    code = ("import duckdb\n"
-            "c = duckdb.connect(r'%s', read_only=True)\n"
+    code = ("import duckdb, sys\n"
+            "c = duckdb.connect(sys.argv[1], read_only=True)\n"
             "t = {r[0] for r in c.execute('select table_name from information_schema.tables').fetchall()}\n"
             "n = c.execute('select count(*) from raw_event_log').fetchall()[0][0] if 'raw_event_log' in t else 0\n"
-            "print(n, 'sessions' in t)\n" % (ROOT / "data" / "mi.duckdb"))
-    r = subprocess.run([str(VENV_PY), "-c", code], capture_output=True, text=True)
+            "print(n, 'sessions' in t)\n")
+    r = subprocess.run([str(VENV_PY), "-c", code, str(db)], capture_output=True, text=True)
     if r.returncode != 0:
         return "empty"
     n, has = r.stdout.split()
@@ -133,24 +208,33 @@ def ensure_data(refresh: bool) -> None:
         run([str(VENV_PY), "-m", "mi.cli", "all"])
 
 
+# ------------------------------------------------------------------ main
 def main(argv) -> int:
+    if "-h" in argv or "--help" in argv:
+        print(__doc__)
+        return 0
+    if "--stop" in argv:
+        return stop_dashboard()
+
     no_browser = "--no-browser" in argv
     print("Roopsee Marketing Intelligence")
     if port_in_use():
         if is_our_dashboard():
-            say(f"The dashboard is already running at {URL}")
+            say(f"The dashboard is already running at {URL}  (stop it with: {PY} run.py --stop)")
             if not no_browser:
                 webbrowser.open(URL)
             return 0
-        die(f"Port {PORT} is used by another program. Close it, or set a different port first:  set MI_PORT=8010")
+        die(f"Port {PORT} is used by another program. Close it, or use another port:  {port_hint()}")
 
     check_prereqs()
     ensure_venv_and_deps()
     ensure_ui("--rebuild-ui" in argv)
+    DATA.mkdir(exist_ok=True)
     ensure_data("--refresh" in argv)
 
-    say(f"Starting the dashboard at {URL}   (press Ctrl+C in this window to stop)")
+    say(f"Starting the dashboard at {URL}   (press Ctrl+C to stop)")
     server = subprocess.Popen([str(VENV_PY), "-m", "mi.cli", "serve"], cwd=ROOT)
+    PID_FILE.write_text(str(server.pid))
     try:
         for _ in range(60):
             if server.poll() is not None:
@@ -173,6 +257,7 @@ def main(argv) -> int:
                 server.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 server.kill()
+        PID_FILE.unlink(missing_ok=True)
     return 0
 
 
