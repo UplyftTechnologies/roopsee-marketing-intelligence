@@ -1,6 +1,6 @@
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { day, inr, num, pct, useApi, dur } from '../api'
-import { Card, Kpi, Legend, Loading, SERIES, Table, axis, chartTip, RateBar } from '../ui'
+import { day, inr, num, pct, useApi, dur, useFilters } from '../api'
+import { Card, Kpi, Legend, Loading, SERIES, Table, axis, chartTip, RateBar, delta } from '../ui'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const RAMP = ['var(--seq-100)', 'var(--seq-200)', 'var(--seq-300)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
@@ -30,11 +30,14 @@ function Heatmap({ hours }) {
   )
 }
 
+const dd = (f, k, p, key, kind) => (f.compare && p ? delta(k[key], p[key], kind) : null)
+
 export default function Overview() {
+  const f = useFilters()
   const s = useApi('/overview')
   return (
     <Loading state={s}>
-      {({ kpis: k, daily, channels, devices, hours, landing, staff_orders: so }) => (
+      {({ kpis: k, prev: p, daily, channels, devices, hours, landing, staff_orders: so }) => (
         <>
           {so.orders > 0 && (
             <div className={`banner ${so.excluded ? '' : 'ok'}`}>
@@ -48,14 +51,14 @@ export default function Overview() {
             </div>
           )}
           <div className="kpis">
-            <Kpi label="Sessions" value={num(k.sessions)} note={`${num(k.visitors)} browsers · ${num(k.people)} people`} />
-            <Kpi label="Orders" value={num(k.orders)} note={`${pct(k.order_cvr, 2)} of sessions`} />
-            <Kpi label="Revenue" value={inr(k.revenue)} note={`AOV ${inr(k.aov)}`} />
-            <Kpi label="Added to cart" value={num(k.cart_sessions)} note={`${pct(k.cart_rate)} of sessions`} />
-            <Kpi label="Reached checkout" value={num(k.checkout_sessions)} />
-            <Kpi label="Quiz completed" value={num(k.quiz_done)} note={`${num(k.quiz_started)} with a tracked start`} />
-            <Kpi label="Bounce rate" value={pct(k.bounce_rate)} note="single-event sessions" />
-            <Kpi label="Avg session" value={dur(k.avg_duration_s)} note={`${num(k.app_sessions)} in Android app`} />
+            <Kpi label="Sessions" help="sessions" value={num(k.sessions)} d={dd(f, k, p, 'sessions')} note={`${num(k.visitors)} browsers · ${num(k.people)} people`} />
+            <Kpi label="Orders" help="orders" value={num(k.orders)} d={dd(f, k, p, 'orders')} note={`${pct(k.order_cvr, 2)} of sessions`} />
+            <Kpi label="Revenue" help="revenue" value={inr(k.revenue)} d={dd(f, k, p, 'revenue')} note={`AOV ${inr(k.aov)}`} />
+            <Kpi label="Added to cart" help="cart" value={num(k.cart_sessions)} d={dd(f, k, p, 'cart_sessions')} note={`${pct(k.cart_rate)} of sessions`} />
+            <Kpi label="Reached checkout" help="checkout" value={num(k.checkout_sessions)} d={dd(f, k, p, 'checkout_sessions')} />
+            <Kpi label="Quiz completed" help="quiz" value={num(k.quiz_done)} d={dd(f, k, p, 'quiz_done')} note={`${num(k.quiz_started)} with a tracked start`} />
+            <Kpi label="Bounce rate" help="bounce" value={pct(k.bounce_rate)} d={dd(f, k, p, 'bounce_rate', 'rate')} goodWhen="down" />
+            <Kpi label="Avg session" help="avgSession" value={dur(k.avg_duration_s)} note={`${num(k.app_sessions)} in Android app`} />
           </div>
 
           <div className="grid g-main">
@@ -70,7 +73,7 @@ export default function Overview() {
                 </BarChart>
               </ResponsiveContainer>
             </Card>
-            <Card title="Where sessions come from" sub="sessions · carts · orders by channel">
+            <Card title="Where sessions come from" sub="click a channel to see its sessions">
               <Table
                 cols={[
                   { label: 'Channel', key: 'channel' },
@@ -79,6 +82,7 @@ export default function Overview() {
                   { label: 'Orders', num: true, render: (r) => num(r.orders) },
                 ]}
                 rows={channels}
+                onRow={(r) => f.go('sessions', { channel: r.channel })}
               />
             </Card>
           </div>

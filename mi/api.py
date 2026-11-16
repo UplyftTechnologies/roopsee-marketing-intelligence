@@ -6,7 +6,7 @@ The API process owns the DuckDB file (single writer). All access goes through DB
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -87,6 +87,8 @@ def meta():
             (SELECT count(*) FROM orders_clean WHERE is_valid) orders, (SELECT count(*) FROM orders_clean WHERE is_valid AND is_excluded) orders_excluded""")
         out["range"] = one("SELECT min(date_ist) AS first, max(date_ist) AS last FROM sessions")
         out["last_transform"] = one("SELECT v FROM etl_meta WHERE k='last_transform'").get("v")
+        tc = _tracking_change()
+        out["tracking_change"] = str(tc) if tc else None
     return out
 
 
@@ -123,15 +125,19 @@ def jobs():
     return JOB
 
 
+def _tracking_change():
+    """Date the current tracker went live (first session_started event). Session ids, bounce and duration before it are not comparable."""
+    return one("SELECT min(ts_ist)::DATE AS d FROM events_clean WHERE event_name = 'session_started'").get("d")
+
+
 # ------------------------------------------------------------------ overview
-@app.get("/api/overview")
-def overview(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
-    w, a = sess_where(date_from, date_to, include_excluded)
+def _kpis(d_from, d_to, include_excluded) -> dict:
+    w, a = sess_where(d_from, d_to, include_excluded)
     k = one(f"""SELECT count(*) sessions, count(DISTINCT visitor_key) visitors, count(DISTINCT coalesce(user_id, visitor_key)) people,
         coalesce(sum(pageviews),0) pageviews, count(*) FILTER (WHERE f_product) product_sessions,
         count(*) FILTER (WHERE f_cart) cart_sessions, count(*) FILTER (WHERE f_checkout) checkout_sessions,
         count(*) FILTER (WHERE f_quiz_done) quiz_done, count(*) FILTER (WHERE f_quiz_start) quiz_started,
-        count(*) FILTER (WHERE events = 1) bounced, count(*) FILTER (WHERE is_app) app_sessions,
+        count(*) FILTER (WHERE is_bounce) bounced, count(*) FILTER (WHERE is_app) app_sessions,
         coalesce(avg(duration_s) FILTER (WHERE duration_s > 0),0) avg_duration_s
         FROM sessions s WHERE {w}""", a)
     ow = "date_ist BETWEEN ? AND ? AND is_valid" + ("" if include_excluded else " AND NOT is_excluded")
@@ -139,6 +145,26 @@ def overview(date_from: str | None = None, date_to: str | None = None, include_e
     k.update(orders=o["orders"], revenue=o["revenue"], aov=ratio(o["revenue"], o["orders"]),
              order_cvr=ratio(o["orders"], k["sessions"]), cart_rate=ratio(k["cart_sessions"], k["sessions"]),
              bounce_rate=ratio(k["bounced"], k["sessions"]))
+    return k
+
+
+def prev_range(d_from, d_to):
+    """The equally long period right before [d_from, d_to]; None for an open-ended range ("All time")."""
+    if not d_from or not d_to:
+        return None
+    a, b = date.fromisoformat(d_from), date.fromisoformat(d_to)
+    n = (b - a).days + 1
+    pt = a - timedelta(days=1)
+    return (pt - timedelta(days=n - 1)).isoformat(), pt.isoformat()
+
+
+@app.get("/api/overview")
+def overview(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    w, a = sess_where(date_from, date_to, include_excluded)
+    ow = "date_ist BETWEEN ? AND ? AND is_valid" + ("" if include_excluded else " AND NOT is_excluded")
+    k = _kpis(date_from, date_to, include_excluded)
+    pr = prev_range(date_from, date_to)
+    prev = _kpis(pr[0], pr[1], include_excluded) if pr else None
     daily = q(f"""SELECT s.date_ist AS date, count(*) sessions, count(DISTINCT visitor_key) visitors,
         count(*) FILTER (WHERE f_cart) carts, count(*) FILTER (WHERE f_checkout) checkouts FROM sessions s WHERE {w} GROUP BY 1 ORDER BY 1""", a)
     od = {r["date"]: r for r in q(f"SELECT date_ist AS date, count(*) orders, sum(revenue) revenue FROM orders_clean WHERE {ow} GROUP BY 1", a)}
@@ -153,7 +179,7 @@ def overview(date_from: str | None = None, date_to: str | None = None, include_e
     landing = q(f"SELECT landing_type, count(*) sessions, count(*) FILTER (WHERE f_cart) carts FROM sessions s WHERE {w} GROUP BY 1 ORDER BY 2 DESC LIMIT 8", a)
     staff = one("SELECT count(*) orders, coalesce(sum(total),0) revenue FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND is_valid AND is_staff_order", a)
     rule_on = bool(q("SELECT 1 FROM exclusions WHERE kind='rule' AND value='staff_orders' AND active"))
-    return {"kpis": k, "staff_orders": {**staff, "excluded": rule_on}, "daily": daily, "channels": channels, "devices": devices, "hours": hours, "landing": landing}
+    return {"kpis": k, "prev": prev, "prev_range": pr, "staff_orders": {**staff, "excluded": rule_on}, "daily": daily, "channels": channels, "devices": devices, "hours": hours, "landing": landing}
 
 
 # ------------------------------------------------------------------ funnel / checkout
@@ -438,6 +464,120 @@ def lookup(q_: str = Query(..., alias="q", min_length=2), limit: int = 12):
                        AND {expr} NOT IN ('Guest') GROUP BY 2 ORDER BY 3 DESC LIMIT ?""", [like, limit]):
             out.append(r)
     return out
+
+
+
+# ------------------------------------------------------------------ insights (plain-language findings)
+def _chg(cur, prev):
+    return None if not prev else (cur - prev) / prev
+
+
+@app.get("/api/insights")
+def insights(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    """Rule-based findings for the selected range. Each has a tone (good / warn / bad / info) and a drill-down target."""
+    k = _kpis(date_from, date_to, include_excluded)
+    pr = prev_range(date_from, date_to)
+    prev = _kpis(pr[0], pr[1], include_excluded) if pr else None
+    out = []
+
+    def add(tone, title, detail, tab=None, filters=None):
+        out.append({"tone": tone, "title": title, "detail": detail, "tab": tab, "filters": filters or {}})
+
+    # 1. trend vs the previous period
+    thin = False
+    if prev:
+        n_days = (date.fromisoformat(date_to) - date.fromisoformat(date_from)).days + 1
+        covered = one("SELECT count(*) n FROM (SELECT date_ist FROM sessions WHERE date_ist BETWEEN ? AND ?" + ("" if include_excluded else " AND NOT is_excluded") + " GROUP BY 1 HAVING count(*) >= 30)", list(pr))["n"]
+        tc = _tracking_change()
+        prev_old = bool(tc and pr[0] < str(tc))
+        thin = covered < 0.7 * n_days or prev_old
+    if prev and prev["sessions"] >= 50:
+        c = _chg(k["sessions"], prev["sessions"])
+        word = "up" if c >= 0 else "down"
+        note = ""
+        if prev_old:
+            note = f" Tracking was upgraded on {tc}, so session counts before that date are not directly comparable."
+        elif thin:
+            note = f" Only {covered} of {n_days} days in that earlier period have meaningful tracking data, so this comparison overstates the change."
+        add("info" if thin else "good" if c >= 0.1 else "bad" if c <= -0.1 else "info", f"Traffic is {word} {abs(c) * 100:.0f}% on the previous period",
+            f"{k['sessions']:,} sessions vs {prev['sessions']:,} in {pr[0]} to {pr[1]}." + note, "performance")
+    if prev and (k["orders"] or prev["orders"]):
+        c = _chg(k["orders"], prev["orders"])
+        add("good" if (c or 0) >= 0.1 else "bad" if (c or 0) <= -0.1 else "info",
+            f"{k['orders']} orders (₹{k['revenue']:,.0f})" + (f", {'up' if c >= 0 else 'down'} {abs(c) * 100:.0f}% on before" if c is not None else ""),
+            f"Previous period: {prev['orders']} orders (₹{prev['revenue']:,.0f}). Average order value ₹{k['aov']:,.0f}.", "performance")
+
+    # 2. biggest leak in the purchase funnel
+    f = funnel(date_from, date_to, include_excluded, None)
+    st = f["stages"]
+    leaks = [(st[i]["of_prev"], i) for i in range(2, 6) if st[i - 1]["sessions"] >= 20]
+    if leaks:
+        rate, i = min(leaks)
+        add("warn", f"Biggest leak: {st[i - 1]['stage']} → {st[i]['stage']}",
+            f"Only {rate * 100:.0f}% continue; {st[i - 1]['sessions'] - st[i]['sessions']:,} sessions stop here.", "funnel")
+
+    # 3. abandoned checkouts that can still be recovered (phone known, no later order)
+    end = date_to or one("SELECT max(date_ist) AS d FROM sessions")["d"]
+    start7 = (date.fromisoformat(str(end)) - timedelta(days=6)).isoformat()
+    ab = one(f"""SELECT count(DISTINCT c.phone10) people, coalesce(sum(c.cart_value),0) value FROM checkout c JOIN sessions s USING (session_id)
+        WHERE s.date_ist BETWEEN ? AND ? {'' if include_excluded else 'AND NOT s.is_excluded'} AND c.outcome IN ('checkout_abandoned','payment_abandoned')
+        AND c.phone10 IS NOT NULL AND c.phone10 NOT IN (SELECT phone10 FROM orders_clean WHERE is_valid AND phone10 IS NOT NULL)""", [start7, str(end)])
+    if ab["people"]:
+        add("warn", f"{ab['people']} people with a known phone left checkout in the last 7 days",
+            f"They haven't ordered since. Cart value where recorded: ₹{ab['value']:,.0f}. A reminder message here is the quickest win.", "funnel")
+
+    # 4. campaigns: best performer and wasted traffic
+    camps = campaigns(date_from, date_to, include_excluded, 1)["rows"]
+    won = [c for c in camps if c["best_orders"] >= 1]
+    if won:
+        c = max(won, key=lambda r: (r["best_orders"], r["best_revenue"]))
+        label = f"{c['channel']} traffic with no campaign tag" if c["campaign"] == "(not set)" else f"{c['campaign']} ({c['channel']})"
+        add("good", f"Best converting source: {label}",
+            f"{c['best_orders']} orders, ₹{c['best_revenue']:,.0f}, from {c['sessions']:,} sessions ({c['cart_rate'] * 100:.1f}% added to cart).", "campaigns")
+    waste = sorted([c for c in camps if c["sessions"] >= 200 and c["carts"] == 0], key=lambda r: -r["sessions"])[:3]
+    if waste:
+        add("bad", f"{len(waste)} campaign{'s' if len(waste) > 1 else ''} with 200+ sessions and zero add-to-carts",
+            "; ".join(f"{c['campaign']} ({c['channel']}, {c['sessions']:,} sessions)" for c in waste) + ". Worth reviewing the targeting or landing page.", "campaigns")
+
+    # 5. channel that adds to cart best vs worst
+    w, a = sess_where(date_from, date_to, include_excluded)
+    ch = [r for r in q(f"SELECT channel, count(*) sessions, count(*) FILTER (WHERE f_cart) carts FROM sessions s WHERE {w} GROUP BY 1 HAVING count(*) >= 200", a)]
+    if len(ch) >= 2:
+        for r in ch:
+            r["rate"] = r["carts"] / r["sessions"]
+        hi, lo = max(ch, key=lambda r: r["rate"]), min(ch, key=lambda r: r["rate"])
+        if hi["rate"] >= 1.5 * max(lo["rate"], 1e-9):
+            add("info", f"{hi['channel']} visitors add to cart most ({hi['rate'] * 100:.1f}%)",
+                f"Compare {lo['channel']}: {lo['rate'] * 100:.1f}% on {lo['sessions']:,} sessions.", "sessions", {"channel": hi["channel"]})
+
+    # 6. mobile vs desktop
+    dv = {r["device"]: r for r in q(f"SELECT device, count(*) sessions, count(*) FILTER (WHERE f_cart) carts FROM sessions s WHERE {w} AND device IN ('Mobile','Desktop') AND NOT is_app GROUP BY 1", a)}
+    if len(dv) == 2 and min(v["sessions"] for v in dv.values()) >= 200:
+        m, d = dv["Mobile"], dv["Desktop"]
+        mr, dr = m["carts"] / m["sessions"], d["carts"] / d["sessions"]
+        if dr >= 1.5 * mr or mr >= 1.5 * dr:
+            add("warn" if dr > mr and m["sessions"] > d["sessions"] else "info", f"{'Desktop' if dr > mr else 'Mobile'} adds to cart {max(dr, mr) / max(min(dr, mr), 1e-9):.1f}× as often",
+                f"Mobile {mr * 100:.1f}% of {m['sessions']:,} sessions, desktop {dr * 100:.1f}% of {d['sessions']:,}.", "cohorts")
+
+    # 7. peak hour
+    hr = one(f"SELECT extract(hour FROM timezone('Asia/Kolkata', started_at))::INT AS h, count(*) n FROM sessions s WHERE {w} GROUP BY 1 ORDER BY 2 DESC LIMIT 1", a)
+    if hr:
+        h = hr["h"]
+        add("info", f"Most visits start between {h % 12 or 12}{'am' if h < 12 else 'pm'} and {(h + 1) % 12 or 12}{'am' if (h + 1) % 24 < 12 else 'pm'} IST",
+            f"{hr['n']:,} sessions began in that hour. Useful for timing posts, ads and messages.", "performance")
+
+    # 8. bounce
+    if k["sessions"] >= 200 and k["bounce_rate"] > 0.4:
+        add("warn", f"{k['bounce_rate'] * 100:.0f}% of sessions leave without doing anything",
+            "One page view or fewer, no clicks, scrolls or searches. Check landing pages and ad-to-page match.", "campaigns")
+
+    # 9. staff orders (so the number is never silently hidden)
+    so = one("SELECT count(*) n, coalesce(sum(total),0) v FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND is_valid AND is_staff_order", [date_from or "2000-01-01", date_to or "2999-12-31"])
+    if so["n"]:
+        on = bool(q("SELECT 1 FROM exclusions WHERE kind='rule' AND value='staff_orders' AND active"))
+        add("info", f"{so['n']} orders (₹{so['v']:,.0f}) came from admin / staff accounts",
+            ("They are excluded from every number here." if on else "They are counted as real customer orders.") + " Change this in Exclusions.", "exclusions")
+    return {"kpis": k, "prev": prev, "prev_range": pr, "insights": out}
 
 
 # ------------------------------------------------------------------ static dashboard (after `npm run build`)

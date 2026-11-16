@@ -268,7 +268,10 @@ a AS (
     bool_or(event_key = 'checkout_view') AS f_checkout, bool_or(event_key = 'pay_started') AS f_pay,
     bool_or(event_key = 'order_placed') AS f_order, bool_or(event_key = 'quiz_started') AS f_quiz_start,
     bool_or(event_key = 'quiz_completed') AS f_quiz_done, bool_or(event_key = 'login') AS f_login,
-    bool_or(event_key = 'search') AS f_search
+    bool_or(event_key = 'search') AS f_search,
+    bool_or(event_name LIKE 'clicked\\_%' ESCAPE '\\' OR event_name IN ('ui_clicked','page_scrolled','scroll_depth','searchbar_typed','add_to_cart')
+            OR event_key IN ('add_to_cart','view_cart','checkout_view','pay_started','order_placed','quiz_started','quiz_completed',
+                             'login','search','wishlist','assistant','address')) AS f_interact
   FROM events_base GROUP BY 1),
 b AS (
   SELECT a.*, keys.key_events,
@@ -298,6 +301,7 @@ SELECT c.*, timezone('Asia/Kolkata', started_at)::DATE AS date_ist,
        WHEN source = 'direct' THEN 'Direct'
        ELSE 'Referral' END AS channel,
   epoch(ended_at) - epoch(started_at) AS duration_s,
+  (pageviews <= 1 AND NOT f_interact) AS is_bounce,
   CASE WHEN f_order THEN 5 WHEN f_pay THEN 4 WHEN f_checkout THEN 3 WHEN f_cart THEN 2 WHEN f_product THEN 1 ELSE 0 END AS stage
 FROM c;
 

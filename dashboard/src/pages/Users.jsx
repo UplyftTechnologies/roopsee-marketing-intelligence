@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { dt, inr, num, useApi } from '../api'
-import { Badge, Card, Chips, Loading, Pager, Search, Table } from '../ui'
+import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table } from '../ui'
 import { useQuickExclude } from './Sessions'
 
 const TONE = { 'Repeat buyer': 'good', Buyer: 'good', 'Abandoned checkout': 'serious', 'Cart, no checkout': 'warn', 'Quiz done, no cart': 'warn' }
@@ -27,7 +27,7 @@ export default function Users() {
         {({ rows, total, segments }) => (
           <>
             <Chips value={segment} onChange={setSegment} options={[{ value: '', label: 'All segments' }, ...segments.map((g) => ({ value: g.segment, label: `${g.segment} (${num(g.n)})` }))]} />
-            <Card title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser. Segments drive the future automated-message step.">
+            <Card right={<ExportBtn name="people" rows={rows} fields={[['Name', 'name'], ['Phone', 'phone10'], ['Email', 'email'], ['Segment', 'segment'], ['First channel', 'first_channel'], ['City', 'city'], ['State', 'state'], ['Sessions', 'sessions'], ['Orders', 'orders'], ['Revenue', 'revenue'], ['Age', 'age_bucket'], ['Skin type', 'skin_type']]} />} title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser. Segments drive the future automated-message step.">
               {msg && <div className="muted" style={{ marginBottom: 8 }}>{msg}</div>}
               <Table rowClass={(r) => (r.is_excluded ? 'excluded' : '')} cols={[
                 { label: 'Person', render: (r) => r.name || (r.is_registered ? <span className="muted">no name</span> : <span className="muted mono">anon {r.person_key.slice(0, 8)}</span>) },

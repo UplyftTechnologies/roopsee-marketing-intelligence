@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { dt, inr, num, pct, useApi } from '../api'
-import { Badge, Card, Chips, Loading, Table } from '../ui'
+import { dt, inr, num, pct, useApi, useFilters } from '../api'
+import { Badge, Card, Chips, ExportBtn, Loading, Table } from '../ui'
 
 const RAMP = ['var(--seq-250)', 'var(--seq-300)', 'var(--seq-350)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
 const OUTCOME = {
@@ -10,7 +10,8 @@ const OUTCOME = {
 const CHANNELS = ['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']
 
 export default function Funnel() {
-  const [channel, setChannel] = useState('All')
+  const f = useFilters()
+  const [channel, setChannel] = useState(f.prefill?.channel || 'All')
   const s = useApi('/funnel', { channel: channel === 'All' ? undefined : channel })
   return (
     <>
@@ -52,7 +53,7 @@ export default function Funnel() {
                 </Card>
               </div>
 
-              <Card title="Abandoned checkouts to follow up" sub="latest 40 with a known phone shown first by recency; phone = last 10 digits">
+              <Card right={<ExportBtn name="abandoned-checkouts" rows={d.abandoned} fields={[['When', 'checkout_at'], ['Name', 'name'], ['Phone', 'phone10'], ['Cart value', 'cart_value'], ['Stopped at', 'outcome'], ['Channel', 'channel'], ['City', 'city']]} />} title="Abandoned checkouts to follow up" sub="latest 40 with a known phone shown first by recency; phone = last 10 digits">
                 <Table cols={[
                   { label: 'When', render: (r) => dt(r.checkout_at) },
                   { label: 'Who', render: (r) => r.name || <span className="muted">anonymous</span> },

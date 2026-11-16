@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { inr, num, pct, useApi } from '../api'
-import { Badge, Card, Chips, Loading, RateBar, Table, axis, chartTip, verdictTone } from '../ui'
+import { inr, num, pct, useApi, useFilters } from '../api'
+import { Badge, Card, Chips, ExportBtn, Loading, RateBar, Table, axis, chartTip, verdictTone } from '../ui'
 
 const CH = ['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']
 
 export default function Campaigns() {
-  const [channel, setChannel] = useState('All')
+  const f = useFilters()
+  const [channel, setChannel] = useState(f.prefill?.channel || 'All')
   const [min, setMin] = useState(30)
   const s = useApi('/campaigns', { min_sessions: min })
   return (
@@ -23,7 +24,7 @@ export default function Campaigns() {
                 <select className="field" value={min} onChange={(e) => setMin(+e.target.value)}>{[1, 10, 30, 100, 300].map((n) => <option key={n}>{n}</option>)}</select>
               </label>
             </div>
-            <Card title="Which campaigns are working?" sub={`Site-wide cart rate is ${pct(base, 2)}. Orders are credited to both the session they happened in and the buyer's FIRST visit (first touch); the verdict uses the higher of the two.`}>
+            <Card right={<ExportBtn name="campaigns" rows={shown} fields={[['Campaign', 'campaign'], ['Channel', 'channel'], ['Source', 'source'], ['Medium', 'medium'], ['Sessions', 'sessions'], ['Cart rate', 'cart_rate'], ['Orders same session', 'orders'], ['Orders first touch', 'ft_orders'], ['Revenue', 'best_revenue'], ['Verdict', 'verdict']]} />} title="Which campaigns are working?" sub={`Site-wide cart rate is ${pct(base, 2)}. Orders are credited to both the session they happened in and the buyer's FIRST visit (first touch); the verdict uses the higher of the two. Click a row to see its sessions.`}>
               <Table
                 cols={[
                   { label: 'Campaign', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 240 }} title={r.campaign}>{r.campaign}</span> },
@@ -39,6 +40,7 @@ export default function Campaigns() {
                   { label: 'Verdict', render: (r) => <Badge tone={verdictTone[r.verdict]}>{r.verdict}</Badge> },
                 ]}
                 rows={shown}
+                onRow={(r) => f.go('sessions', { channel: r.channel, search: r.campaign === '(not set)' ? '' : r.campaign })}
               />
             </Card>
             <Card title="Cart rate by campaign" sub="campaigns with at least 100 sessions, % of sessions that added to cart">
