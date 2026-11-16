@@ -1,0 +1,6 @@
+duckdb>=1.1
+pandas>=2.2
+requests>=2.32
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pytz>=2024.1

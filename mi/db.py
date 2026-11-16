@@ -1,0 +1,66 @@
+"""DuckDB connection + raw table schemas."""
+import duckdb
+from .config import DB_PATH, DATA_DIR, IST
+
+RAW_SCHEMAS = {
+    "raw_event_log": {
+        "id": "VARCHAR PRIMARY KEY", "user_name": "VARCHAR", "session_id": "VARCHAR", "country": "VARCHAR",
+        "city": "VARCHAR", "region": "VARCHAR", "ip_address": "VARCHAR", "device": "VARCHAR", "platform": "VARCHAR",
+        "browser": "VARCHAR", "language": "VARCHAR", "time_ist": "VARCHAR", "page_link": "VARCHAR",
+        "event_name": "VARCHAR", "extra_data": "JSON", "created_at": "TIMESTAMPTZ", "value": "VARCHAR",
+        "referrer": "VARCHAR", "user_id": "VARCHAR", "visitor_id": "VARCHAR", "phone_no": "VARCHAR",
+    },
+    "raw_users": {
+        "id": "VARCHAR", "email": "VARCHAR", "name": "VARCHAR", "phone_no": "VARCHAR", "skin_type": "VARCHAR",
+        "skin_concerns": "JSON", "role": "VARCHAR", "gender": "VARCHAR", "wallet_balance": "DOUBLE",
+        "referral_code": "VARCHAR", "used_referral_code": "VARCHAR", "created_at": "TIMESTAMPTZ",
+        "phone_verified": "BOOLEAN", "skin_score": "INTEGER",
+    },
+    "raw_orders": {
+        "id": "VARCHAR", "user_id": "VARCHAR", "name": "VARCHAR", "email": "VARCHAR", "phone": "VARCHAR",
+        "pincode": "VARCHAR", "items": "JSON", "total": "DOUBLE", "savings": "DOUBLE", "status": "VARCHAR",
+        "created_at": "TIMESTAMPTZ", "delivery_fee": "VARCHAR", "coupon_discount": "VARCHAR",
+        "products_total": "VARCHAR", "state": "VARCHAR", "city": "VARCHAR", "wallet_amount_used": "DOUBLE",
+        "coupon_code": "VARCHAR", "payment_status": "VARCHAR", "payment_method": "VARCHAR",
+        "paid_at": "TIMESTAMPTZ", "visitor_id": "VARCHAR", "session_id": "VARCHAR",
+        "delivered_at": "TIMESTAMPTZ", "discount": "DOUBLE",
+    },
+    "raw_quiz_results": {
+        "id": "VARCHAR", "user_id": "VARCHAR", "gender": "VARCHAR", "age": "VARCHAR", "skin_type": "VARCHAR",
+        "created_at": "TIMESTAMPTZ", "completed_at": "TIMESTAMPTZ", "quiz_number": "INTEGER",
+        "guest_session_id": "VARCHAR",
+    },
+    "raw_visitor_links": {
+        "visitor_id": "VARCHAR", "user_id": "VARCHAR", "guest_session_id": "VARCHAR", "session_id": "VARCHAR",
+        "linked_at": "TIMESTAMPTZ",
+    },
+    "raw_customer_address": {
+        "id": "BIGINT", "user_id": "VARCHAR", "city": "VARCHAR", "state": "VARCHAR", "pincode": "VARCHAR",
+        "is_default": "BOOLEAN", "created_at": "TIMESTAMPTZ", "latitude": "DOUBLE", "longitude": "DOUBLE",
+    },
+}
+
+META_DDL = """
+CREATE TABLE IF NOT EXISTS etl_runs (run_id BIGINT, step VARCHAR, started_at TIMESTAMP, finished_at TIMESTAMP,
+                                     rows BIGINT, note VARCHAR);
+"""
+
+
+def connect(read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    DATA_DIR.mkdir(exist_ok=True)
+    con = duckdb.connect(str(DB_PATH), read_only=read_only)
+    con.execute(f"SET TimeZone='{IST}'")
+    con.execute("SET enable_progress_bar=false")
+    if not read_only:
+        init_raw(con)
+    return con
+
+
+def init_raw(con) -> None:
+    for t, cols in RAW_SCHEMAS.items():
+        con.execute(f"CREATE TABLE IF NOT EXISTS {t} ({', '.join(f'{c} {d}' for c, d in cols.items())})")
+    con.execute(META_DDL)
+
+
+import threading
+DB_LOCK = threading.RLock()  # serialises writers (extract inserts, transform) against API reads
