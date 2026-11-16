@@ -60,13 +60,13 @@ export default function Basket() {
 
             <div className="grid g2">
               <Card title="Often bought together" sub="product types that appear together in 2+ orders (inferred from names where the catalog has no match)">
-                <Table cols={[{ label: 'Type A', key: 'a' }, { label: 'Type B', key: 'b' }, { label: 'Orders', num: true, render: (r) => num(r.orders) }]} rows={d.pairs} empty="No pair of product types has appeared together in 2+ orders in this range yet" />
+                <Table cols={[{ label: 'Type A', key: 'a' }, { label: 'Type B', key: 'b' }, { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) }]} rows={d.pairs} empty="No pair of product types has appeared together in 2+ orders in this range yet" />
               </Card>
               <Card title="Coupon impact" sub="average order value by coupon used">
                 <Table cols={[
-                  { label: 'Coupon', key: 'coupon' }, { label: 'Orders', num: true, render: (r) => num(r.orders) },
-                  { label: 'Avg order', num: true, render: (r) => inr(r.aov) }, { label: 'Avg basket', num: true, render: (r) => inr(r.avg_basket) },
-                  { label: 'Avg discount', num: true, render: (r) => (r.avg_discount ? inr(r.avg_discount) : '–') },
+                  { label: 'Coupon', key: 'coupon' }, { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) },
+                  { label: 'Avg order', sortBy: 'aov', num: true, render: (r) => inr(r.aov) }, { label: 'Avg basket', sortBy: 'avg_basket', num: true, render: (r) => inr(r.avg_basket) },
+                  { label: 'Avg discount', sortBy: 'avg_discount', num: true, render: (r) => (r.avg_discount ? inr(r.avg_discount) : '–') },
                 ]} rows={d.coupons} />
               </Card>
             </div>
@@ -74,17 +74,17 @@ export default function Basket() {
             <div className="grid g2">
               <Card title="Top products" sub="by revenue" right={<ExportBtn name="top-products" rows={d.products} fields={[['Product', 'product_name'], ['Brand', 'brand'], ['Type', 'product_type'], ['Units', 'units'], ['Orders', 'orders'], ['Revenue', 'revenue']]} />}>
                 <Table cols={[
-                  { label: 'Product', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={r.product_name}>{r.product_name}</span> },
-                  { label: 'Type', key: 'product_type' }, { label: 'Units', num: true, render: (r) => num(r.units) },
-                  { label: 'Revenue', num: true, render: (r) => inr(r.revenue) },
+                  { label: 'Product', sortBy: 'product_name', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={r.product_name}>{r.product_name}</span> },
+                  { label: 'Type', key: 'product_type' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) },
+                  { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) },
                 ]} rows={d.products} />
               </Card>
               <div className="grid" style={{ gap: 14 }}>
                 <Card title="Brands" sub="by revenue">
-                  <Table cols={[{ label: 'Brand', key: 'brand' }, { label: 'Units', num: true, render: (r) => num(r.units) }, { label: 'Orders', num: true, render: (r) => num(r.orders) }, { label: 'Revenue', num: true, render: (r) => inr(r.revenue) }]} rows={d.brands} />
+                  <Table cols={[{ label: 'Brand', key: 'brand' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) }, { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) }, { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) }]} rows={d.brands} />
                 </Card>
                 <Card title="Product types">
-                  <Table cols={[{ label: 'Type', key: 'product_type' }, { label: 'Units', num: true, render: (r) => num(r.units) }, { label: 'Revenue', num: true, render: (r) => inr(r.revenue) }]} rows={d.types} />
+                  <Table cols={[{ label: 'Type', key: 'product_type' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) }, { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) }]} rows={d.types} />
                 </Card>
               </div>
             </div>

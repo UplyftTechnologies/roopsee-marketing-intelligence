@@ -91,15 +91,15 @@ export default function Loyalty() {
             <div className="grid g2">
               <Card title="Customer value by first channel" sub="the channel that first brought the customer">
                 <Table cols={[
-                  { label: 'Channel', key: 'channel' }, { label: 'Customers', num: true, render: (r) => num(r.customers) },
-                  { label: 'Orders', num: true, render: (r) => num(r.orders) }, { label: 'Revenue', num: true, render: (r) => inr(r.revenue) },
-                  { label: 'Lifetime value', num: true, help: 'ltv', render: (r) => inr(r.ltv) }, { label: 'Came back', num: true, render: (r) => `${r.repeaters} (${pct(r.repeaters / (r.customers || 1), 0)})` },
+                  { label: 'Channel', key: 'channel' }, { label: 'Customers', sortBy: 'customers', num: true, render: (r) => num(r.customers) },
+                  { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) }, { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) },
+                  { label: 'Lifetime value', sortBy: 'ltv', num: true, help: 'ltv', render: (r) => inr(r.ltv) }, { label: 'Came back', sortBy: 'repeaters', num: true, render: (r) => `${r.repeaters} (${pct(r.repeaters / (r.customers || 1), 0)})` },
                 ]} rows={d.by_channel} />
               </Card>
               <Card title="Where customers are now" sub={`days since their last order, as of ${day(d.as_of)}`}>
                 <Table cols={[
-                  { label: 'Last order', render: (r) => r.bucket.slice(3) }, { label: 'Customers', num: true, render: (r) => num(r.customers) },
-                  { label: 'Came back before', num: true, render: (r) => num(r.repeaters) }, { label: 'Lifetime revenue', num: true, render: (r) => inr(r.revenue) },
+                  { label: 'Last order', sortBy: 'bucket', render: (r) => r.bucket.slice(3) }, { label: 'Customers', sortBy: 'customers', num: true, render: (r) => num(r.customers) },
+                  { label: 'Came back before', sortBy: 'repeaters', num: true, render: (r) => num(r.repeaters) }, { label: 'Lifetime revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) },
                 ]} rows={d.recency} />
               </Card>
             </div>
@@ -107,8 +107,8 @@ export default function Loyalty() {
             <Cohorts cohorts={d.cohorts} asOf={d.as_of} />
 
             <Card title="Products people buy again" sub="bought on at least two different orders by the same customer">
-              <Table cols={[{ label: 'Product', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 380 }} title={r.product_name}>{r.product_name}</span> }, { label: 'Brand', key: 'brand' },
-                { label: 'Customers who reordered', num: true, render: (r) => num(r.repeat_customers) }]} rows={d.reordered} empty="No product has been reordered by the same customer yet" />
+              <Table cols={[{ label: 'Product', sortBy: 'product_name', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 380 }} title={r.product_name}>{r.product_name}</span> }, { label: 'Brand', key: 'brand' },
+                { label: 'Customers who reordered', sortBy: 'repeat_customers', num: true, render: (r) => num(r.repeat_customers) }]} rows={d.reordered} empty="No product has been reordered by the same customer yet" />
             </Card>
             <div className="muted">This page always covers all orders (the date range at the top does not apply). Hide internal traffic still does.</div>
           </>

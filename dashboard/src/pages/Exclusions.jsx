@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, dt, num, useApi, useFilters } from '../api'
 import { Badge, Card, Loading, Table } from '../ui'
+import { Inventory, ShareBar } from '../components/ExclusionTools'
 
 /** Manual, editable exclusion list. Every change re-applies automatically (a few seconds) and all tabs reload. */
 function AddForm({ kinds, onDone }) {
@@ -100,11 +101,19 @@ function Row({ r, onChange }) {
   )
 }
 
+const SORTERS = {
+  new: (a, b) => b.id - a.id, old: (a, b) => a.id - b.id,
+  az: (a, b) => a.value.localeCompare(b.value, 'en', { numeric: true, sensitivity: 'base' }), za: (a, b) => b.value.localeCompare(a.value, 'en', { numeric: true, sensitivity: 'base' }),
+  kind: (a, b) => a.kind.localeCompare(b.kind) || a.value.localeCompare(b.value), active: (a, b) => Number(b.active) - Number(a.active) || b.id - a.id,
+}
+const sortRules = (rows, how) => [...rows].sort(SORTERS[how] || SORTERS.new)
+
 export default function Exclusions() {
   const f = useFilters()
   const list = useApi('/exclusions', {}, { scoped: false })
   const impact = useApi('/meta', {}, { scoped: false })
   const [kindFilter, setKindFilter] = useState('')
+  const [listSort, setListSort] = useState('new')
   const reload = () => f.bump()
   const c = impact.data?.counts
   const job = impact.data?.job
@@ -118,16 +127,18 @@ export default function Exclusions() {
         <div className="spacer" />
         <button className="btn" disabled={job?.running} onClick={async () => { await api('/exclusions/apply', { method: 'POST' }); f.reloadMeta() }}>Re-apply all rules</button>
       </div>
+      <ShareBar />
       {list.data && <AddForm kinds={list.data.kinds} onDone={reload} />}
       <Finder onAdded={reload} />
+      <Inventory />
       <Loading state={list}>
         {({ rows, kinds }) => (
           <Card title={`Exclusion list (${rows.length})`} sub="tick/untick to enable or disable a rule · edit or delete · every change re-applies automatically"
-            right={<select className="field" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}><option value="">All types</option>{Object.keys(kinds).map((k) => <option key={k}>{k}</option>)}</select>}>
+            right={<span className="chip-row"><select className="field" value={listSort} onChange={(e) => setListSort(e.target.value)} aria-label="Sort rules"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="az">Value A → Z</option><option value="za">Value Z → A</option><option value="kind">Type A → Z</option><option value="active">Active first</option></select><select className="field" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}><option value="">All types</option>{Object.keys(kinds).map((k) => <option key={k}>{k}</option>)}</select></span>}>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>On</th><th>Type</th><th>Value</th><th>Note</th><th>Source · updated</th><th /></tr></thead>
-                <tbody>{rows.filter((r) => !kindFilter || r.kind === kindFilter).map((r) => <Row key={`${r.id}-${r.updated_at}`} r={r} onChange={reload} />)}</tbody>
+                <tbody>{sortRules(rows.filter((r) => !kindFilter || r.kind === kindFilter), listSort).map((r) => <Row key={`${r.id}-${r.updated_at}`} r={r} onChange={reload} />)}</tbody>
               </table>
             </div>
           </Card>

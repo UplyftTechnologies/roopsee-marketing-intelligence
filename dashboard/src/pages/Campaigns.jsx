@@ -27,17 +27,17 @@ export default function Campaigns() {
             <Card right={<ExportBtn name="campaigns" rows={shown} fields={[['Campaign', 'campaign'], ['Channel', 'channel'], ['Source', 'source'], ['Medium', 'medium'], ['Sessions', 'sessions'], ['Cart rate', 'cart_rate'], ['Orders same session', 'orders'], ['Orders first touch', 'ft_orders'], ['Revenue', 'best_revenue'], ['Verdict', 'verdict']]} />} title="Which campaigns are working?" sub={`Site-wide cart rate is ${pct(base, 2)}. Orders are credited to both the session they happened in and the buyer's FIRST visit (first touch); the verdict uses the higher of the two. Click a row to see its sessions.`}>
               <Table
                 cols={[
-                  { label: 'Campaign', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 240 }} title={r.campaign}>{r.campaign}</span> },
-                  { label: 'Channel', key: 'channel' }, { label: 'Source / medium', render: (r) => `${r.source} / ${r.medium}` },
-                  { label: 'Sessions', num: true, render: (r) => num(r.sessions) },
-                  { label: 'Engaged', num: true, render: (r) => pct(r.engaged_rate, 0) },
-                  { label: 'Quiz done', num: true, render: (r) => pct(r.quiz_rate, 1) },
-                  { label: 'Cart rate', num: true, render: (r) => <RateBar v={r.cart_rate} max={maxCart} text={pct(r.cart_rate, 1)} /> },
-                  { label: 'Checkout', num: true, render: (r) => pct(r.checkout_rate, 1) },
-                  { label: 'Orders (same session)', num: true, render: (r) => num(r.orders) },
-                  { label: 'Orders (first touch)', num: true, render: (r) => num(r.ft_orders) },
-                  { label: 'Revenue', num: true, render: (r) => inr(r.best_revenue) },
-                  { label: 'Verdict', render: (r) => <Badge tone={verdictTone[r.verdict]}>{r.verdict}</Badge> },
+                  { label: 'Campaign', sortBy: 'campaign', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 240 }} title={r.campaign}>{r.campaign}</span> },
+                  { label: 'Channel', key: 'channel' }, { label: 'Source / medium', sortBy: 'source', render: (r) => `${r.source} / ${r.medium}` },
+                  { label: 'Sessions', sortBy: 'sessions', num: true, render: (r) => num(r.sessions) },
+                  { label: 'Engaged', sortBy: 'engaged_rate', num: true, render: (r) => pct(r.engaged_rate, 0) },
+                  { label: 'Quiz done', sortBy: 'quiz_rate', num: true, render: (r) => pct(r.quiz_rate, 1) },
+                  { label: 'Cart rate', sortBy: 'cart_rate', num: true, render: (r) => <RateBar v={r.cart_rate} max={maxCart} text={pct(r.cart_rate, 1)} /> },
+                  { label: 'Checkout', sortBy: 'checkout_rate', num: true, render: (r) => pct(r.checkout_rate, 1) },
+                  { label: 'Orders (same session)', sortBy: 'orders', num: true, render: (r) => num(r.orders) },
+                  { label: 'Orders (first touch)', sortBy: 'ft_orders', num: true, render: (r) => num(r.ft_orders) },
+                  { label: 'Revenue', sortBy: 'best_revenue', num: true, render: (r) => inr(r.best_revenue) },
+                  { label: 'Verdict', sortBy: 'verdict', render: (r) => <Badge tone={verdictTone[r.verdict]}>{r.verdict}</Badge> },
                 ]}
                 rows={shown}
                 onRow={(r) => f.go('sessions', { channel: r.channel, search: r.campaign === '(not set)' ? '' : r.campaign })}

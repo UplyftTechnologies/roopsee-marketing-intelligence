@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 /* ---------- metric glossary: shown as hover/focus help next to labels ---------- */
 export const GLOSSARY = {
@@ -58,7 +58,7 @@ export function delta(cur, prev, kind = 'count') {
 
 export const Delta = ({ d, goodWhen = 'up' }) => {
   if (!d) return null
-  const good = d.dir === 0 ? null : (d.dir > 0) === (goodWhen === 'up')
+  const good = d.dir === 0 || goodWhen === null ? null : (d.dir > 0) === (goodWhen === 'up')
   const arrow = d.dir > 0 ? '▲' : d.dir < 0 ? '▼' : '■'
   return (
     <span className="delta" title="Compared with the previous period of the same length">
@@ -93,19 +93,76 @@ export const Badge = ({ tone, children }) => <span className={`badge ${tone || '
 
 export const verdictTone = { Winning: 'good', Converting: 'good', Promising: 'warn', 'No carts - review': 'bad', 'Too early': '' }
 
-export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass }) {
+/** Next server-side sort state when a header is clicked: same key flips direction, a new key starts descending (ascending for text). */
+export const nextSort = (cur, key, textKeys = []) => (cur.key === key ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' })
+
+/** Table with click-to-sort headers and optional row selection.
+ *  Columns: { label, key?, sortBy? (field name or fn), num?, render?, cls? }  - sortable when key or sortBy is set.
+ *  Client sort by default; pass `sort` ({key, dir}) + `onSort(key)` for server-side sorting of paginated data. */
+export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort }) {
+  const [local, setLocal] = useState(null)
+  const server = typeof onSort === 'function'
+  const sortOf = (c) => c.sortBy ?? c.key
+  const idOf = (c) => c.key || c.label
+  const data = useMemo(() => {
+    if (server || !local || !rows) return rows
+    const c = cols.find((x) => idOf(x) === local.id)
+    const sb = c && sortOf(c)
+    if (!sb) return rows
+    const get = typeof sb === 'function' ? sb : (r) => r[sb]
+    const m = local.dir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const x = get(a); const y = get(b)
+      if (x == null && y == null) return 0
+      if (x == null) return 1
+      if (y == null) return -1
+      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'en', { numeric: true, sensitivity: 'base' })) * m
+    })
+  }, [rows, local, cols, server])
   if (!rows || !rows.length) return <div className="empty">{empty}</div>
+  const click = (c) => {
+    const sb = sortOf(c)
+    if (!sb) return
+    if (server) { onSort(typeof sb === 'function' ? idOf(c) : sb); return }
+    const id = idOf(c)
+    if (!local || local.id !== id) {
+      const v = typeof sb === 'function' ? sb(rows[0]) : rows[0][sb]
+      setLocal({ id, dir: typeof v === 'number' ? 'desc' : 'asc', flipped: false })
+    } else if (!local.flipped) setLocal({ id, dir: local.dir === 'desc' ? 'asc' : 'desc', flipped: true })
+    else setLocal(null)
+  }
+  const dirOf = (c) => {
+    const sb = sortOf(c)
+    if (!sb) return null
+    if (server) return sort && sort.key === (typeof sb === 'function' ? idOf(c) : sb) ? sort.dir : null
+    return local && local.id === idOf(c) ? local.dir : null
+  }
+  const ids = selectable ? data.map(rowId) : []
+  const allOn = selectable && ids.length > 0 && ids.every((i) => selected.has(i))
   return (
     <div className="table-wrap">
       <table>
         <thead>
-          <tr>{cols.map((c) => <th key={c.key || c.label} className={c.num ? 'num' : ''}>{c.label}{c.help && <> <Help id={c.help} /></>}</th>)}</tr>
+          <tr>
+            {selectable && <th className="sel"><input type="checkbox" aria-label="Select all rows" checked={allOn} onChange={(e) => onToggleAll(ids, e.target.checked)} /></th>}
+            {cols.map((c) => {
+              const d = dirOf(c)
+              const can = !!sortOf(c)
+              return (
+                <th key={idOf(c)} className={`${c.num ? 'num' : ''} ${can ? 'sortable' : ''} ${d ? 'sorted' : ''}`} onClick={can ? () => click(c) : undefined}
+                  aria-sort={d ? (d === 'asc' ? 'ascending' : 'descending') : undefined} title={can ? 'Click to sort' : undefined}>
+                  {c.label}{c.help && <> <Help id={c.help} /></>}{d && <span className="arrow">{d === 'asc' ? '▲' : '▼'}</span>}
+                </th>
+              )
+            })}
+          </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className={`${onRow ? 'click' : ''} ${rowClass ? rowClass(r) : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
+          {data.map((r, i) => (
+            <tr key={selectable ? rowId(r) : i} className={`${onRow ? 'click' : ''} ${rowClass ? rowClass(r) : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
+              {selectable && <td className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label="Select row" checked={selected.has(rowId(r))} onChange={() => onToggle(rowId(r))} /></td>}
               {cols.map((c) => (
-                <td key={c.key || c.label} className={`${c.num ? 'num' : ''} ${c.cls || ''}`}>
+                <td key={idOf(c)} className={`${c.num ? 'num' : ''} ${c.cls || ''}`}>
                   {c.render ? c.render(r) : r[c.key] ?? '–'}
                 </td>
               ))}

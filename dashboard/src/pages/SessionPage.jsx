@@ -82,7 +82,7 @@ export default function SessionPage() {
           </Card>
           {orders.length > 0 && (
             <Card title="Orders from this session">
-              <Table cols={[{ label: 'Total', num: true, render: (o) => inr(o.total) }, { label: 'Status', render: (o) => <Badge tone={o.is_valid && !o.is_test ? 'good' : ''}>{o.is_test ? 'test' : o.status}</Badge> },
+              <Table onRow={(o) => f.go('order', { key: o.order_id })} cols={[{ label: 'Total', num: true, render: (o) => inr(o.total) }, { label: 'Status', render: (o) => <Badge tone={o.is_valid && !o.is_test ? 'good' : ''}>{o.is_test ? 'test' : o.status}</Badge> },
                 { label: 'Items', render: (o) => <span className="trunc" style={{ display: 'block', maxWidth: 170 }} title={o.items}>{o.items || '–'}</span> }]} rows={orders} />
             </Card>
           )}

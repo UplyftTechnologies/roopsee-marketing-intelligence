@@ -365,11 +365,20 @@ o AS (
     coalesce(nullif(o.session_id,''), om.session_id) AS session_id, o.visitor_id,
     CASE WHEN o.items IS NULL THEN 0 ELSE json_array_length(o.items) END AS items_count,
     (coalesce(o.items::VARCHAR,'') ILIKE '%test product%' OR coalesce(o.total, 0) <= 1) AS is_test,
-    (o.status NOT IN ('payment_cancelled','payment_pending')) AS is_placed
+    (o.status NOT IN ('payment_cancelled','payment_pending')) AS is_placed,
+    o.name AS customer_name, try_cast(o.delivery_fee AS DOUBLE) AS delivery_fee, try_cast(o.handling_fee AS DOUBLE) AS handling_fee,
+    try_cast(o.coupon_discount AS DOUBLE) AS coupon_discount, o.discount AS discount, o.savings AS savings, o.wallet_amount_used,
+    o.cashback_amount, o.cashback_percent, o.payment_failed_reason, o.paid_at, o.delivered_at,
+    try_cast(json_extract_string(o.metadata, '$.picked_up_at') AS TIMESTAMPTZ) AS picked_up_at,
+    try_cast(json_extract_string(o.metadata, '$.delivery_started_at') AS TIMESTAMPTZ) AS delivery_started_at,
+    try_cast(json_extract_string(o.metadata, '$.cod_collected_at') AS TIMESTAMPTZ) AS cod_collected_at,
+    o.rider_id, o.courier_partner, o.tracking_id
   FROM raw_orders o LEFT JOIN om ON om.order_id = lower(o.id))
 SELECT o.*, (o.is_placed AND NOT o.is_test) AS is_valid,
   CASE WHEN o.is_placed AND NOT o.is_test THEN o.total ELSE 0 END AS revenue,
-  s.channel, s.source, s.medium, s.campaign, s.device, s.is_app,
+  s.channel, s.source, s.medium, s.campaign, s.device, s.is_app, rd.name AS rider_name,
+  CASE WHEN o.is_placed AND NOT o.is_test
+       THEN count(*) FILTER (WHERE o.is_placed AND NOT o.is_test) OVER (PARTITION BY o.user_id ORDER BY o.ts) END AS nth_order,
   (o.user_id IN (SELECT lower(id) FROM raw_users WHERE role IN ('admin','rider','doctor'))) AS is_staff_order,
   coalesce(o.is_test
    OR (o.user_id IN (SELECT lower(id) FROM raw_users WHERE role IN ('admin','rider','doctor')) AND EXISTS (SELECT 1 FROM excl WHERE kind = 'rule' AND v = 'staff_orders'))
@@ -378,7 +387,7 @@ SELECT o.*, (o.is_placed AND NOT o.is_test) AS is_valid,
    OR o.phone10 IN (SELECT right(regexp_replace(v, '[^0-9]', '', 'g'), 10) FROM excl WHERE kind = 'phone')
    OR EXISTS (SELECT 1 FROM excl x WHERE x.kind = 'email' AND (o.email_l = x.v OR (x.v LIKE '@%' AND o.email_l LIKE '%' || x.v))),
    FALSE) AS is_excluded
-FROM o LEFT JOIN sessions s ON s.session_id = o.session_id;
+FROM o LEFT JOIN sessions s ON s.session_id = o.session_id LEFT JOIN raw_users rd ON lower(rd.id) = lower(o.rider_id);
 """
 
 STEP_PRODUCTS = """
@@ -417,6 +426,25 @@ SELECT x.order_id, x.user_id, x.ts, x.date_ist, x.is_valid, x.is_excluded, x.is_
   (x.cat_cat IS NULL) AS type_inferred,
   x.qty, x.price, x.price * x.qty AS line_total, x.in_catalog
 FROM x;
+"""
+
+STEP_META = """
+-- every id / name Meta knows for a campaign -> that campaign (ambiguous keys are dropped, never guessed)
+CREATE OR REPLACE TABLE meta_ids AS
+SELECT key, any_value(campaign_id) AS campaign_id FROM (
+  SELECT campaign_id AS key, campaign_id FROM raw_meta_insights
+  UNION ALL SELECT adset_id, campaign_id FROM raw_meta_insights
+  UNION ALL SELECT ad_id, campaign_id FROM raw_meta_insights
+  UNION ALL SELECT lower(trim(campaign_name)), campaign_id FROM raw_meta_insights WHERE campaign_name IS NOT NULL
+  UNION ALL SELECT entity_id, coalesce(campaign_id, entity_id) FROM raw_meta_entities
+  UNION ALL SELECT lower(trim(name)), entity_id FROM raw_meta_entities WHERE entity_type = 'campaign' AND name IS NOT NULL)
+WHERE key IS NOT NULL GROUP BY key HAVING count(DISTINCT campaign_id) = 1;
+
+-- our sessions that came from a Meta campaign we can identify (utm_campaign holds the campaign id, name, or an ad-set / ad id)
+CREATE OR REPLACE TABLE session_meta AS
+SELECT s.session_id, any_value(m.campaign_id) AS meta_campaign_id
+FROM sessions s JOIN meta_ids m ON m.key = s.campaign OR m.key = lower(trim(s.campaign))
+WHERE s.source IN ('facebook', 'instagram') GROUP BY s.session_id;
 """
 
 STEP_CHECKOUT = """
@@ -524,19 +552,21 @@ def _log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
-def run(con) -> dict:
+def run(con, flags_only: bool = False) -> dict:
     """Rebuild every derived table from raw. Holds the DB lock for the duration (a few seconds)."""
     with DB_LOCK:
         t0 = time.time()
         seed_exclusions(con)
         con.execute(MACROS)
-        steps = [("identity_map", STEP_IDENTITY), ("events_base", STEP_EVENTS_BASE)]
+        # exclusions never change events_base / identity_map, so an exclusion edit can skip the two slowest steps
+        have_base = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'events_base'").fetchall()[0][0] > 0
+        steps = [] if (flags_only and have_base) else [("identity_map", STEP_IDENTITY), ("events_base", STEP_EVENTS_BASE)]
         for name, sql in steps:
             t = time.time()
             con.execute(sql)
             _log(f"{name}: {time.time() - t:.1f}s")
         t = time.time(); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
-        for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS),
+        for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
                           ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS)]:
             t = time.time()
             con.execute(sql)

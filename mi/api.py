@@ -9,17 +9,23 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+import csv
+import io
+import json
+
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import extract, transform
+from . import meta as meta_mod
 from .config import ROOT
 from .db import DB_LOCK, connect
 from .transform import EXCLUSION_KINDS, EXCL_JOINS, RULE_SQL
 
 CON = None
+PENDING = {"reapply": False}
 JOB = {"running": False, "name": None, "started": None, "finished": None, "message": "", "error": None}
 
 
@@ -102,6 +108,12 @@ def _run_job(name: str, fn):
             JOB["error"] = f"{type(e).__name__}: {e}"
         finally:
             JOB.update(running=False, finished=datetime.now().isoformat(timespec="seconds"))
+            if PENDING["reapply"]:
+                PENDING["reapply"] = False
+                try:
+                    _reapply()
+                except Exception:  # never let a follow-up failure mask the first job's result
+                    pass
     if JOB["running"]:
         raise HTTPException(409, f"A job is already running: {JOB['name']}")
     threading.Thread(target=target, daemon=True).start()
@@ -114,6 +126,12 @@ def refresh(mode: str = "full"):
         if mode == "full":
             JOB["message"] = "extracting from Supabase"
             extract.run(CON.cursor())
+            if meta_mod.configured():
+                JOB["message"] = "pulling Meta Ads"
+                try:
+                    meta_mod.sync(CON.cursor())
+                except Exception as e:  # keep the refresh going; the error is shown on the Meta Ads page
+                    meta_mod.record_error(CON.cursor(), e)
         JOB["message"] = "transforming"
         transform.run(CON.cursor())
     _run_job(f"refresh:{mode}", fn)
@@ -287,27 +305,76 @@ def retention(date_from: str | None = None, date_to: str | None = None, include_
 
 
 # ------------------------------------------------------------------ sessions / users / events
-@app.get("/api/sessions")
-def sessions(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
-             min_stage: int = 0, channel: str | None = None, only_excluded: bool = False, limit: int = 50, offset: int = 0):
-    w, a = sess_where(date_from, date_to, include_excluded)
+# what a session "did" (used by the multi-select filters and the abandoner presets)
+FLAG_ORDER = "(s.f_order OR coalesce(o.n_orders, 0) > 0)"
+FLAG_LOGIN = "(s.f_login OR s.user_id IS NOT NULL)"
+SESSION_FLAGS = {"product": "s.f_product", "cart": "s.f_cart", "checkout": "s.f_checkout", "pay": "s.f_pay", "order": FLAG_ORDER,
+                 "login": FLAG_LOGIN, "quiz": "s.f_quiz_done", "search": "s.f_search"}
+EMAIL = "coalesce(nullif(lower(u.email), ''), o.order_email)"
+SESSION_SORTS = {"started_at": "s.started_at", "events": "s.events", "duration_s": "s.duration_s", "order_value": "coalesce(o.order_value, 0)",
+                 "channel": "s.channel", "campaign": "s.campaign", "city": "nullif(lower(s.city), '')", "name": "nullif(lower(u.name), '')", "email": EMAIL,
+                 "stage": "s.stage", "device": "s.device"}
+ORD_CTE = """WITH o AS (SELECT session_id, count(*) FILTER (WHERE NOT is_test) AS n_orders,
+    sum(total) FILTER (WHERE is_valid AND NOT is_test) AS order_value, sum(total) FILTER (WHERE NOT is_valid AND NOT is_test) AS other_value,
+    string_agg(DISTINCT status, ', ') FILTER (WHERE NOT is_test) AS statuses, any_value(email_l) FILTER (WHERE email_l IS NOT NULL) AS order_email
+    FROM orders_clean WHERE session_id IS NOT NULL GROUP BY 1)"""
+SESS_FROM = " FROM sessions s LEFT JOIN o ON o.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key)"
+
+
+def _csv(v: str | None) -> list[str]:
+    return [x.strip() for x in (v or "").split(",") if x.strip()]
+
+
+def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any"):
+    w, a = sess_where(d_from, d_to, include_excluded)
     if only_excluded:
         w += " AND s.is_excluded"
     if min_stage:
-        w += " AND s.stage >= ?"; a.append(min_stage)
+        w += " AND s.stage >= ?"
+        a.append(min_stage)
     if channel:
-        w += " AND s.channel = ?"; a.append(channel)
+        w += " AND s.channel = ?"
+        a.append(channel)
+    hs = [SESSION_FLAGS[k] for k in _csv(has) if k in SESSION_FLAGS]
+    if hs:
+        w += " AND (" + (" AND " if match == "all" else " OR ").join(hs) + ")"
+    for k in _csv(lacks):
+        if k in SESSION_FLAGS:
+            w += f" AND NOT {SESSION_FLAGS[k]}"
     if search:
         like = f"%{search.lower()}%"
-        w += """ AND (lower(s.session_id) LIKE ? OR lower(s.visitor_key) LIKE ? OR lower(coalesce(s.user_id,'')) LIKE ? OR coalesce(s.ip,'') LIKE ?
-                 OR coalesce(s.phone10,'') LIKE ? OR lower(coalesce(s.city,'')) LIKE ? OR lower(coalesce(u.name,'')) LIKE ? OR lower(s.campaign) LIKE ?)"""
-        a += [like] * 8
-    base = f"FROM sessions s LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key) WHERE {w}"
-    total = one(f"SELECT count(*) n {base}", a)["n"]
-    rows = q(f"""SELECT s.session_id, s.started_at, s.duration_s, s.events, s.pageviews, s.channel, s.source, s.medium, s.campaign, s.landing_path,
-        s.city, s.region, s.country, s.device, s.platform, s.is_app, s.user_id, u.name, s.phone10, s.ip, s.visitor_key, s.key_events, s.stage,
-        s.is_excluded, s.excl_reason {base} ORDER BY s.started_at DESC LIMIT ? OFFSET ?""", [*a, limit, offset])
+        w += f""" AND (lower(s.session_id) LIKE ? OR lower(s.visitor_key) LIKE ? OR lower(coalesce(s.user_id,'')) LIKE ? OR coalesce(s.ip,'') LIKE ?
+                 OR coalesce(s.phone10,'') LIKE ? OR lower(coalesce(s.city,'')) LIKE ? OR lower(coalesce(u.name,'')) LIKE ? OR lower(s.campaign) LIKE ?
+                 OR lower(coalesce({EMAIL}, '')) LIKE ?)"""
+        a += [like] * 9
+    return w, a
+
+
+@app.get("/api/sessions")
+def sessions(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
+             min_stage: int = 0, channel: str | None = None, only_excluded: bool = False, has: str | None = None, lacks: str | None = None,
+             match: str = "any", sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
+    """has / lacks = comma lists of: product, cart, checkout, pay, order, login, quiz, search. match=any|all applies to `has`."""
+    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match)
+    order = SESSION_SORTS.get(sort, SESSION_SORTS["started_at"])
+    d = "ASC" if direction.lower() == "asc" else "DESC"
+    total = one(f"{ORD_CTE} SELECT count(*) n {SESS_FROM} WHERE {w}", a)["n"]
+    rows = q(f"""{ORD_CTE} SELECT s.session_id, s.started_at, s.duration_s, s.events, s.pageviews, s.channel, s.source, s.medium, s.campaign, s.landing_path,
+        s.city, s.region, s.country, s.device, s.platform, s.is_app, s.user_id, u.name, {EMAIL} AS email, s.phone10, s.ip, s.visitor_key, s.key_events, s.stage,
+        s.is_excluded, s.excl_reason, coalesce(o.n_orders, 0) AS order_count, o.order_value, o.other_value AS order_other_value, o.statuses AS order_statuses
+        {SESS_FROM} WHERE {w} ORDER BY {order} {d} NULLS LAST, s.started_at DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 500)), max(0, offset)])
     return {"total": total, "rows": rows}
+
+
+@app.get("/api/sessions/counts")
+def session_counts(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    """Sizes of the one-click presets on the Sessions tab."""
+    w, a = sess_where(date_from, date_to, include_excluded)
+    r = one(f"""{ORD_CTE} SELECT count(*) AS total,
+        count(*) FILTER (WHERE s.f_cart AND NOT {FLAG_ORDER}) AS cart_abandoners, count(*) FILTER (WHERE s.f_checkout AND NOT {FLAG_ORDER}) AS checkout_abandoners,
+        count(*) FILTER (WHERE {FLAG_LOGIN}) AS logged_in, count(*) FILTER (WHERE {FLAG_ORDER}) AS ordered
+        {SESS_FROM} WHERE {w}""", a)
+    return r
 
 
 @app.get("/api/sessions/{session_id}")
@@ -374,25 +441,48 @@ def person_profile(key: str):
             "ips": ips, "orders": orders, "daily": daily}
 
 
-@app.get("/api/users")
-def users(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
-          segment: str | None = None, sort: str = "last_seen", limit: int = 50, offset: int = 0):
+USER_SORTS = {"last_seen": "last_seen", "first_seen": "first_seen", "name": "nullif(lower(name), '')", "city": "nullif(lower(city), '')", "sessions": "sessions", "orders": "orders",
+              "revenue": "revenue", "cart_sessions": "cart_sessions", "segment": "segment", "first_channel": "first_channel", "email": "nullif(lower(email), '')"}
+USER_PRESETS = {"cart_abandoners": "cart_sessions > 0 AND orders = 0", "checkout_abandoners": "checkout_sessions > 0 AND orders = 0",
+                "logged_in": "is_registered", "buyers": "orders > 0", "reachable": "nullif(phone10, '') IS NOT NULL"}
+
+
+def _users_where(d_from, d_to, include_excluded, search=None, segment=None, preset=None):
     w = "timezone('Asia/Kolkata', last_seen)::DATE >= ? AND timezone('Asia/Kolkata', first_seen)::DATE <= ?" + ("" if include_excluded else " AND NOT is_excluded")
-    a = [date_from or "2000-01-01", date_to or "2999-12-31"]
+    a = [d_from or "2000-01-01", d_to or "2999-12-31"]
     if segment:
-        w += " AND segment = ?"; a.append(segment)
+        w += " AND segment = ?"
+        a.append(segment)
+    for k in _csv(preset):
+        if k in USER_PRESETS:
+            w += f" AND ({USER_PRESETS[k]})"
     if search:
         like = f"%{search.lower()}%"
         w += " AND (lower(coalesce(name,'')) LIKE ? OR coalesce(phone10,'') LIKE ? OR lower(coalesce(email,'')) LIKE ? OR lower(person_key) LIKE ? OR lower(coalesce(city,'')) LIKE ?)"
         a += [like] * 5
-    order = {"last_seen": "last_seen DESC", "revenue": "revenue DESC, last_seen DESC", "sessions": "sessions DESC",
-             "first_seen": "first_seen DESC"}.get(sort, "last_seen DESC")
+    return w, a
+
+
+@app.get("/api/users")
+def users(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
+          segment: str | None = None, preset: str | None = None, sort: str = "last_seen", direction: str = "desc", limit: int = 50, offset: int = 0):
+    w, a = _users_where(date_from, date_to, include_excluded, search, segment, preset)
+    order = USER_SORTS.get(sort, "last_seen")
+    d = "ASC" if direction.lower() == "asc" else "DESC"
     total = one(f"SELECT count(*) n FROM users_360 WHERE {w}", a)["n"]
     rows = q(f"""SELECT person_key, user_id, name, phone10, email, is_registered, first_seen, last_seen, sessions, first_channel, first_campaign,
         city, state, device, uses_app, cart_sessions, checkout_sessions, orders, revenue, gender, skin_type, age_bucket, segment, is_excluded
-        FROM users_360 WHERE {w} ORDER BY {order} LIMIT ? OFFSET ?""", [*a, limit, offset])
+        FROM users_360 WHERE {w} ORDER BY {order} {d} NULLS LAST, last_seen DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 500)), max(0, offset)])
     segs = q(f"SELECT segment, count(*) n FROM users_360 WHERE {'TRUE' if include_excluded else 'NOT is_excluded'} GROUP BY 1 ORDER BY 2 DESC")
     return {"total": total, "rows": rows, "segments": segs}
+
+
+@app.get("/api/users/counts")
+def user_counts(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    """Sizes of the one-click presets on the Users tab (person level: someone who later ordered is not an abandoner)."""
+    w, a = _users_where(date_from, date_to, include_excluded)
+    cols = ", ".join(f"count(*) FILTER (WHERE {c}) AS {k}" for k, c in USER_PRESETS.items())
+    return one(f"SELECT count(*) AS total, {cols} FROM users_360 WHERE {w}", a)
 
 
 @app.get("/api/events/catalogue")
@@ -422,7 +512,11 @@ def _check_kind(kind: str):
 
 
 def _reapply():
-    _run_job("apply-exclusions", lambda: transform.run(CON.cursor()))
+    """Exclusion edits only need the flagging steps (about 3 s instead of 15 s). Edits made mid-job are queued."""
+    if JOB["running"]:
+        PENDING["reapply"] = True
+        return
+    _run_job("apply-exclusions", lambda: transform.run(CON.cursor(), flags_only=True))
 
 
 @app.get("/api/exclusions")
@@ -444,7 +538,7 @@ def add_exclusions(body: ExclIn, apply: bool = True):
                 continue
             ids.append(CON.execute("INSERT INTO exclusions (kind, value, note, active) VALUES (?,?,?,?) RETURNING id",
                                    [body.kind, v, body.note, body.active]).fetchone()[0])
-    if apply and ids and not JOB["running"]:
+    if apply and ids:
         _reapply()
     return {"added": len(ids), "ids": ids, "job": JOB}
 
@@ -464,7 +558,7 @@ def update_exclusion(eid: int, body: ExclPatch, apply: bool = True):
         if not CON.execute("SELECT 1 FROM exclusions WHERE id=?", [eid]).fetchone():
             raise HTTPException(404, "not found")
         CON.execute(f"UPDATE exclusions SET {', '.join(sets)}, updated_at = now() WHERE id = ?", [*args, eid])
-    if apply and not JOB["running"]:
+    if apply:
         _reapply()
     return {"ok": True, "job": JOB}
 
@@ -473,7 +567,7 @@ def update_exclusion(eid: int, body: ExclPatch, apply: bool = True):
 def delete_exclusion(eid: int, apply: bool = True):
     with DB_LOCK:
         CON.execute("DELETE FROM exclusions WHERE id=?", [eid])
-    if apply and not JOB["running"]:
+    if apply:
         _reapply()
     return {"ok": True, "job": JOB}
 
@@ -645,6 +739,29 @@ def insights(date_from: str | None = None, date_to: str | None = None, include_e
     if qa and qa["reachable"] >= 20:
         add("warn", f"{qa['reachable']} people finished the quiz, left a phone number, and never bought",
             f"{qa['people']} quiz finishers in the last 60 days have no order; these {qa['reachable']} can be contacted. Quiz users convert far better than other visitors.", "audiences")
+    # 11. online payments that never complete (a direct revenue leak)
+    ex = "" if include_excluded else " AND NOT is_excluded"
+    pay = one(f"""SELECT count(*) AS attempts, count(*) FILTER (WHERE is_valid) AS ok FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND NOT is_test{ex}
+                  AND payment_method IS NOT NULL AND payment_method NOT ILIKE 'COD%'""", [date_from or "2000-01-01", date_to or "2999-12-31"])
+    if pay["attempts"] >= 10 and pay["ok"] / pay["attempts"] < 0.6:
+        reason = one(f"""SELECT payment_failed_reason AS r, count(*) AS n FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND NOT is_test{ex} AND NOT is_placed
+                         AND payment_failed_reason IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 1""", [date_from or "2000-01-01", date_to or "2999-12-31"])
+        lost = pay["attempts"] - pay["ok"]
+        add("bad", f"Only {pay['ok'] / pay['attempts'] * 100:.0f}% of online payments complete",
+            f"{lost} of {pay['attempts']} online orders were cancelled or abandoned at payment" + (f"; most common reason: “{reason['r']}”" if reason else "") + ". Cash on delivery orders almost always complete.",
+            "orders", {"tab": "analytics"})
+    # 12. Meta Ads: what the spend bought
+    if one("SELECT count(*) AS n FROM raw_meta_insights")["n"]:
+        mt = _meta_rows(date_from, date_to, include_excluded)
+        tot = _meta_totals(mt)
+        if tot["spend"] >= 500:
+            wasted = [r for r in mt if r["verdict"] == "Wasting spend"]
+            bl = _meta_blended(date_from, date_to, include_excluded, tot["spend"])
+            roas = f"{bl['roas']:.2f}" if bl["roas"] is not None else "n/a"
+            add("warn" if (bl["orders"] == 0 or (bl["roas"] or 0) < 1) else "good",
+                f"Meta Ads spent ₹{tot['spend']:,.0f}, bringing {bl['orders']} tracked order{'s' if bl['orders'] != 1 else ''} (₹{bl['revenue']:,.0f})",
+                f"Return on ad spend {roas}× across all Paid Meta traffic; {tot['carts']} carts from {tot['sessions']:,} sessions matched to campaigns."
+                + (f" {len(wasted)} campaign{'s' if len(wasted) != 1 else ''} spent ₹{sum(r['spend'] for r in wasted):,.0f} with no add-to-carts." if wasted else ""), "meta")
     return {"kpis": k, "prev": prev, "prev_range": pr, "insights": out}
 
 
@@ -791,16 +908,20 @@ def audiences(include_excluded: bool = False):
 
 
 @app.get("/api/audiences/{aid}/people")
-def audience_people(aid: str, include_excluded: bool = False, only_reachable: bool = False, limit: int = 50, offset: int = 0):
+def audience_people(aid: str, include_excluded: bool = False, only_reachable: bool = False, sort: str = "reach", direction: str = "desc", limit: int = 50, offset: int = 0):
     spec = next((a for a in AUDIENCES if a[0] == aid), None)
     if not spec:
         raise HTTPException(404, "unknown audience")
     base = _audience_base(include_excluded)
     cond = spec[4] + (" AND p.phone10 IS NOT NULL" if only_reachable else "")
+    sorts = {"last_seen": "p.last_seen", "name": "lower(p.name)", "city": "lower(p.city)", "orders": "p.orders", "revenue": "p.revenue",
+             "last_cart_value": "p.last_cart_value", "first_channel": "p.first_channel", "days_seen": "p.days_seen"}
+    dd = "ASC" if direction.lower() == "asc" else "DESC"
+    order = f"{sorts[sort]} {dd}" if sort in sorts else "(p.phone10 IS NULL)"
     total = one(f"SELECT count(*) n FROM ({base}) p WHERE {cond}")["n"]
     rows = q(f"""SELECT p.person_key, p.name, p.phone10, p.email, p.city, p.state, p.segment, p.first_channel, p.orders, p.revenue, p.skin_type, p.age_bucket,
         p.last_seen, p.last_order_at, p.last_checkout_at, p.last_cart_value, p.days_seen, p.days_order
-        FROM ({base}) p WHERE {cond} ORDER BY (p.phone10 IS NULL), p.last_seen DESC LIMIT ? OFFSET ?""", [limit, offset])
+        FROM ({base}) p WHERE {cond} ORDER BY {order} NULLS LAST, p.last_seen DESC LIMIT ? OFFSET ?""", [limit, offset])
     return {"id": aid, "title": spec[1], "description": spec[2], "action": spec[3], "total": total, "rows": rows}
 
 
@@ -890,6 +1011,500 @@ def report(dimension: str = "channel", date_from: str | None = None, date_to: st
     groups = one(f"SELECT count(*) AS n FROM (SELECT {expr} AS g {base}{sq} GROUP BY 1 HAVING count(*) >= ?)", [*a, *sa, ms])["n"]
     totals = one(f"SELECT {REPORT_METRICS} {base}{sq}", [*a, *sa])
     return {"dimension": dimension, "rows": [_derive(r) for r in rows], "totals": _derive(totals) if totals else None, "groups": groups}
+
+
+
+# ------------------------------------------------------------------ exclusions: bulk add, share (export / import), inventory
+class BulkItem(BaseModel):
+    kind: str
+    value: str
+    note: str | None = None
+    active: bool = True
+
+
+class BulkIn(BaseModel):
+    items: list[BulkItem]
+    apply: bool = True
+
+
+class ImportIn(BaseModel):
+    exclusions: list[BulkItem]
+    dry_run: bool = True
+
+
+def _classify(items: list[BulkItem]) -> tuple[list[BulkItem], int, list[dict]]:
+    """Split into (new, duplicate count, invalid rows) against what is already in the list."""
+    with DB_LOCK:
+        have = {(k, str(v).lower()) for k, v in CON.execute("SELECT kind, value FROM exclusions").fetchall()}
+    new, dup, invalid, seen = [], 0, [], set()
+    for it in items:
+        kind, value = it.kind.strip(), it.value.strip()
+        if kind not in EXCLUSION_KINDS:
+            invalid.append({"kind": it.kind, "value": it.value, "why": "unknown type"})
+        elif not value or len(value) > 300:
+            invalid.append({"kind": kind, "value": value[:40], "why": "empty or too long"})
+        elif (kind, value.lower()) in have or (kind, value.lower()) in seen:
+            dup += 1
+        else:
+            seen.add((kind, value.lower()))
+            new.append(BulkItem(kind=kind, value=value, note=it.note, active=it.active))
+    return new, dup, invalid
+
+
+def _insert_exclusions(items: list[BulkItem], note_suffix: str = "") -> int:
+    with DB_LOCK:
+        for it in items:
+            CON.execute("INSERT INTO exclusions (kind, value, note, active, source) VALUES (?,?,?,?, 'manual')",
+                        [it.kind, it.value, ((it.note or "") + note_suffix).strip() or None, it.active]).fetchall()
+    return len(items)
+
+
+@app.post("/api/exclusions/bulk")
+def bulk_exclusions(body: BulkIn):
+    """Add many exclusions at once (one rebuild, not one per row)."""
+    if len(body.items) > 5000:
+        raise HTTPException(400, "too many items (max 5000)")
+    new, dup, invalid = _classify(body.items)
+    added = _insert_exclusions(new)
+    if body.apply and added:
+        _reapply()
+    return {"added": added, "skipped": dup, "invalid": invalid[:20], "job": JOB}
+
+
+@app.get("/api/exclusions/export")
+def export_exclusions(format: str = "json", include_builtin: bool = False):
+    """Download the exclusion list as a file that another dashboard can import."""
+    rows = q("SELECT kind, value, note, active, source FROM exclusions ORDER BY kind, lower(value)")
+    if not include_builtin:
+        rows = [r for r in rows if r["source"] != "default"]
+    stamp = date.today().isoformat()
+    if format == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["kind", "value", "note", "active"])
+        for r in rows:
+            w.writerow([r["kind"], r["value"], r["note"] or "", "true" if r["active"] else "false"])
+        return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="roopsee-exclusions-{stamp}.csv"'})
+    payload = {"format": "roopsee-exclusions", "version": 1, "exported_at": datetime.now().isoformat(timespec="seconds"), "count": len(rows),
+               "exclusions": [{"kind": r["kind"], "value": r["value"], "note": r["note"], "active": bool(r["active"])} for r in rows]}
+    return Response(json.dumps(payload, indent=2, ensure_ascii=False), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="roopsee-exclusions-{stamp}.json"'})
+
+
+@app.post("/api/exclusions/import")
+def import_exclusions(body: ImportIn):
+    """dry_run=true previews (new / already present / invalid); dry_run=false merges the new ones and rebuilds once."""
+    if len(body.exclusions) > 5000:
+        raise HTTPException(400, "too many items (max 5000)")
+    new, dup, invalid = _classify(body.exclusions)
+    if not body.dry_run and new:
+        _insert_exclusions(new, " [imported]")
+        _reapply()
+    return {"applied": not body.dry_run, "new": len(new), "duplicates": dup, "invalid": invalid[:20], "invalid_count": len(invalid),
+            "preview": [{"kind": n.kind, "value": n.value, "note": n.note} for n in new[:50]]}
+
+
+@app.get("/api/exclusions/inventory")
+def exclusion_inventory():
+    """Every identifier we have reason to think is internal / automated, with how much of it is still counted in the numbers."""
+    items: dict = {}
+
+    def add(kind, value, label, reason, total=0, counted=0, last=None, shared=None):
+        if value is None or str(value).strip() == "":
+            return
+        k = (kind, str(value).lower())
+        it = items.setdefault(k, {"kind": kind, "value": str(value), "label": label, "reasons": [], "sessions": 0, "counted": 0, "last_seen": None, "shared": None})
+        if reason not in it["reasons"]:
+            it["reasons"].append(reason)
+        it["label"] = it["label"] or label
+        it["sessions"] = max(it["sessions"], total or 0)
+        it["counted"] = max(it["counted"], counted or 0)
+        if last and (not it["last_seen"] or last > it["last_seen"]):
+            it["last_seen"] = last
+        if shared is not None:
+            it["shared"] = shared
+
+    # 1. staff accounts (admin / rider / doctor) and their contact details
+    ustat = {r["user_id"]: r for r in q("SELECT user_id, count(*) n, count(*) FILTER (WHERE NOT is_excluded) c, max(started_at) last FROM sessions WHERE user_id IS NOT NULL GROUP BY 1")}
+    for r in q("""SELECT lower(id) uid, name, role, nullif(lower(email), '') email,
+                  nullif(right(regexp_replace(coalesce(phone_no, ''), '[^0-9]', '', 'g'), 10), '') phone FROM raw_users WHERE role IN ('admin','rider','doctor')"""):
+        st = ustat.get(r["uid"], {})
+        why = f"staff account ({r['role']})"
+        n, c, last = st.get("n", 0), st.get("c", 0), st.get("last")
+        add("user_id", r["uid"], r["name"], why, n, c, last)
+        add("email", r["email"], r["name"], why + " email", n, c, last)
+        add("phone", r["phone"], r["name"], why + " phone", n, c, last)
+        if r["name"] and len(r["name"].strip()) > 2:
+            add("name", r["name"].strip(), r["name"], why + " name", n, c, last)
+
+    # 2. company-domain emails (from the active @domain exclusions)
+    doms = [r["value"].lower() for r in q("SELECT value FROM exclusions WHERE active AND kind = 'email' AND value LIKE '@%'")]
+    for d in doms:
+        for r in q("SELECT lower(id) uid, name, lower(email) email FROM raw_users WHERE lower(email) LIKE ?", [f"%{d}"]):
+            st = ustat.get(r["uid"], {})
+            add("email", r["email"], r["name"], f"company email ({d})", st.get("n", 0), st.get("c", 0), st.get("last"))
+
+    # 3. anything seen inside /admin: browsers, IPs, phones
+    for r in q("""WITH adm AS (SELECT visitor_key, count(DISTINCT session_id) internal FROM events_clean WHERE page_type = 'admin' GROUP BY 1)
+                  SELECT a.visitor_key, a.internal, count(s.session_id) n, count(s.session_id) FILTER (WHERE NOT s.is_excluded) c, max(s.started_at) last
+                  FROM adm a LEFT JOIN sessions s ON s.visitor_key = a.visitor_key GROUP BY a.visitor_key, a.internal"""):
+        add("visitor_id", r["visitor_key"], None, f"opened /admin ({r['internal']} sessions)", r["n"], r["c"], r["last"])
+    for r in q("""WITH adm AS (SELECT ip, count(DISTINCT session_id) internal FROM events_clean WHERE page_type = 'admin' AND ip IS NOT NULL GROUP BY 1)
+                  SELECT a.ip, a.internal, count(s.session_id) n, count(s.session_id) FILTER (WHERE NOT s.is_excluded) c, count(DISTINCT s.visitor_key) browsers, max(s.started_at) last
+                  FROM adm a LEFT JOIN sessions s ON s.ip = a.ip GROUP BY a.ip, a.internal"""):
+        add("ip", r["ip"], None, f"used inside /admin ({r['internal']} sessions)", r["n"], r["c"], r["last"], r["browsers"])
+    for r in q("""WITH adm AS (SELECT phone10, count(DISTINCT session_id) internal FROM events_clean WHERE page_type = 'admin' AND phone10 IS NOT NULL GROUP BY 1)
+                  SELECT a.phone10, a.internal, count(s.session_id) n, count(s.session_id) FILTER (WHERE NOT s.is_excluded) c, max(s.started_at) last
+                  FROM adm a LEFT JOIN sessions s ON s.phone10 = a.phone10 GROUP BY a.phone10, a.internal"""):
+        add("phone", r["phone10"], None, f"used inside /admin ({r['internal']} sessions)", r["n"], r["c"], r["last"])
+
+    # 4. bot-like anonymous browsers: many very short sessions
+    for r in q("""SELECT visitor_key, count(*) n, count(*) FILTER (WHERE NOT is_excluded) c, avg(duration_s) avg_s, max(started_at) last, mode(ip) top_ip
+                  FROM sessions WHERE user_id IS NULL GROUP BY 1 HAVING count(*) >= 30 AND avg(duration_s) < 5"""):
+        why = f"bot-like: {r['n']} sessions averaging {r['avg_s']:.1f}s"
+        add("visitor_id", r["visitor_key"], None, why, r["n"], r["c"], r["last"])
+        if r["top_ip"]:
+            ipst = one("SELECT count(*) n, count(*) FILTER (WHERE NOT is_excluded) c, count(DISTINCT visitor_key) b FROM sessions WHERE ip = ?", [r["top_ip"]])
+            add("ip", r["top_ip"], None, why, ipst["n"], ipst["c"], r["last"], ipst["b"])
+
+    listed = {(r["kind"], str(r["value"]).lower()) for r in q("SELECT kind, value FROM exclusions WHERE active")}
+    rows = []
+    for it in items.values():
+        it["reason"] = " · ".join(it["reasons"])
+        it["in_list"] = (it["kind"], it["value"].lower()) in listed
+        it["risky"] = it["kind"] == "ip" and (it["shared"] or 0) >= 4  # shared IP (carrier / office): may belong to many customers
+        rows.append(it)
+    rows.sort(key=lambda r: (-r["counted"], -r["sessions"], r["kind"]))
+    by_kind: dict = {}
+    for r in rows:
+        by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
+    return {"rows": rows, "summary": {"total": len(rows), "in_list": sum(r["in_list"] for r in rows), "still_counted": sum(1 for r in rows if r["counted"] > 0 and not r["in_list"]), "by_kind": by_kind}}
+
+
+
+# ------------------------------------------------------------------ orders: list, analytics, detail
+ORDER_SORTS = {"ts": "o.ts", "total": "o.total", "products_total": "o.products_total", "status": "o.status", "payment_method": "o.payment_method",
+               "city": "nullif(lower(o.city), '')", "customer_name": "nullif(lower(o.customer_name), '')", "coupon_code": "o.coupon_code",
+               "items_count": "o.items_count", "nth_order": "o.nth_order", "delivery_fee": "o.delivery_fee"}
+ORDER_SCOPES = {"sales": "o.is_valid", "all": "NOT o.is_test", "unpaid": "(NOT o.is_placed AND NOT o.is_test)", "internal": "o.is_excluded"}
+ORDER_ITEMS = "(SELECT string_agg(l.product_name || CASE WHEN l.qty > 1 THEN ' x' || l.qty ELSE '' END, ' | ') FROM order_lines l WHERE l.order_id = o.order_id)"
+
+
+def _in(col: str, values: list[str]) -> tuple[str, list]:
+    return f"{col} IN ({', '.join('?' for _ in values)})", list(values)
+
+
+def _orders_where(d_from, d_to, include_excluded, scope="sales", status=None, payment=None, coupon=None, search=None):
+    w = ["o.date_ist BETWEEN ? AND ?", ORDER_SCOPES.get(scope, ORDER_SCOPES["sales"])]
+    a = [d_from or "2000-01-01", d_to or "2999-12-31"]
+    if scope != "internal" and not include_excluded:
+        w.append("NOT o.is_excluded")
+    if _csv(status):
+        c, v = _in("o.status", _csv(status))
+        w.append(c)
+        a += v
+    if _csv(payment):
+        c, v = _in("coalesce(o.payment_method, '(not recorded)')", _csv(payment))
+        w.append(c)
+        a += v
+    if coupon:
+        w.append("coalesce(split_part(o.coupon_code, ',', 1), '(no coupon)') = ?")
+        a.append(coupon)
+    if search:
+        like = f"%{search.lower()}%"
+        w.append("""(lower(o.order_id) LIKE ? OR coalesce(o.phone10, '') LIKE ? OR lower(coalesce(o.customer_name, '')) LIKE ? OR lower(coalesce(o.email_l, '')) LIKE ?
+                    OR lower(coalesce(o.city, '')) LIKE ? OR coalesce(o.pincode, '') LIKE ? OR lower(coalesce(o.coupon_code, '')) LIKE ?)""")
+        a += [like] * 7
+    return " AND ".join(w), a
+
+
+@app.get("/api/orders")
+def orders_list(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, scope: str = "sales", status: str | None = None,
+                payment: str | None = None, coupon: str | None = None, search: str | None = None, sort: str = "ts", direction: str = "desc", limit: int = 50, offset: int = 0):
+    """scope: sales (valid orders) | all (every real order incl. unpaid) | unpaid (cancelled / payment pending) | internal (test, staff, manually excluded)."""
+    w, a = _orders_where(date_from, date_to, include_excluded, scope, status, payment, coupon, search)
+    order = ORDER_SORTS.get(sort, "o.ts")
+    d = "ASC" if direction.lower() == "asc" else "DESC"
+    summ = one(f"SELECT count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, coalesce(avg(o.total), 0) AS aov FROM orders_clean o WHERE {w}", a)
+    rows = q(f"""SELECT o.order_id, o.ts, o.customer_name, o.phone10, o.email_l AS email, o.city, o.state, o.pincode, o.items_count, {ORDER_ITEMS} AS items,
+        o.total, o.products_total, o.coupon_code, o.coupon_discount, o.delivery_fee, o.wallet_amount_used, o.payment_method, o.payment_status, o.status,
+        o.payment_failed_reason, o.nth_order, o.session_id, o.channel, o.campaign, o.device, o.rider_name, o.delivered_at, o.user_id,
+        o.is_valid, o.is_test, o.is_staff_order, o.is_excluded
+        FROM orders_clean o WHERE {w} ORDER BY {order} {d} NULLS LAST, o.ts DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 500)), max(0, offset)])
+    opts = {"statuses": [r["status"] for r in q("SELECT status, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC")],
+            "payment_methods": [r["m"] for r in q("SELECT coalesce(payment_method, '(not recorded)') AS m, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC")],
+            "coupons": [r["c"] for r in q("SELECT coalesce(split_part(coupon_code, ',', 1), '(no coupon)') AS c, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC LIMIT 30")]}
+    return {"total": summ["orders"], "summary": summ, "rows": rows, "options": opts}
+
+
+def _order_kpis(d_from, d_to, include_excluded) -> dict:
+    ex = "" if include_excluded else " AND NOT o.is_excluded"
+    k = one(f"""SELECT count(*) AS attempts, count(*) FILTER (WHERE o.is_valid) AS orders, coalesce(sum(o.total) FILTER (WHERE o.is_valid), 0) AS gmv,
+        count(*) FILTER (WHERE o.status = 'payment_cancelled') AS cancelled, count(*) FILTER (WHERE o.status = 'payment_pending') AS pending,
+        count(*) FILTER (WHERE o.is_valid AND o.payment_method ILIKE 'COD%') AS cod_orders,
+        count(*) FILTER (WHERE o.is_valid AND coalesce(o.payment_method, '') NOT ILIKE 'COD%') AS online_orders,
+        coalesce(sum(o.coupon_discount) FILTER (WHERE o.is_valid), 0) AS coupon_discount, coalesce(sum(o.products_total) FILTER (WHERE o.is_valid), 0) AS products_total,
+        coalesce(sum(o.delivery_fee) FILTER (WHERE o.is_valid), 0) AS delivery_fees, coalesce(sum(o.wallet_amount_used) FILTER (WHERE o.is_valid), 0) AS wallet_used,
+        count(*) FILTER (WHERE o.is_valid AND o.nth_order = 1) AS first_orders, count(*) FILTER (WHERE o.is_valid AND o.nth_order > 1) AS repeat_orders,
+        count(*) FILTER (WHERE o.is_valid AND o.delivered_at IS NOT NULL) AS delivered,
+        median(date_diff('minute', o.ts, o.delivered_at)) FILTER (WHERE o.is_valid AND o.delivered_at IS NOT NULL) / 60.0 AS median_delivery_h
+        FROM orders_clean o WHERE o.date_ist BETWEEN ? AND ? AND NOT o.is_test{ex}""", [d_from or "2000-01-01", d_to or "2999-12-31"])
+    k["aov"] = ratio(k["gmv"], k["orders"]) if False else (round(k["gmv"] / k["orders"], 2) if k["orders"] else 0)
+    k["cancel_rate"] = ratio(k["cancelled"], k["attempts"])
+    k["cod_share"] = ratio(k["cod_orders"], k["orders"])
+    k["repeat_share"] = ratio(k["repeat_orders"], k["orders"])
+    k["discount_pct"] = ratio(k["coupon_discount"], k["products_total"])
+    return k
+
+
+def _order_series(lo: str, hi: str, include_excluded: bool) -> dict:
+    ex = "" if include_excluded else " AND NOT o.is_excluded"
+    rows = {str(r["d"]): r for r in q(f"""SELECT o.date_ist AS d, count(*) AS attempts, count(*) FILTER (WHERE o.is_valid) AS orders,
+        coalesce(sum(o.total) FILTER (WHERE o.is_valid), 0) AS gmv, count(*) FILTER (WHERE o.status = 'payment_cancelled') AS cancelled
+        FROM orders_clean o WHERE o.date_ist BETWEEN ? AND ? AND NOT o.is_test{ex} GROUP BY 1""", [lo, hi])}
+    dates, m = [], {k: [] for k in ("orders", "gmv", "aov", "cancelled", "attempts")}
+    d, end = date.fromisoformat(lo), date.fromisoformat(hi)
+    while d <= end:
+        k = d.isoformat()
+        r = rows.get(k, {})
+        o, g = r.get("orders", 0), float(r.get("gmv", 0) or 0)
+        dates.append(k)
+        m["orders"].append(o)
+        m["gmv"].append(round(g, 2))
+        m["aov"].append(round(g / o, 2) if o else 0)
+        m["cancelled"].append(r.get("cancelled", 0))
+        m["attempts"].append(r.get("attempts", 0))
+        d += timedelta(days=1)
+    return {"dates": dates, "m": m}
+
+
+@app.get("/api/orders/analytics")
+def orders_analytics(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    lo = date_from or str(one("SELECT min(date_ist) AS d FROM orders_clean")["d"])
+    hi = date_to or str(one("SELECT max(date_ist) AS d FROM orders_clean")["d"])
+    pr = prev_range(date_from, date_to)
+    kpis = _order_kpis(date_from, date_to, include_excluded)
+    prev = _order_kpis(pr[0], pr[1], include_excluded) if pr else None
+    cur = _order_series(lo, hi, include_excluded)
+    pser = _order_series(pr[0], pr[1], include_excluded) if pr else None
+    w = "o.date_ist BETWEEN ? AND ? AND NOT o.is_test" + ("" if include_excluded else " AND NOT o.is_excluded")
+    a = [date_from or "2000-01-01", date_to or "2999-12-31"]
+    status = q(f"SELECT o.status, count(*) AS n, coalesce(sum(o.total), 0) AS gmv FROM orders_clean o WHERE {w} GROUP BY 1 ORDER BY n DESC", a)
+    payment = q(f"""SELECT coalesce(o.payment_method, '(not recorded)') AS method, count(*) AS attempts, count(*) FILTER (WHERE o.is_valid) AS orders,
+        coalesce(sum(o.total) FILTER (WHERE o.is_valid), 0) AS gmv, coalesce(avg(o.total) FILTER (WHERE o.is_valid), 0) AS aov,
+        count(*) FILTER (WHERE o.status = 'payment_cancelled') AS cancelled FROM orders_clean o WHERE {w} GROUP BY 1 ORDER BY attempts DESC""", a)
+    failures = q(f"SELECT coalesce(o.payment_failed_reason, '(no reason recorded)') AS reason, count(*) AS n FROM orders_clean o WHERE {w} AND NOT o.is_placed GROUP BY 1 ORDER BY n DESC LIMIT 8", a)
+    coupons = q(f"""SELECT coalesce(split_part(o.coupon_code, ',', 1), '(no coupon)') AS coupon, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov,
+        avg(o.coupon_discount) AS avg_discount FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC LIMIT 10""", a)
+    cities = q(f"SELECT coalesce(o.city, 'Unknown') AS city, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC LIMIT 10", a)
+    pins = q(f"SELECT coalesce(o.pincode, 'Unknown') AS pincode, any_value(o.city) AS city, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC LIMIT 10", a)
+    hours = q(f"""SELECT extract(dow FROM o.ts_ist)::INT AS dow, extract(hour FROM o.ts_ist)::INT AS hour, count(*) AS orders FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1, 2""", a)
+    customers = q(f"""SELECT CASE WHEN o.nth_order = 1 THEN 'First order' ELSE 'Repeat order' END AS kind, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov
+        FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY 1""", a)
+    channels = q(f"SELECT coalesce(o.channel, 'Unattributed') AS channel, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC", a)
+    buckets = q(f"""SELECT CASE WHEN o.total < 300 THEN '1. under 300' WHEN o.total < 500 THEN '2. 300-499' WHEN o.total < 800 THEN '3. 500-799' WHEN o.total < 1200 THEN '4. 800-1199'
+        ELSE '5. 1200+' END AS band, count(*) AS orders FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY 1""", a)
+    delivery = one(f"""SELECT count(*) FILTER (WHERE o.delivered_at IS NOT NULL) AS delivered,
+        count(*) FILTER (WHERE o.delivered_at IS NOT NULL AND date_diff('hour', o.ts, o.delivered_at) <= 24) AS within_24h,
+        count(*) FILTER (WHERE o.delivered_at IS NOT NULL AND date_diff('hour', o.ts, o.delivered_at) <= 48) AS within_48h,
+        median(date_diff('minute', o.ts, o.delivered_at)) FILTER (WHERE o.delivered_at IS NOT NULL) / 60.0 AS median_h,
+        median(date_diff('minute', o.ts, o.picked_up_at)) FILTER (WHERE o.picked_up_at IS NOT NULL) / 60.0 AS median_pickup_h
+        FROM orders_clean o WHERE {w} AND o.is_valid""", a)
+    riders = q(f"""SELECT coalesce(o.rider_name, 'Unassigned') AS rider, count(*) AS orders, count(*) FILTER (WHERE o.delivered_at IS NOT NULL) AS delivered,
+        median(date_diff('minute', o.ts, o.delivered_at)) FILTER (WHERE o.delivered_at IS NOT NULL) / 60.0 AS median_h
+        FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC LIMIT 8""", a)
+    return {"kpis": kpis, "prev": prev, "prev_range": pr, "dates": cur["dates"], "current": cur["m"], "prev_dates": pser["dates"] if pser else None, "previous": pser["m"] if pser else None,
+            "status": status, "payment": payment, "failures": failures, "coupons": coupons, "cities": cities, "pincodes": pins, "hours": hours,
+            "customers": customers, "channels": channels, "buckets": buckets, "delivery": delivery, "riders": riders}
+
+
+@app.get("/api/orders/{order_id}")
+def order_detail(order_id: str):
+    rows = q("SELECT * FROM orders_clean WHERE order_id = ?", [order_id.lower()])
+    if not rows:
+        raise HTTPException(404, "order not found")
+    o = rows[0]
+    items = q("SELECT product_id, product_name, brand, product_type, qty, price, line_total FROM order_lines WHERE order_id = ? ORDER BY line_total DESC", [o["order_id"]])
+    steps = [("Order placed", o["ts"]), ("Payment received", o["paid_at"]), ("Picked up", o["picked_up_at"]), ("Out for delivery", o["delivery_started_at"]),
+             ("Delivered", o["delivered_at"]), ("Cash collected", o["cod_collected_at"])]
+    timeline = sorted(({"label": l, "at": t} for l, t in steps if t), key=lambda x: x["at"])
+    customer = one("SELECT person_key, name, phone10, email, segment, sessions, orders, revenue, first_channel FROM users_360 WHERE user_id = ?", [o["user_id"]]) if o["user_id"] else {}
+    others = q("SELECT order_id, ts, total, status, nth_order FROM orders_clean WHERE user_id = ? AND order_id <> ? AND NOT is_test ORDER BY ts DESC LIMIT 20", [o["user_id"], o["order_id"]]) if o["user_id"] else []
+    session = one("SELECT session_id, started_at, channel, source, medium, campaign, landing_path, device, city FROM sessions WHERE session_id = ?", [o["session_id"]]) if o["session_id"] else {}
+    return {"order": o, "items": items, "timeline": timeline, "customer": customer or None, "other_orders": others, "session": session or None}
+
+
+
+# ------------------------------------------------------------------ Meta Ads (spend from Meta joined to our own sessions and orders)
+def _meta_rows(d_from, d_to, include_excluded) -> list[dict]:
+    lo, hi = d_from or "2000-01-01", d_to or "2999-12-31"
+    mrows = q("""SELECT campaign_id, any_value(campaign_name) AS name, sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks, sum(link_clicks) AS link_clicks,
+                 sum(purchases) AS meta_purchases, sum(purchase_value) AS meta_value, sum(add_to_cart) AS meta_atc, sum(initiate_checkout) AS meta_checkout,
+                 min(date) AS first_day, max(date) AS last_day FROM raw_meta_insights WHERE date BETWEEN ? AND ? GROUP BY campaign_id""", [lo, hi])
+    ex = "" if include_excluded else " AND NOT s.is_excluded"
+    ours = {r["cid"]: r for r in q(f"""SELECT sm.meta_campaign_id AS cid, count(*) AS sessions, count(DISTINCT s.visitor_key) AS visitors, count(*) FILTER (WHERE s.f_cart) AS carts,
+        count(*) FILTER (WHERE s.f_checkout) AS checkouts, count(*) FILTER (WHERE s.f_quiz_done) AS quiz FROM sessions s JOIN session_meta sm USING (session_id)
+        WHERE s.date_ist BETWEEN ? AND ?{ex} GROUP BY 1""", [lo, hi])}
+    oex = "" if include_excluded else " AND NOT o.is_excluded"
+    ords = {r["cid"]: r for r in q(f"""SELECT sm.meta_campaign_id AS cid, count(*) AS orders, coalesce(sum(o.total), 0) AS revenue FROM orders_clean o
+        JOIN session_meta sm ON sm.session_id = o.session_id WHERE o.is_valid AND o.date_ist BETWEEN ? AND ?{oex} GROUP BY 1""", [lo, hi])}
+    ents = {r["entity_id"]: r for r in q("SELECT entity_id, effective_status, objective, daily_budget FROM raw_meta_entities WHERE entity_type = 'campaign'")}
+    out = []
+    for m in mrows:
+        o, w, e = ours.get(m["campaign_id"], {}), ords.get(m["campaign_id"], {}), ents.get(m["campaign_id"], {})
+        r = {**m, "sessions": o.get("sessions", 0), "visitors": o.get("visitors", 0), "carts": o.get("carts", 0), "checkouts": o.get("checkouts", 0), "quiz": o.get("quiz", 0),
+             "orders": w.get("orders", 0), "revenue": float(w.get("revenue", 0) or 0), "status": e.get("effective_status"), "objective": e.get("objective"), "daily_budget": e.get("daily_budget")}
+        out.append(_meta_derive(r))
+    return out
+
+
+def _meta_derive(r: dict) -> dict:
+    sp = float(r["spend"] or 0)
+    r["spend"] = sp
+    r["ctr"] = ratio(r["clicks"], r["impressions"])
+    r["cpc"] = round(sp / r["clicks"], 2) if r["clicks"] else None
+    r["cpm"] = round(sp / r["impressions"] * 1000, 2) if r["impressions"] else None
+    r["meta_roas"] = round((r["meta_value"] or 0) / sp, 2) if sp else None
+    r["our_roas"] = round(r["revenue"] / sp, 2) if sp else None
+    r["cost_per_session"] = round(sp / r["sessions"], 2) if r["sessions"] else None
+    r["cost_per_cart"] = round(sp / r["carts"], 2) if r["carts"] else None
+    r["cost_per_order"] = round(sp / r["orders"], 2) if r["orders"] else None
+    r["cart_rate"] = ratio(r["carts"], r["sessions"])
+    r["click_to_session"] = ratio(r["sessions"], r["link_clicks"]) if r["link_clicks"] else None
+    if r["orders"] and r["our_roas"] and r["our_roas"] >= 1:
+        r["verdict"] = "Paying back"
+    elif r["orders"]:
+        r["verdict"] = "Converting"
+    elif sp >= 300 and r["carts"] == 0:
+        r["verdict"] = "Wasting spend"
+    elif r["carts"]:
+        r["verdict"] = "Promising"
+    else:
+        r["verdict"] = "Too early"
+    return r
+
+
+def _meta_totals(rows: list[dict]) -> dict:
+    keys = ("spend", "impressions", "clicks", "link_clicks", "meta_purchases", "meta_value", "meta_atc", "sessions", "visitors", "carts", "checkouts", "quiz", "orders", "revenue")
+    t = {k: sum((r[k] or 0) for r in rows) for k in keys}
+    return _meta_derive({**t, "meta_checkout": 0})
+
+
+def _meta_blended(d_from, d_to, include_excluded, spend: float) -> dict:
+    """Orders from ALL Paid Meta traffic, even sessions whose campaign tag cannot be matched to a Meta campaign (so ROAS is not understated)."""
+    oex = "" if include_excluded else " AND NOT o.is_excluded"
+    r = one(f"""SELECT count(*) AS orders, coalesce(sum(o.total), 0) AS revenue FROM orders_clean o JOIN sessions s ON s.session_id = o.session_id
+                WHERE s.channel = 'Paid Meta' AND o.is_valid AND o.date_ist BETWEEN ? AND ?{oex}""", [d_from or "2000-01-01", d_to or "2999-12-31"])
+    rev = float(r["revenue"] or 0)
+    return {"spend": spend, "orders": r["orders"], "revenue": rev, "roas": round(rev / spend, 2) if spend else None,
+            "cost_per_order": round(spend / r["orders"], 2) if r["orders"] else None}
+
+
+def _meta_series(lo: str, hi: str, include_excluded: bool) -> dict:
+    ex = "" if include_excluded else " AND NOT s.is_excluded"
+    oex = "" if include_excluded else " AND NOT o.is_excluded"
+    md = {str(r["d"]): r for r in q("SELECT date AS d, sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks, sum(link_clicks) AS link_clicks FROM raw_meta_insights WHERE date BETWEEN ? AND ? GROUP BY 1", [lo, hi])}
+    sd = {str(r["d"]): r for r in q(f"""SELECT s.date_ist AS d, count(*) AS sessions, count(*) FILTER (WHERE s.f_cart) AS carts FROM sessions s JOIN session_meta sm USING (session_id)
+                                      WHERE s.date_ist BETWEEN ? AND ?{ex} GROUP BY 1""", [lo, hi])}
+    od = {str(r["d"]): r for r in q(f"""SELECT o.date_ist AS d, count(*) AS orders, coalesce(sum(o.total), 0) AS revenue FROM orders_clean o JOIN session_meta sm ON sm.session_id = o.session_id
+                                      WHERE o.is_valid AND o.date_ist BETWEEN ? AND ?{oex} GROUP BY 1""", [lo, hi])}
+    dates, m = [], {k: [] for k in ("spend", "impressions", "clicks", "link_clicks", "sessions", "carts", "orders", "revenue")}
+    d, end = date.fromisoformat(lo), date.fromisoformat(hi)
+    while d <= end:
+        k = d.isoformat()
+        dates.append(k)
+        for key, src in (("spend", md), ("impressions", md), ("clicks", md), ("link_clicks", md), ("sessions", sd), ("carts", sd), ("orders", od), ("revenue", od)):
+            v = src.get(k, {}).get(key, 0) or 0
+            m[key].append(round(float(v), 2) if key in ("spend", "revenue") else int(v))
+        d += timedelta(days=1)
+    return {"dates": dates, "m": m}
+
+
+@app.get("/api/meta/status")
+def meta_status(check: bool = False):
+    """Connection state. `check=true` also asks Meta about the token (validity / expiry); the token itself is never returned."""
+    out = {"configured": meta_mod.configured()}
+    kv = {r["k"]: r["v"] for r in q("SELECT k, v FROM etl_meta WHERE k LIKE 'meta_%'")}
+    out["last_sync"] = kv.get("meta_last_sync")
+    out["last_error"] = kv.get("meta_last_error")
+    out["accounts"] = json.loads(kv["meta_accounts"]) if kv.get("meta_accounts") else []
+    st = one("SELECT count(*) AS rows, min(date) AS first_day, max(date) AS last_day, coalesce(sum(spend), 0) AS spend, count(DISTINCT campaign_id) AS campaigns FROM raw_meta_insights")
+    out.update(st)
+    if check and out["configured"]:
+        try:
+            c = meta_mod.MetaClient()
+            out["token"] = c.token_info()
+            out["user"] = c.me().get("name")
+        except Exception as e:
+            out["token"] = {"valid": False, "error": meta_mod.redact(e)}
+    return out
+
+
+@app.post("/api/meta/sync")
+def meta_sync(full: bool = False):
+    if not meta_mod.configured():
+        raise HTTPException(400, "META_ACCESS_TOKEN is not set in .env")
+
+    def fn():
+        JOB["message"] = "pulling Meta Ads"
+        try:
+            meta_mod.sync(CON.cursor(), full=full)
+        except Exception as e:
+            meta_mod.record_error(CON.cursor(), e)
+            raise
+        JOB["message"] = "linking campaigns to your sessions"
+        transform.run(CON.cursor(), flags_only=True)
+    _run_job("meta-sync", fn)
+    return JOB
+
+
+@app.get("/api/meta/overview")
+def meta_overview(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    if not one("SELECT count(*) AS n FROM raw_meta_insights")["n"]:
+        return {"connected": False}
+    rows = _meta_rows(date_from, date_to, include_excluded)
+    rows.sort(key=lambda r: -r["spend"])
+    tot = _meta_totals(rows)
+    pr = prev_range(date_from, date_to)
+    prev = _meta_totals(_meta_rows(pr[0], pr[1], include_excluded)) if pr else None
+    lo = date_from or str(one("SELECT min(date) AS d FROM raw_meta_insights")["d"])
+    hi = date_to or str(one("SELECT max(date) AS d FROM raw_meta_insights")["d"])
+    cur = _meta_series(lo, hi, include_excluded)
+    pser = _meta_series(pr[0], pr[1], include_excluded) if pr else None
+    ex = "" if include_excluded else " AND NOT s.is_excluded"
+    cov = one(f"""SELECT count(*) AS paid_meta_sessions, count(sm.session_id) AS matched FROM sessions s LEFT JOIN session_meta sm USING (session_id)
+                  WHERE s.channel = 'Paid Meta' AND s.date_ist BETWEEN ? AND ?{ex}""", [date_from or "2000-01-01", date_to or "2999-12-31"])
+    unmatched = q(f"""SELECT s.campaign, count(*) AS sessions FROM sessions s LEFT JOIN session_meta sm USING (session_id)
+                      WHERE s.channel = 'Paid Meta' AND sm.session_id IS NULL AND s.date_ist BETWEEN ? AND ?{ex} GROUP BY 1 ORDER BY 2 DESC LIMIT 6""", [date_from or "2000-01-01", date_to or "2999-12-31"])
+    blended = _meta_blended(date_from, date_to, include_excluded, tot["spend"])
+    pblended = _meta_blended(pr[0], pr[1], include_excluded, prev["spend"]) if (pr and prev) else None
+    return {"connected": True, "blended": blended, "prev_blended": pblended, "totals": tot, "prev": prev, "prev_range": pr, "campaigns": rows, "dates": cur["dates"], "current": cur["m"],
+            "prev_dates": pser["dates"] if pser else None, "previous": pser["m"] if pser else None,
+            "coverage": {**cov, "unmatched": unmatched}, "wasted": [r for r in rows if r["verdict"] == "Wasting spend"]}
+
+
+@app.get("/api/meta/breakdown")
+def meta_breakdown(level: str = "adset", campaign_id: str | None = None, date_from: str | None = None, date_to: str | None = None):
+    """Ad sets or ads, with Meta's own numbers (our sessions can only be matched to campaigns reliably)."""
+    if level not in ("adset", "ad"):
+        raise HTTPException(400, "level must be adset or ad")
+    idc, namec = ("adset_id", "adset_name") if level == "adset" else ("ad_id", "ad_name")
+    w, a = "date BETWEEN ? AND ?", [date_from or "2000-01-01", date_to or "2999-12-31"]
+    if campaign_id:
+        w += " AND campaign_id = ?"
+        a.append(campaign_id)
+    rows = q(f"""SELECT {idc} AS id, any_value({namec}) AS name, any_value(campaign_name) AS campaign, sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks,
+                 sum(link_clicks) AS link_clicks, sum(purchases) AS meta_purchases, sum(purchase_value) AS meta_value, sum(add_to_cart) AS meta_atc, sum(initiate_checkout) AS meta_checkout
+                 FROM raw_meta_insights WHERE {w} GROUP BY 1 ORDER BY spend DESC LIMIT 200""", a)
+    thumbs = {r["entity_id"]: r for r in q("SELECT entity_id, thumbnail_url, effective_status FROM raw_meta_entities WHERE entity_type = ?", [level])}
+    for r in rows:
+        t = thumbs.get(r["id"], {})
+        r["thumbnail_url"], r["status"] = t.get("thumbnail_url"), t.get("effective_status")
+        r["ctr"] = ratio(r["clicks"], r["impressions"])
+        r["cpc"] = round(r["spend"] / r["clicks"], 2) if r["clicks"] else None
+        r["meta_roas"] = round((r["meta_value"] or 0) / r["spend"], 2) if r["spend"] else None
+    return {"level": level, "rows": rows}
 
 
 # ------------------------------------------------------------------ static dashboard (after `npm run build`)

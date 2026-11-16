@@ -45,32 +45,32 @@ export default function Funnel() {
                 </Card>
                 <Card title="Checkout outcomes" sub="sessions that reached checkout or payment">
                   <Table cols={[
-                    { label: 'Outcome', render: (r) => <Badge tone={OUTCOME[r.outcome]?.[1]}>{OUTCOME[r.outcome]?.[0] || r.outcome}</Badge> },
-                    { label: 'Sessions', num: true, render: (r) => num(r.sessions) },
-                    { label: 'Avg cart', num: true, render: (r) => inr(r.avg_cart_value) },
-                    { label: 'Cart value', num: true, render: (r) => inr(r.cart_value) },
+                    { label: 'Outcome', sortBy: 'outcome', render: (r) => <Badge tone={OUTCOME[r.outcome]?.[1]}>{OUTCOME[r.outcome]?.[0] || r.outcome}</Badge> },
+                    { label: 'Sessions', sortBy: 'sessions', num: true, render: (r) => num(r.sessions) },
+                    { label: 'Avg cart', sortBy: 'avg_cart_value', num: true, render: (r) => inr(r.avg_cart_value) },
+                    { label: 'Cart value', sortBy: 'cart_value', num: true, render: (r) => inr(r.cart_value) },
                   ]} rows={d.checkout_outcomes} />
                 </Card>
               </div>
 
               <Card right={<ExportBtn name="abandoned-checkouts" rows={d.abandoned} fields={[['When', 'checkout_at'], ['Name', 'name'], ['Phone', 'phone10'], ['Cart value', 'cart_value'], ['Stopped at', 'outcome'], ['Channel', 'channel'], ['City', 'city']]} />} title="Abandoned checkouts to follow up" sub="latest 40 with a known phone shown first by recency; phone = last 10 digits">
                 <Table cols={[
-                  { label: 'When', render: (r) => dt(r.checkout_at) },
-                  { label: 'Who', render: (r) => r.name || <span className="muted">anonymous</span> },
-                  { label: 'Phone', cls: 'mono', render: (r) => r.phone10 || '–' },
-                  { label: 'Cart', num: true, render: (r) => inr(r.cart_value) },
-                  { label: 'Stopped at', render: (r) => <Badge tone={OUTCOME[r.outcome]?.[1]}>{OUTCOME[r.outcome]?.[0]}</Badge> },
+                  { label: 'When', sortBy: 'checkout_at', render: (r) => dt(r.checkout_at) },
+                  { label: 'Who', sortBy: 'name', render: (r) => r.name || <span className="muted">anonymous</span> },
+                  { label: 'Phone', sortBy: 'phone10', cls: 'mono', render: (r) => r.phone10 || '–' },
+                  { label: 'Cart', sortBy: 'cart_value', num: true, render: (r) => inr(r.cart_value) },
+                  { label: 'Stopped at', sortBy: 'outcome', render: (r) => <Badge tone={OUTCOME[r.outcome]?.[1]}>{OUTCOME[r.outcome]?.[0]}</Badge> },
                   { label: 'Channel', key: 'channel' }, { label: 'City', key: 'city' }, { label: 'Device', key: 'device' },
                 ]} rows={d.abandoned} />
               </Card>
 
               <div className="grid g2">
                 <Card title="Most added-to-cart products">
-                  <Table cols={[{ label: 'Product', render: (r) => <span className="trunc" title={r.product_name} style={{ display: 'block' }}>{r.product_name}</span> }, { label: 'Brand', key: 'brand' },
-                    { label: 'Adds', num: true, render: (r) => num(r.adds) }]} rows={d.top_products} />
+                  <Table cols={[{ label: 'Product', sortBy: 'product_name', render: (r) => <span className="trunc" title={r.product_name} style={{ display: 'block' }}>{r.product_name}</span> }, { label: 'Brand', key: 'brand' },
+                    { label: 'Adds', sortBy: 'adds', num: true, render: (r) => num(r.adds) }]} rows={d.top_products} />
                 </Card>
                 <Card title="Payment method vs outcome">
-                  <Table cols={[{ label: 'Method', key: 'method' }, { label: 'Outcome', render: (r) => OUTCOME[r.outcome]?.[0] || r.outcome }, { label: 'Sessions', num: true, render: (r) => num(r.n) }]} rows={d.payment_methods} />
+                  <Table cols={[{ label: 'Method', key: 'method' }, { label: 'Outcome', sortBy: 'outcome', render: (r) => OUTCOME[r.outcome]?.[0] || r.outcome }, { label: 'Sessions', sortBy: 'n', num: true, render: (r) => num(r.n) }]} rows={d.payment_methods} />
                 </Card>
               </div>
             </>

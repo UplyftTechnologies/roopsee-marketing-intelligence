@@ -73,15 +73,15 @@ export default function Cohorts() {
               <Card title="Cohort table">
                 <Table cols={[
                   { label: DIMS.find((d) => d[0] === dim)[1], key: 'value' },
-                  { label: 'People', num: true, render: (r) => num(r.people) },
-                  { label: 'Avg sessions', num: true, render: (r) => r.avg_sessions },
-                  { label: 'Quiz done', num: true, render: (r) => num(r.quiz_done) },
-                  { label: 'Cart rate', num: true, render: (r) => pct(r.cart_rate, 1) },
-                  { label: 'Checked out', num: true, render: (r) => num(r.checked_out) },
-                  { label: 'Buyers', num: true, render: (r) => num(r.buyers) },
-                  { label: 'Buyer rate', num: true, render: (r) => <RateBar v={r.buyer_rate} max={maxBuy} text={pct(r.buyer_rate, 2)} /> },
-                  { label: 'Repeat', num: true, render: (r) => num(r.repeat_buyers) },
-                  { label: 'Revenue', num: true, render: (r) => inr(r.revenue) },
+                  { label: 'People', sortBy: 'people', num: true, render: (r) => num(r.people) },
+                  { label: 'Avg sessions', sortBy: 'avg_sessions', num: true, render: (r) => r.avg_sessions },
+                  { label: 'Quiz done', sortBy: 'quiz_done', num: true, render: (r) => num(r.quiz_done) },
+                  { label: 'Cart rate', sortBy: 'cart_rate', num: true, render: (r) => pct(r.cart_rate, 1) },
+                  { label: 'Checked out', sortBy: 'checked_out', num: true, render: (r) => num(r.checked_out) },
+                  { label: 'Buyers', sortBy: 'buyers', num: true, render: (r) => num(r.buyers) },
+                  { label: 'Buyer rate', sortBy: 'buyer_rate', num: true, render: (r) => <RateBar v={r.buyer_rate} max={maxBuy} text={pct(r.buyer_rate, 2)} /> },
+                  { label: 'Repeat', sortBy: 'repeat_buyers', num: true, render: (r) => num(r.repeat_buyers) },
+                  { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) },
                 ]} rows={rows} />
               </Card>
             </>

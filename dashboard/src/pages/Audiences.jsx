@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { dt, inr, num, pct, useApi, useFilters } from '../api'
-import { Badge, Card, ExportBtn, Kpi, Loading, Pager, Table } from '../ui'
+import { Badge, Card, ExportBtn, Kpi, Loading, Pager, Table, nextSort } from '../ui'
 
 function People({ id, onClose }) {
   const f = useFilters()
   const [only, setOnly] = useState(true)
   const [offset, setOffset] = useState(0)
+  const [sort, setSort] = useState({ key: 'reach', dir: 'desc' })
   const limit = 25
-  const s = useApi(`/audiences/${id}/people`, { only_reachable: only, limit, offset }, { scoped: true })
-  useEffect(() => setOffset(0), [id, only])
+  const s = useApi(`/audiences/${id}/people`, { only_reachable: only, sort: sort.key, direction: sort.dir, limit, offset }, { scoped: true })
+  useEffect(() => setOffset(0), [id, only, sort])
   return (
     <Loading state={s}>
       {(d) => (
@@ -19,15 +20,15 @@ function People({ id, onClose }) {
             <button className="btn small" onClick={onClose}>Close</button>
           </span>}>
           <div className="banner ok" style={{ marginBottom: 10 }}><div><b>Suggested next step:</b> {d.action}<div className="muted">Messaging is not built yet; export the list or use it as a target for the automated step later.</div></div></div>
-          <Table onRow={(r) => f.go('person', { key: r.person_key })} cols={[
-            { label: 'Person', render: (r) => r.name || <span className="muted">no name</span> },
+          <Table sort={sort} onSort={(k) => setSort(nextSort(sort, k, ['name', 'city', 'first_channel']))} onRow={(r) => f.go('person', { key: r.person_key })} cols={[
+            { label: 'Person', sortBy: 'name', render: (r) => r.name || <span className="muted">no name</span> },
             { label: 'Phone', cls: 'mono', render: (r) => r.phone10 || <span className="muted">none</span> },
-            { label: 'Place', render: (r) => [r.city, r.state].filter(Boolean).join(', ') || '–' },
-            { label: 'First channel', key: 'first_channel' },
-            { label: 'Last cart', num: true, render: (r) => (r.last_cart_value ? inr(r.last_cart_value) : '–') },
-            { label: 'Orders', num: true, render: (r) => r.orders }, { label: 'Spent', num: true, render: (r) => (r.revenue ? inr(r.revenue) : '–') },
+            { label: 'Place', sortBy: 'city', render: (r) => [r.city, r.state].filter(Boolean).join(', ') || '–' },
+            { label: 'First channel', sortBy: 'first_channel', render: (r) => r.first_channel },
+            { label: 'Last cart', num: true, sortBy: 'last_cart_value', render: (r) => (r.last_cart_value ? inr(r.last_cart_value) : '–') },
+            { label: 'Orders', num: true, sortBy: 'orders', render: (r) => r.orders }, { label: 'Spent', num: true, sortBy: 'revenue', render: (r) => (r.revenue ? inr(r.revenue) : '–') },
             { label: 'Skin / age', render: (r) => [r.skin_type, r.age_bucket].filter(Boolean).join(' · ') || '–' },
-            { label: 'Last seen', render: (r) => dt(r.last_seen) },
+            { label: 'Last seen', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },
           ]} rows={d.rows} empty="Nobody in this group has a phone number yet. Untick the box to see everyone." />
           <Pager total={d.total} limit={limit} offset={offset} setOffset={setOffset} />
         </Card>

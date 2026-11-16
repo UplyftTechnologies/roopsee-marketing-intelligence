@@ -131,14 +131,14 @@ export default function Person() {
           <Card title={`Browsers & devices (${d.browsers.length})`} sub="each browser id is one device or one cleared-cookie reset">
             <Table cols={[
               { label: 'Browser', render: (b) => <span title={b.visitor_key}><span className="mono">{b.visitor_key.slice(0, 10)}…</span><br /><span className="muted">{[b.is_app ? 'Android app' : b.device, b.platform, b.browser].filter(Boolean).join(' · ')}</span></span> },
-              { label: 'Sessions', num: true, render: (b) => num(b.sessions) }, { label: 'Last seen', render: (b) => dt(b.last_seen) },
+              { label: 'Sessions', sortBy: 'sessions', num: true, render: (b) => num(b.sessions) }, { label: 'Last seen', sortBy: 'last_seen', render: (b) => dt(b.last_seen) },
             ]} rows={d.browsers.slice(0, 10)} />
             {d.browsers.length > 10 && <div className="muted" style={{ marginTop: 6 }}>+ {d.browsers.length - 10} more browsers</div>}
           </Card>
           {d.orders.length > 0 && (
             <Card title={`Orders (${d.orders.length})`}>
-              <Table cols={[
-                { label: 'When', render: (o) => dt(o.ts) }, { label: 'Total', num: true, render: (o) => inr(o.total) },
+              <Table onRow={(o) => f.go('order', { key: o.order_id })} cols={[
+                { label: 'When', sortBy: 'ts', render: (o) => dt(o.ts) }, { label: 'Total', sortBy: 'total', num: true, render: (o) => inr(o.total) },
                 { label: 'Status', render: (o) => <Badge tone={o.is_valid && !o.is_test ? 'good' : o.is_test ? '' : 'warn'}>{o.is_test ? 'test' : o.status}</Badge> },
                 { label: 'Items', render: (o) => <span className="trunc" style={{ display: 'block', maxWidth: 160 }} title={o.items}>{o.items || '–'}</span> },
               ]} rows={d.orders} />
@@ -146,7 +146,7 @@ export default function Person() {
           )}
           {d.ips.length > 0 && (
             <Card title={`IP addresses (${d.ips.length})`}>
-              <Table cols={[{ label: 'IP', cls: 'mono', key: 'ip' }, { label: 'Place', key: 'city' }, { label: 'Sessions', num: true, render: (r) => num(r.sessions) }, { label: 'Last seen', render: (r) => dt(r.last_seen) }]} rows={d.ips.slice(0, 8)} />
+              <Table cols={[{ label: 'IP', cls: 'mono', key: 'ip' }, { label: 'Place', key: 'city' }, { label: 'Sessions', sortBy: 'sessions', num: true, render: (r) => num(r.sessions) }, { label: 'Last seen', sortBy: 'last_seen', render: (r) => dt(r.last_seen) }]} rows={d.ips.slice(0, 8)} />
             </Card>
           )}
           <Card title="Identifiers"><div className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>

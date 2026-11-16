@@ -43,9 +43,9 @@ export default function DataPage() {
             right={<input className="field" placeholder="filter event name…" value={filter} onChange={(e) => setFilter(e.target.value)} />}>
             <Table cols={[
               { label: 'Event name', cls: 'mono', key: 'event_name' },
-              { label: 'Mapped to', render: (r) => (r.event_key.startsWith('(') ? <span className="muted">{r.event_key}</span> : <Badge tone="good">{KEY_LABEL[r.event_key] || r.event_key}</Badge>) },
-              { label: 'Events', num: true, render: (r) => num(r.events) }, { label: 'Sessions', num: true, render: (r) => num(r.sessions) },
-              { label: 'First seen', render: (r) => dt(r.first_seen) }, { label: 'Last seen', render: (r) => dt(r.last_seen) },
+              { label: 'Mapped to', sortBy: 'event_key', render: (r) => (r.event_key.startsWith('(') ? <span className="muted">{r.event_key}</span> : <Badge tone="good">{KEY_LABEL[r.event_key] || r.event_key}</Badge>) },
+              { label: 'Events', sortBy: 'events', num: true, render: (r) => num(r.events) }, { label: 'Sessions', sortBy: 'sessions', num: true, render: (r) => num(r.sessions) },
+              { label: 'First seen', sortBy: 'first_seen', render: (r) => dt(r.first_seen) }, { label: 'Last seen', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },
             ]} rows={rows.filter((r) => r.event_name.includes(filter.toLowerCase()))} />
           </Card>
         )}

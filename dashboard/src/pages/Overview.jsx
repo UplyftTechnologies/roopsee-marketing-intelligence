@@ -10,7 +10,7 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const RAMP = ['var(--seq-100)', 'var(--seq-200)', 'var(--seq-300)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
 const CARDS = ['sessions', 'people', 'cart_rate', 'orders', 'revenue', 'aov']
 
-function Heatmap({ hours }) {
+export function Heatmap({ hours, unit = 'sessions' }) {
   const m = {}
   let max = 0
   hours.forEach((h) => { m[`${h.dow}-${h.hour}`] = h.sessions; max = Math.max(max, h.sessions) })
@@ -25,12 +25,12 @@ function Heatmap({ hours }) {
             {Array.from({ length: 24 }, (_, h) => {
               const v = m[`${di}-${h}`] || 0
               const step = v ? Math.min(5, Math.floor((v / max) * 5.999)) : -1
-              return <span key={h} className="cell" title={`${d} ${h}:00 – ${num(v)} sessions`} style={step >= 0 ? { background: RAMP[step] } : undefined} />
+              return <span key={h} className="cell" title={`${d} ${h}:00 – ${num(v)} ${unit}`} style={step >= 0 ? { background: RAMP[step] } : undefined} />
             })}
           </Fragment>
         ))}
       </div>
-      <div className="legend">Sessions by hour of day (IST) · lighter = fewer, darker = more · peak {num(max)} in one hour</div>
+      <div className="legend">{unit === 'orders' ? 'Orders' : 'Sessions'} by hour of day (IST) · lighter = fewer, darker = more · peak {num(max)} in one hour</div>
     </div>
   )
 }

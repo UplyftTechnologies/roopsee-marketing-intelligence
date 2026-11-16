@@ -17,13 +17,18 @@ import Loyalty from './pages/Loyalty'
 import Audiences from './pages/Audiences'
 import Person from './pages/Person'
 import SessionPage from './pages/SessionPage'
+import Orders from './pages/Orders'
+import OrderPage from './pages/OrderPage'
+import MetaAds from './pages/MetaAds'
 
 // [key, label, icon, one-line description (tooltip + page subtitle), component, group]
 const NAV = [
   ['home', 'Home', 'home', 'What matters right now', Home, ''],
   ['performance', 'Performance', 'chart', 'Traffic, orders and trends over time', Overview, 'Reports'],
+  ['orders', 'Orders', 'receipt', 'Every order, payments, delivery and order analytics', Orders, 'Reports'],
   ['funnel', 'Funnel & checkout', 'funnel', 'Where people drop off, who to follow up', Funnel, 'Reports'],
   ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Reports'],
+  ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Reports'],
   ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where from', Cohorts, 'Reports'],
   ['basket', 'Basket & AOV', 'basket', 'What people buy and how to raise order value', Basket, 'Reports'],
   ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],
@@ -37,10 +42,11 @@ const NAV = [
 const EXTRA = [
   ['person', 'Person', 'users', 'Everything about one person', Person, 'Users'],
   ['session', 'Session', 'list', 'Everything about one session', SessionPage, 'Sessions'],
+  ['order', 'Order', 'receipt', 'Everything about one order', OrderPage, 'Orders'],
 ]
 function parseHash() {
   const [a, ...rest] = decodeURIComponent(location.hash.slice(1)).split('/')
-  if ((a === 'person' || a === 'session') && rest.length) return { tab: a, prefill: { key: rest.join('/') } }
+  if ((a === 'person' || a === 'session' || a === 'order') && rest.length) return { tab: a, prefill: { key: rest.join('/') } }
   return { tab: NAV.some((n) => n[0] === a) ? a : 'home', prefill: {} }
 }
 const iso = (d) => d.toISOString().slice(0, 10)
@@ -67,9 +73,9 @@ export default function App() {
 
   const go = (key, pre = {}) => { setPrefill(pre); setTab(key); setNavKey((k) => k + 1); setMenu(false); window.scrollTo(0, 0) }
   useEffect(() => {
-    const h = (tab === 'person' || tab === 'session') && prefill.key ? `${tab}/${prefill.key}` : tab
+    const h = ['person', 'session', 'order'].includes(tab) && prefill.key ? `${tab}/${prefill.key}` : tab
     lastHash.current = h
-    location.hash = (tab === 'person' || tab === 'session') && prefill.key ? `${tab}/${encodeURIComponent(prefill.key)}` : tab
+    location.hash = ['person', 'session', 'order'].includes(tab) && prefill.key ? `${tab}/${encodeURIComponent(prefill.key)}` : tab
   }, [tab, prefill])
   useEffect(() => {
     const onHash = () => {
@@ -111,10 +117,10 @@ export default function App() {
   const canCompare = !!(from && to)
   const prevText = canCompare ? `${fmt(shift(from, -daysBetween(from, to)))} – ${fmt(shift(from, -1))}` : null
   const cur = [...NAV, ...EXTRA].find((n) => n[0] === tab) || NAV[0]
-  const railActive = tab === 'person' ? 'users' : tab === 'session' ? 'sessions' : tab
+  const railActive = tab === 'person' ? 'users' : tab === 'session' ? 'sessions' : tab === 'order' ? 'orders' : tab
   const Page = cur[4]
   const dateless = tab === 'loyalty' || tab === 'audiences'
-  const noDates = dateless || ['exclusions', 'data', 'person', 'session'].includes(tab)
+  const noDates = dateless || ['exclusions', 'data', 'person', 'session', 'order'].includes(tab)
   const job = meta?.job
   const c = meta?.counts
   const tc = meta?.tracking_change
@@ -173,7 +179,7 @@ export default function App() {
               <DatePicker presets={presets} active={active} from={from} to={to} rangeText={rangeText} prevText={prevText} compare={compare} setCompare={setCompare}
                 setRange={(f, t) => { setFrom(f); setTo(t) }} first={first} last={last} canCompare={canCompare} note={crossesUpgrade ? upgradeText : null} />
             )}
-            {!['exclusions', 'data', 'person', 'session'].includes(tab) && (
+            {!['exclusions', 'data', 'person', 'session', 'order'].includes(tab) && (
               <Popover align="right" width={320} trigger={({ open, toggle }) => (
                 <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Internal, test and bot traffic">
                   <span className={`dot ${hideInternal ? '' : 'off'}`} />{hideInternal ? 'Internal traffic hidden' : 'All traffic shown'}<Icon name="chevron" size={16} />

@@ -24,6 +24,8 @@ RAW_SCHEMAS = {
         "coupon_code": "VARCHAR", "payment_status": "VARCHAR", "payment_method": "VARCHAR",
         "paid_at": "TIMESTAMPTZ", "visitor_id": "VARCHAR", "session_id": "VARCHAR",
         "delivered_at": "TIMESTAMPTZ", "discount": "DOUBLE",
+        "handling_fee": "VARCHAR", "cashback_amount": "DOUBLE", "cashback_percent": "DOUBLE", "payment_failed_reason": "VARCHAR",
+        "rider_id": "VARCHAR", "courier_partner": "VARCHAR", "tracking_id": "VARCHAR", "metadata": "JSON",
     },
     "raw_quiz_results": {
         "id": "VARCHAR", "user_id": "VARCHAR", "gender": "VARCHAR", "age": "VARCHAR", "skin_type": "VARCHAR",
@@ -41,6 +43,17 @@ RAW_SCHEMAS = {
     "raw_catalog_master": {
         "product_id": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
         "category_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE",
+    },
+    "raw_meta_insights": {
+        "account_id": "VARCHAR", "date": "DATE", "campaign_id": "VARCHAR", "campaign_name": "VARCHAR", "adset_id": "VARCHAR", "adset_name": "VARCHAR",
+        "ad_id": "VARCHAR", "ad_name": "VARCHAR", "spend": "DOUBLE", "impressions": "BIGINT", "reach": "BIGINT", "frequency": "DOUBLE", "clicks": "BIGINT",
+        "link_clicks": "BIGINT", "ctr": "DOUBLE", "cpc": "DOUBLE", "cpm": "DOUBLE", "purchases": "DOUBLE", "purchase_value": "DOUBLE", "add_to_cart": "DOUBLE",
+        "initiate_checkout": "DOUBLE", "view_content": "DOUBLE", "landing_page_views": "DOUBLE", "actions": "JSON",
+    },
+    "raw_meta_entities": {
+        "account_id": "VARCHAR", "entity_type": "VARCHAR", "entity_id": "VARCHAR", "name": "VARCHAR", "campaign_id": "VARCHAR", "adset_id": "VARCHAR",
+        "status": "VARCHAR", "effective_status": "VARCHAR", "objective": "VARCHAR", "daily_budget": "DOUBLE", "lifetime_budget": "DOUBLE",
+        "thumbnail_url": "VARCHAR", "created_time": "TIMESTAMPTZ",
     },
     "raw_customer_address": {
         "id": "BIGINT", "user_id": "VARCHAR", "city": "VARCHAR", "state": "VARCHAR", "pincode": "VARCHAR",
@@ -67,6 +80,8 @@ def connect(read_only: bool = False) -> duckdb.DuckDBPyConnection:
 def init_raw(con) -> None:
     for t, cols in RAW_SCHEMAS.items():
         con.execute(f"CREATE TABLE IF NOT EXISTS {t} ({', '.join(f'{c} {d}' for c, d in cols.items())})")
+        for c, d in cols.items():  # schema migration: columns added in later versions
+            con.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {c} {d.split(' PRIMARY')[0]}")
     con.execute(META_DDL)
 
 

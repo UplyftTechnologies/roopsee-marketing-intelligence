@@ -69,6 +69,25 @@ before using `extract` / `transform` from the command line (or just use the butt
 | "Port 8000 is used by another program" | close that program, or start with `MI_PORT=8010` |
 | Page shows "No analytics tables yet" | press **Refresh data**, or run `python3 run.py --refresh` |
 
+## Optional: Meta Ads
+
+Add these to `.env` (never commit it) and press **Refresh**; the **Meta Ads** page then shows spend, clicks, CTR, CPC and what your own tracking says the spend brought in.
+
+```
+META_ACCESS_TOKEN=<token with the ads_read permission>
+META_AD_ACCOUNT_IDS=act_1234567890,act_9876543210   # optional; default = every account the token can list that has spent money
+META_SINCE=2026-06-01                               # optional first day to pull
+```
+
+- **Read-only.** The client only sends GET requests, the token travels in a header and is redacted from every error message and API response.
+- A normal user token expires after about 60 days. Create a **System User** token in Business Settings (it does not expire) for production use.
+- An ad account can be readable without appearing in the token's account list (for example a boosted-Instagram-post account). If a campaign id in your UTM tags is not matched, look it up in the Graph API and add its account to `META_AD_ACCOUNT_IDS`.
+- Campaign matching uses the id in `utm_campaign` (or the ad-set / ad id). Put this in each ad's URL parameters so every click carries real ids: `utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.id}}&utm_content={{ad.id}}&utm_term={{adset.id}}`
+
+## Sharing exclusions
+
+**Exclusions → Share your exclusion list** downloads your rules as JSON or CSV; a teammate opens **Import a list…** on their dashboard and only the missing rules are added. The file contains staff phone numbers, emails and IPs: send it privately.
+
 ## Safety
 
 - Only `PRODUCT_SUPABASE_URL` / `PRODUCT_SUPABASE_SERVICE_KEY` are read from `.env`. The client in `mi/supa.py` exposes
