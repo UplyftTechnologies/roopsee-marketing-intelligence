@@ -17,8 +17,10 @@ from .db import connect
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "all"
     if cmd == "serve":
+        import os
+
         import uvicorn
-        uvicorn.run("mi.api:app", host="127.0.0.1", port=8000)
+        uvicorn.run("mi.api:app", host="127.0.0.1", port=int(os.environ.get("MI_PORT", "8000")))
         return 0
     if cmd not in ("extract", "transform", "all"):
         print(__doc__)
