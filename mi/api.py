@@ -1507,6 +1507,91 @@ def meta_breakdown(level: str = "adset", campaign_id: str | None = None, date_fr
     return {"level": level, "rows": rows}
 
 
+def _meta_lite(r: dict) -> dict:
+    """Meta's own numbers for one ad set / ad (our sessions can only be matched to campaigns reliably)."""
+    sp = float(r["spend"] or 0)
+    r["spend"] = sp
+    r["ctr"] = ratio(r["clicks"], r["impressions"])
+    r["cpc"] = round(sp / r["clicks"], 2) if r["clicks"] else None
+    r["meta_roas"] = round((r["meta_value"] or 0) / sp, 2) if sp else None
+    return r
+
+
+_SUM = ("spend", "impressions", "clicks", "link_clicks", "meta_purchases", "meta_value", "meta_atc")
+
+
+@app.get("/api/meta/hierarchy")
+def meta_hierarchy(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, include_idle: bool = False):
+    """Campaign -> ad set -> ad tree with spend and results at every level.
+    Campaign rows also carry our own sessions / orders / ROAS. `include_idle` adds items that had no spend in the range."""
+    if not one("SELECT count(*) AS n FROM raw_meta_insights")["n"]:
+        return {"connected": False, "campaigns": []}
+    lo, hi = date_from or "2000-01-01", date_to or "2999-12-31"
+    rows = q("""SELECT campaign_id, any_value(campaign_name) AS campaign_name, adset_id, any_value(adset_name) AS adset_name, ad_id, any_value(ad_name) AS ad_name,
+                sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks, sum(link_clicks) AS link_clicks,
+                sum(purchases) AS meta_purchases, sum(purchase_value) AS meta_value, sum(add_to_cart) AS meta_atc
+                FROM raw_meta_insights WHERE date BETWEEN ? AND ? GROUP BY campaign_id, adset_id, ad_id""", [lo, hi])
+    ents = {}
+    for e in q("SELECT entity_type, entity_id, name, campaign_id, adset_id, effective_status, daily_budget, thumbnail_url FROM raw_meta_entities"):
+        ents[(e["entity_type"], e["entity_id"])] = e
+    ours = {r["campaign_id"]: r for r in _meta_rows(date_from, date_to, include_excluded)}
+    zero = {k: 0 for k in _SUM}
+
+    camps: dict[str, dict] = {}
+
+    def camp(cid, name=None):
+        if cid not in camps:
+            e = ents.get(("campaign", cid), {})
+            camps[cid] = {"id": cid, "level": "campaign", "name": name or e.get("name") or cid, "status": e.get("effective_status"),
+                          "daily_budget": e.get("daily_budget"), "objective": (ours.get(cid) or {}).get("objective"), "adsets": {}}
+        return camps[cid]
+
+    def adset(c, aid, name=None):
+        if aid not in c["adsets"]:
+            e = ents.get(("adset", aid), {})
+            c["adsets"][aid] = {"id": aid, "level": "adset", "name": name or e.get("name") or aid, "status": e.get("effective_status"),
+                                "daily_budget": e.get("daily_budget"), "ads": {}}
+        return c["adsets"][aid]
+
+    for r in rows:
+        c = camp(r["campaign_id"], r["campaign_name"])
+        a = adset(c, r["adset_id"], r["adset_name"])
+        e = ents.get(("ad", r["ad_id"]), {})
+        a["ads"][r["ad_id"]] = _meta_lite({"id": r["ad_id"], "level": "ad", "name": r["ad_name"] or e.get("name") or r["ad_id"], "status": e.get("effective_status"),
+                                           "thumbnail_url": e.get("thumbnail_url"), **{k: r[k] or 0 for k in _SUM}})
+    if include_idle:  # things that exist in Meta but had no spend in this range
+        for (kind, eid), e in ents.items():
+            if kind == "campaign":
+                camp(eid)
+            elif kind == "adset" and e.get("campaign_id"):
+                adset(camp(e["campaign_id"]), eid)
+            elif kind == "ad" and e.get("campaign_id") and e.get("adset_id"):
+                a = adset(camp(e["campaign_id"]), e["adset_id"])
+                a["ads"].setdefault(eid, _meta_lite({"id": eid, "level": "ad", "name": e.get("name") or eid, "status": e.get("effective_status"),
+                                                     "thumbnail_url": e.get("thumbnail_url"), **zero}))
+    out = []
+    for c in camps.values():
+        sets = []
+        for a in c["adsets"].values():
+            ads = sorted(a.pop("ads").values(), key=lambda x: -x["spend"])
+            node = _meta_lite({**a, **{k: sum(x[k] or 0 for x in ads) for k in _SUM}})
+            node["children"] = ads
+            sets.append(node)
+        sets.sort(key=lambda x: -x["spend"])
+        c.pop("adsets")
+        base = ours.get(c["id"])
+        if base:
+            node = {**base, **{k: c[k] for k in ("id", "level", "daily_budget") if c.get(k) is not None}, "name": base["name"] or c["name"], "status": c["status"] or base.get("status")}
+        else:
+            node = _meta_derive({**c, **{k: sum(x[k] or 0 for x in sets) for k in _SUM}, "meta_checkout": 0, "sessions": 0, "visitors": 0, "carts": 0, "checkouts": 0, "quiz": 0, "orders": 0, "revenue": 0.0})
+        node["id"], node["level"] = c["id"], "campaign"
+        node["children"] = sets
+        out.append(node)
+    out.sort(key=lambda x: -x["spend"])
+    return {"connected": True, "campaigns": out,
+            "counts": {"campaigns": len(out), "adsets": sum(len(c["children"]) for c in out), "ads": sum(len(a["children"]) for c in out for a in c["children"])}}
+
+
 # ------------------------------------------------------------------ static dashboard (after `npm run build`)
 DIST = ROOT / "dashboard" / "dist"
 if DIST.exists():

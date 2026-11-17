@@ -5,7 +5,7 @@ from . import create_adsets, create_ads, create_campaigns, create_creatives, doc
 from .common import LauncherError, Settings, adsets_cfg, guard_write, log, need_ready, ready_ads
 from .meta_api import Meta
 
-COMMANDS = ["doctor", "validate", "images", "upload", "setup", "prepare", "publish", "status"]
+COMMANDS = ["doctor", "validate", "images", "live", "upload", "setup", "prepare", "publish", "status"]
 
 
 def execute(command: str, batch: str | None = None, dry_run=False, validate_only=False, confirm_production=False,
@@ -19,6 +19,10 @@ def execute(command: str, batch: str | None = None, dry_run=False, validate_only
         return validate.report(s, batch)
     if command == "status":
         doctor.status(s, live)
+        return True
+    if command == "live":
+        need_ready(s)
+        doctor.live(s)
         return True
     if command == "images":
         need_ready(s)

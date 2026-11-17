@@ -94,13 +94,15 @@ async function Health() {
     btn.disabled = false;
   };
   const btn = h('button', { class: 'primary', onclick: run }, 'Run health check');
+  const liveLog = Log(); liveLog.hidden = true;
+  const showLive = async () => { liveLog.hidden = false; try { await runJob({ command: 'live' }, liveLog); } catch (e) { fail(e); } };
   const ents = Object.entries(S.entities);
   const ads = Object.entries(S.ads);
   return h('div', {},
     h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Health check'), btn),
       h('div', { class: 'sub' }, `Read-only. Checks credentials, token, permissions, ad account (${S.account || 'not set'}) and Page (${S.page_id || 'not set'}).`),
       S.missing.length ? h('div', { class: 'msg bad' }, 'Missing in .env: ' + S.missing.join(', ')) : null, checks, log),
-    h('div', { class: 'card' }, h('h3', {}, 'What exists on Meta (' + S.env + ')'),
+    h('div', { class: 'card' }, h('div', { class: 'row' }, h('h3', { class: 'grow' }, 'What exists on Meta (' + S.env + ')'), h('button', { onclick: showLive }, 'Show live from Meta')), liveLog,
       ents.length ? h('table', { class: 'tbl' }, h('tr', {}, h('th', {}, 'Item'), h('th', {}, 'Meta id'), h('th', {}, 'Status')),
         ents.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v.id || ''), h('td', {}, h('span', { class: 'pill' }, v.status || ''))))) : h('div', { class: 'muted' }, 'Nothing created yet.'),
       ads.length ? h('div', { class: 'sub' }, `${ads.length} ad(s): ` + ads.map(([k, v]) => `${k} (${v.status})`).join(', ')) : null));

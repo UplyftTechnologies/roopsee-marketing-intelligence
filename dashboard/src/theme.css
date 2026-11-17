@@ -213,3 +213,18 @@ td.nw { white-space: nowrap; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
 .chart-legend i.sq { width: 10px; height: 10px; border: 0; border-radius: 2px; background: var(--series-1); }
 .chart-legend i.sq.prev { background: var(--text-muted); opacity: .45; }
+
+/* ---------- Meta Ads: campaign > ad set > ad tree ---------- */
+.tree { width: 100%; border-collapse: collapse; }
+.tree th.num, .tree td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tree .nm { display: flex; align-items: center; gap: 8px; min-width: 280px; }
+.tree .caret { width: 20px; height: 20px; padding: 0; border: 0; background: none; color: var(--text-secondary); cursor: pointer; font-size: 20px; font-weight: 600; line-height: 1; flex: none; }
+.tree .caret:hover { color: var(--text-primary); }
+.tree tr.lv-campaign > td { background: var(--surface-2); font-weight: 500; }
+.tree tr.lv-adset .nm { padding-left: 24px; }
+.tree tr.lv-ad .nm { padding-left: 48px; }
+.tree tr.lv-adset .nm::before, .tree tr.lv-ad .nm::before { content: ''; width: 10px; height: 14px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: -8px 0 0 -14px; flex: none; }
+.tree .tag { flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+.tree img { border-radius: 4px; object-fit: cover; flex: none; }
+.tree .share { height: 3px; border-radius: 2px; background: var(--series-1); opacity: .45; margin: 3px 0 0 auto; }
+.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }

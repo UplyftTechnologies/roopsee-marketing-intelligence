@@ -89,6 +89,97 @@ function Levels({ campaigns }) {
   )
 }
 
+/** Campaign -> ad set -> ad as one expandable tree, with spend and results at every level. */
+function Flow({ data, open, setOpen, q }) {
+  const ql = q.trim().toLowerCase()
+  const m = (n) => !ql || n.name.toLowerCase().includes(ql) || String(n.id).includes(ql)
+  const has = (n) => m(n) || (n.children || []).some(has)
+  const rows = []
+  const push = (n, parent) => {
+    rows.push({ n, parent })
+    const kids = (n.children || []).filter(has)
+    if (kids.length && (open.has(n.id) || ql)) kids.forEach((k) => push(k, n))
+  }
+  data.campaigns.filter(has).forEach((c) => push(c, null))
+  const toggle = (id) => { const x = new Set(open); if (x.has(id)) x.delete(id); else x.add(id); setOpen(x) }
+  if (!rows.length) return <div className="muted">Nothing matches.</div>
+  return (
+    <div className="table-wrap">
+      <table className="tree">
+        <thead>
+          <tr>
+            <th>Campaign → ad set → ad</th><th>Status</th><th className="num">Budget / day</th><th className="num">Spend</th><th className="num">Impressions</th><th className="num">Clicks</th>
+            <th className="num">CTR</th><th className="num">CPC</th><th className="num">Meta: carts</th><th className="num">Meta: purchases</th><th className="num">Meta ROAS</th><th className="num">Our orders</th><th className="num">Our ROAS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ n, parent }) => {
+            const kids = n.children ? n.children.length : 0
+            const isOpen = open.has(n.id) || (!!ql && kids > 0)
+            const share = parent && parent.spend ? Math.min(100, (n.spend / parent.spend) * 100) : null
+            const camp = n.level === 'campaign'
+            return (
+              <tr key={`${n.level}-${n.id}`} className={`lv-${n.level}`}>
+                <td>
+                  <div className="nm">
+                    {kids ? <button type="button" className="caret" aria-label={isOpen ? 'Collapse' : 'Expand'} aria-expanded={isOpen} onClick={() => toggle(n.id)}><span style={{ display: 'inline-block', transition: 'transform .12s', transform: isOpen ? 'rotate(90deg)' : 'none' }}>›</span></button> : <span className="caret" />}
+                    {n.level === 'ad' && n.thumbnail_url && <img src={n.thumbnail_url} alt="" width="28" height="28" loading="lazy" />}
+                    <span className="tag">{n.level === 'adset' ? 'ad set' : n.level}</span>
+                    <span className="trunc" style={{ maxWidth: 260 }} title={`${n.name} (${n.id})`}>{n.name}</span>
+                    {kids > 0 && <span className="muted" style={{ fontSize: 12 }}>{kids}</span>}
+                  </div>
+                </td>
+                <td className="nw">{n.status ? <Badge tone={STATUS_TONE[n.status]}>{n.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–'}</td>
+                <td className="num">{n.daily_budget ? inr(n.daily_budget) : '–'}</td>
+                <td className="num"><b>{inr(n.spend)}</b>{share != null && <div className="share" style={{ width: `${Math.max(share, 2)}%` }} title={`${share.toFixed(0)}% of the parent's spend`} />}</td>
+                <td className="num">{num(n.impressions)}</td>
+                <td className="num">{num(n.link_clicks)}</td>
+                <td className="num">{pct(n.ctr, 2)}</td>
+                <td className="num">{rupee(n.cpc)}</td>
+                <td className="num">{num(n.meta_atc)}</td>
+                <td className="num">{num(n.meta_purchases)}</td>
+                <td className="num">{n.meta_roas == null ? '–' : `${n.meta_roas.toFixed(2)}×`}</td>
+                <td className="num">{camp ? num(n.orders) : <span className="muted" title="Our sessions and orders are matched to campaigns only">–</span>}</td>
+                <td className="num">{camp ? (n.our_roas == null ? '–' : `${n.our_roas.toFixed(2)}×`) : <span className="muted">–</span>}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function Hierarchy() {
+  const [idle, setIdle] = useState(false)
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(() => new Set())
+  const s = useApi('/meta/hierarchy', { include_idle: idle }, { scoped: true })
+  return (
+    <Card title="Campaign structure" sub="how spend flows from each campaign to its ad sets and ads · click the arrow to open a level">
+      <Loading state={s}>
+        {(d) => {
+          if (!d.connected) return <div className="muted">No Meta data yet.</div>
+          const all = d.campaigns.flatMap((c) => [c.id, ...c.children.map((a) => a.id)])
+          return (
+            <>
+              <div className="chip-row" style={{ marginBottom: 10 }}>
+                <button type="button" className="btn small" onClick={() => setOpen(new Set(all))}>Expand all</button>
+                <button type="button" className="btn small" onClick={() => setOpen(new Set())}>Collapse all</button>
+                <input className="field" style={{ maxWidth: 240 }} placeholder="Find a campaign, ad set or ad…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search the structure" />
+                <label className="chk"><input type="checkbox" checked={idle} onChange={(e) => setIdle(e.target.checked)} /> Include items with no spend</label>
+                <span className="muted" style={{ fontSize: 12 }}>{d.counts.campaigns} campaigns · {d.counts.adsets} ad sets · {d.counts.ads} ads</span>
+              </div>
+              <Flow data={d} open={open} setOpen={setOpen} q={q} />
+              <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>Spend, clicks and the “Meta” columns are Meta’s own numbers at every level. “Our orders / ROAS” come from your tracked sessions and can only be matched to campaigns, so they are shown on campaign rows only.</div>
+            </>
+          )
+        }}
+      </Loading>
+    </Card>
+  )
+}
+
 export default function MetaAds() {
   const f = useFilters()
   const [metric, setMetric] = useState('m_spend')
@@ -148,6 +239,7 @@ export default function MetaAds() {
                   <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>A campaign showing 0 sessions may simply be an app-install campaign or one whose clicks go elsewhere, so check its objective before pausing it.</div>
                 </Card>
               )}
+              <Hierarchy />
               <ExportBtn name="meta-campaigns" rows={o.campaigns} fields={[['Campaign', 'name'], ['Status', 'status'], ['Spend', 'spend'], ['Impressions', 'impressions'], ['Link clicks', 'link_clicks'], ['CTR', 'ctr'], ['CPC', 'cpc'], ['Our sessions', 'sessions'], ['Carts', 'carts'], ['Our orders', 'orders'], ['Our revenue', 'revenue'], ['Meta purchases', 'meta_purchases'], ['Verdict', 'verdict']]} />
             </>
           )

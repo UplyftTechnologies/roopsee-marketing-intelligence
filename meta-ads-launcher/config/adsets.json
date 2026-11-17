@@ -4,9 +4,7 @@
       "key": "PROSPECTING_001",
       "campaign_key": "ROOPSEE_TRAFFIC_001",
       "audience": "BROAD",
-      "placements": [
-        "instagram"
-      ],
+      "placements": ["instagram"],
       "optimization_goal": "LINK_CLICKS"
     }
   ]

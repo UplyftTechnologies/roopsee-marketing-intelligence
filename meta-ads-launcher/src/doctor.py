@@ -76,6 +76,26 @@ def images(s: Settings) -> None:
         print(f"  {r['hash']}  {r.get('width')}x{r.get('height')}  {r.get('name', '')}  {r.get('created_time', '')[:10]}")
 
 
+def live(s: Settings) -> None:
+    """Everything that exists in the ad account right now, read straight from Meta (campaign > ad set > ad)."""
+    meta = Meta(s)
+    acc = s.account
+    camps = meta.pages(f"{acc}/campaigns", fields="id,name,objective,effective_status,daily_budget,created_time", limit=100)
+    sets = meta.pages(f"{acc}/adsets", fields="id,name,campaign_id,effective_status,optimization_goal,daily_budget", limit=200)
+    ads = meta.pages(f"{acc}/ads", fields="id,name,adset_id,effective_status,creative{id}", limit=200)
+    imgs = meta.pages(f"{acc}/adimages", fields="hash,name", limit=100)
+    print(f"LIVE on Meta - {s.env.upper()} {acc}: {len(camps)} campaign(s), {len(sets)} ad set(s), {len(ads)} ad(s), {len(imgs)} image(s)\n")
+    money = lambda v: f"INR {int(v) / 100:,.0f}/day" if v else "-"
+    for c in camps:
+        print(f"CAMPAIGN  {c['name']}  [{c.get('effective_status')}]  {c.get('objective')}  {money(c.get('daily_budget'))}  id {c['id']}")
+        for a in [x for x in sets if x.get("campaign_id") == c["id"]]:
+            print(f"  AD SET  {a['name']}  [{a.get('effective_status')}]  {a.get('optimization_goal')}  {money(a.get('daily_budget'))}  id {a['id']}")
+            for d in [x for x in ads if x.get("adset_id") == a["id"]]:
+                print(f"    AD    {d['name']}  [{d.get('effective_status')}]  creative {(d.get('creative') or {}).get('id', '-')}  id {d['id']}")
+    for i in imgs:
+        print(f"IMAGE  {i['hash']}  {i.get('name', '')}")
+
+
 def status(s: Settings, live: bool = False) -> None:
     ent, ads = Registry(s, "entity_registry.json"), Registry(s, "ad_registry.json")
     print(f"environment: {s.env.upper()}")
