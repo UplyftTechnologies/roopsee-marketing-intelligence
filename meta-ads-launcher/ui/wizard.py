@@ -1,6 +1,7 @@
 """Backend for the guided 'New campaign' flow, drafts, history and the live overview."""
 from __future__ import annotations
 
+import json
 import re
 import time
 import uuid
@@ -413,3 +414,39 @@ def overview(refresh: bool = False):
             "images": live["images"], "attention": att, "fetched": datetime.now().strftime("%H:%M:%S")}
     _CACHE[(s.env, s.account)] = {"t": time.time(), "data": data}
     return data
+
+
+# ---- images already on Meta (with previews) ------------------------------------------------------------------------------
+_IMG_CACHE: dict = {}
+HEX32 = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _img(r: dict) -> dict:
+    return {"hash": r.get("hash"), "name": r.get("name"), "width": r.get("width"), "height": r.get("height"), "created": (r.get("created_time") or "")[:10],
+            "thumb": r.get("url_128") or r.get("url"), "full": r.get("url") or r.get("url_128"), "link": r.get("permalink_url")}
+
+
+@router.get("/api/meta-images")
+def meta_images(hashes: str | None = None, refresh: bool = False):
+    """Images in the ad account with a thumbnail and the full-size image link. Meta's image links need no token."""
+    s = Settings()
+    if s.missing():
+        raise HTTPException(400, "Missing in .env: " + ", ".join(s.missing()))
+    meta = Meta(s)
+    fields = "hash,name,width,height,created_time,url,url_128,permalink_url"
+    try:
+        if hashes:
+            want = [h for h in hashes.split(",") if HEX32.match(h)][:20]
+            if not want:
+                raise HTTPException(400, "that is not an image hash (32 letters and digits)")
+            rows = meta.get(f"{s.account}/adimages", hashes=json.dumps(want), fields=fields).get("data", [])
+            return {"images": [_img(r) for r in rows]}
+        hit = _IMG_CACHE.get((s.env, s.account))
+        if hit and not refresh and time.time() - hit["t"] < 60:
+            return hit["data"]
+        rows = meta.pages(f"{s.account}/adimages", fields=fields, limit=100)
+        data = {"images": sorted((_img(r) for r in rows), key=lambda x: x["created"] or "", reverse=True), "env": s.env, "account": s.account}
+        _IMG_CACHE[(s.env, s.account)] = {"t": time.time(), "data": data}
+        return data
+    except MetaError as e:
+        raise HTTPException(502, f"Meta said: {s.redact(e)[:300]}")

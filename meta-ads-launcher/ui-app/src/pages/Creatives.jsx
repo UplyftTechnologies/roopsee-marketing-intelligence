@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react'
 import { api } from '../api'
-import { Badge, Card, CopyBtn, Field, Loading, useLoad } from '../ui'
+import { Badge, Card, Field, Loading, useLoad } from '../ui'
+import { MetaImageGrid } from '../MetaImages'
 
 export default function Creatives({ ctx }) {
   const [st, reload] = useLoad(() => api('/api/creatives'))
   const [theme, setTheme] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  const [onMeta, setOnMeta] = useState(null)
   const input = useRef(null)
 
   const upload = async (files) => {
@@ -21,7 +21,6 @@ export default function Creatives({ ctx }) {
     setBusy(false); reload()
     setMsg({ tone: bad.length ? 'err' : 'ok', text: [ok.length ? `Saved ${ok.join(', ')}.` : '', ...bad].filter(Boolean).join(' ') })
   }
-  const loadMeta = async () => { try { setOnMeta((await api('/api/overview?refresh=true')).images || []) } catch (e) { setMsg({ tone: 'err', text: e.message }) } }
 
   return (
     <>
@@ -63,13 +62,8 @@ export default function Creatives({ ctx }) {
         </Loading>
       </Card>
 
-      <Card title="Already on Meta" sub="Images in the ad account, with the hash you can reuse in a campaign"
-        right={<button type="button" className="btn small" onClick={loadMeta}>{onMeta ? 'Reload' : 'Show'}</button>}>
-        {!onMeta ? <div className="muted">Press Show to read them from Meta.</div> : onMeta.length === 0 ? <div className="empty">None.</div> : (
-          <div>{onMeta.slice(0, 60).map((m) => (
-            <div key={m.hash} className="list-row"><span className="mono grow">{m.hash}</span><span className="muted">{m.name}</span><CopyBtn text={m.hash} label="Copy hash" /></div>
-          ))}{onMeta.length > 60 && <div className="muted" style={{ marginTop: 6 }}>Showing 60 of {onMeta.length}.</div>}</div>
-        )}
+      <Card title="Already on Meta" sub="The images in your ad account, shown as Meta has them, with the hash to reuse. Click an image to see it full size.">
+        <MetaImageGrid actions={(i) => <button type="button" className="btn small" onClick={() => ctx.go('new', { metahash: i.hash })}>Use in a campaign</button>} />
       </Card>
     </>
   )

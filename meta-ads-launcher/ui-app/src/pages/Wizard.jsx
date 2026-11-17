@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon'
 import { api, followJob, inr } from '../api'
 import { Badge, Banner, Card, Field, JobPanel, Loading, useLoad } from '../ui'
+import { MetaImageGrid, MetaImg } from '../MetaImages'
 
 const STEPS = ['What for', 'Who sees it', 'Budget', 'Ads', 'Review']
 const uid = () => 's' + Math.random().toString(36).slice(2, 7)
@@ -24,6 +25,7 @@ const toServer = (a) => {
   return { ...a, ads: a.ads.map((ad) => ({ ...ad, sets: (ad.sets || all).filter((u) => all.includes(u)) })) }
 }
 
+const themeOf = (name, fallback) => { const m = /^RS_([A-Za-z0-9]+)_\d+/.exec(name || ''); return m ? m[1] : (fallback || 'meta') }
 const CtaLabel = { LEARN_MORE: 'Learn more', SHOP_NOW: 'Shop now', SIGN_UP: 'Sign up', GET_OFFER: 'Get offer', ORDER_NOW: 'Order now', CONTACT_US: 'Contact us', SUBSCRIBE: 'Subscribe' }
 const audLabel = (o, s) => (s.audience === 'custom' ? `Custom (${s.custom.countries}, ${s.custom.age_min}-${s.custom.age_max}${s.custom.gender !== 'all' ? ', ' + s.custom.gender : ''})`
   : o.audiences.find((x) => x.id === s.audience)?.label || s.audience)
@@ -46,7 +48,7 @@ function FeedPreview({ ad }) {
     <div className="fp">
       <div className="ph"><i>R</i>Roopsee.<small>Sponsored</small></div>
       <div className="pt">{ad.primary_text || 'Your main text appears here'}</div>
-      {ad.image ? <img src={'/' + ad.image} alt="" /> : <div className="noimg">{ad.image_hash ? 'Image already on Meta' : 'No image yet'}</div>}
+      {ad.image ? <img src={'/' + ad.image} alt="" /> : ad.preview_url ? <MetaImg src={ad.preview_url} alt="" /> : <div className="noimg">{ad.image_hash ? 'Image already on Meta' : 'No image yet'}</div>}
       <div className="cta"><div><small>{host}</small><b>{ad.headline || 'Your headline'}</b></div><span>{CtaLabel[ad.cta] || 'Learn more'}</span></div>
     </div>
   )
@@ -73,6 +75,16 @@ function Flow({ o, ctx, params }) {
   useEffect(() => { // coming from the Creatives page with an image picked
     if (params.image) { setA((x) => ({ ...x, ads: [{ image: params.image, ad_key: params.image.split('/').pop().replace(/\.[^.]+$/, ''), ...x.defaults }] })); setStep(Number(params.step) || 1) }
   }, [params.image]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { // coming from Creatives > Already on Meta > Use in a campaign
+    if (!params.metahash) return
+    api('/api/meta-images?hashes=' + params.metahash).then(async (r) => {
+      const img = r.images?.[0]
+      if (!img) return
+      const key = (await api('/api/next-key?theme=' + encodeURIComponent(themeOf(img.name)))).key
+      setA((x) => ({ ...x, ads: [{ image_hash: img.hash, ad_key: key, preview_url: img.full || img.thumb, ...x.defaults }] }))
+      setStep(4)
+    }).catch(() => {})
+  }, [params.metahash]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { // a link to a saved draft: #new?draft=<id>
     if (params.draft) api('/api/drafts/' + params.draft).then((d) => { setA(normalize(d.answers, o)); setDraftId(d.id); setStep(Number(params.step) || 1) }).catch(() => {})
   }, [params.draft]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -282,6 +294,7 @@ function Step4({ o, a, setA, set }) {
   const [msg, setMsg] = useState(null)
   const [lib, setLib] = useState(null)
   const [hash, setHash] = useState({ hash: '', key: '' })
+  const [pick, setPick] = useState(false)
   const input = useRef(null)
   const setD = (k, v) => set('defaults', { ...d, [k]: v })
   const addAd = (extra) => setA((x) => ({ ...x, ads: [...x.ads, { ...x.defaults, ...extra }] }))
@@ -303,6 +316,13 @@ function Step4({ o, a, setA, set }) {
       try { const r = await api('/api/creatives', { method: 'POST', body: fd }); addAd({ image: r.saved, ad_key: r.key }) } catch (e) { setMsg(`${f.name}: ${e.message}`) }
     }
     setBusy(false)
+  }
+  const addMeta = async (img) => {
+    try {
+      const key = (await api('/api/next-key?theme=' + encodeURIComponent(themeOf(img.name, theme)))).key
+      addAd({ image_hash: img.hash, ad_key: key, preview_url: img.full || img.thumb })
+      setMsg(null); setPick(false)
+    } catch (e) { setMsg(e.message) }
   }
   const openLib = async () => setLib((await api('/api/creatives')).filter((c) => !c.used && !a.ads.some((x) => x.image === c.path)))
 
@@ -335,19 +355,25 @@ function Step4({ o, a, setA, set }) {
           {msg && <Banner tone="err">{msg}</Banner>}
           <div className="row" style={{ marginTop: 10 }}>
             <button type="button" className="btn small" onClick={openLib}>Pick from my library</button>
-            <details><summary className="btn small" style={{ display: 'inline-block', cursor: 'pointer' }}>Use an image already on Meta (hash)</summary>
+            <button type="button" className="btn small" onClick={() => setPick(!pick)}>{pick ? 'Close Meta images' : 'Pick an image already on Meta'}</button>
+            <details><summary className="btn small" style={{ display: 'inline-block', cursor: 'pointer' }}>Or paste an image hash</summary>
               <div className="fgrid" style={{ marginTop: 8 }}>
                 <Field label="Image hash"><input className="field" value={hash.hash} onChange={(e) => setHash({ ...hash, hash: e.target.value })} placeholder="32 letters and digits" /></Field>
                 <Field label="Ad ID (optional)" hint="Leave empty and one is made from the theme above, like RS_SKINCARE_001."><input className="field" value={hash.key} onChange={(e) => setHash({ ...hash, key: e.target.value.toUpperCase() })} /></Field>
               </div>
               <button type="button" className="btn small" style={{ marginTop: 8 }} onClick={async () => {
-                if (!/^[0-9a-f]{32}$/.test(hash.hash.trim())) { setMsg('That image hash does not look right. It should be 32 letters and digits.'); return }
+                const h = hash.hash.trim().toLowerCase()
+                if (!/^[0-9a-f]{32}$/.test(h)) { setMsg('That image hash does not look right. It should be 32 letters and digits.'); return }
+                let img
+                try { img = (await api('/api/meta-images?hashes=' + h)).images?.[0] } catch (e) { setMsg(e.message); return }
+                if (!img) { setMsg('That hash is not in this ad account. Use "Pick an image already on Meta" to see the ones you have.'); return }
                 let key = hash.key.trim()
-                if (!key) { try { key = (await api('/api/next-key?theme=' + encodeURIComponent(theme))).key } catch (e) { setMsg(e.message); return } }
-                setMsg(null); addAd({ image_hash: hash.hash.trim(), ad_key: key }); setHash({ hash: '', key: '' })
+                if (!key) { try { key = (await api('/api/next-key?theme=' + encodeURIComponent(themeOf(img.name, theme)))).key } catch (e) { setMsg(e.message); return } }
+                setMsg(null); addAd({ image_hash: img.hash, ad_key: key, preview_url: img.full || img.thumb }); setHash({ hash: '', key: '' })
               }}>Add this ad</button>
             </details>
           </div>
+          {pick && <div style={{ marginTop: 12 }}><MetaImageGrid limit={24} actions={(i) => <button type="button" className="btn small primary" onClick={() => addMeta(i)}>Use this image</button>} /></div>}
           {lib && (lib.length === 0 ? <div className="muted" style={{ marginTop: 8 }}>No unused images in your library.</div> : (
             <div className="picker" style={{ marginTop: 10 }}>{lib.map((c) => <button type="button" key={c.path} className="pick" onClick={() => { addAd({ image: c.path, ad_key: c.key }); setLib(lib.filter((x) => x.path !== c.path)) }}><img src={'/' + c.path} alt="" /><span>{c.key}</span></button>)}</div>
           ))}
@@ -355,9 +381,9 @@ function Step4({ o, a, setA, set }) {
 
         {a.ads.map((ad, i) => (
           <div key={ad.ad_key + i} className="adcard">
-            {ad.image ? <img className="pic" src={'/' + ad.image} alt="" /> : <div className="pic">image hash<br />{(ad.image_hash || '').slice(0, 8)}…</div>}
+            {ad.image ? <img className="pic" src={'/' + ad.image} alt="" /> : ad.preview_url ? <div className="pic metapic"><MetaImg src={ad.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div> : <div className="pic">image hash<br />{(ad.image_hash || '').slice(0, 8)}…</div>}
             <div className="stack">
-              <div className="row">{ad.image ? <b>{ad.ad_key}</b> : <label className="lf" style={{ minWidth: 220 }}><span className="lf-label">Ad ID (must be new, like RS_SKINCARE_001)</span><input className="field" value={ad.ad_key || ''} onChange={(e) => upd(i, 'ad_key', e.target.value.toUpperCase())} /></label>}
+              <div className="row">{ad.image ? <b>{ad.ad_key}</b> : <label className="lf" style={{ minWidth: 220 }}><span className="lf-label">Ad ID (must be new, like RS_SKINCARE_001)</span><span className="mini mono">hash {(ad.image_hash || '').slice(0, 10)}…</span><input className="field" value={ad.ad_key || ''} onChange={(e) => upd(i, 'ad_key', e.target.value.toUpperCase())} /></label>}
                 <button type="button" className="btn small danger right" onClick={() => setA((x) => ({ ...x, ads: x.ads.filter((_, j) => j !== i) }))}><Icon name="trash" size={13} /> Remove</button></div>
               {a.adsets.length > 1 && (
                 <div><span className="lf-label">Show this ad in</span>

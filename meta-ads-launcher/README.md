@@ -211,7 +211,7 @@ The first run builds the screens (needs Node.js once; the dashboard needs it too
 1. **What for**: get website visitors, or get sales (Sales needs your pixel in `.env`).
 2. **Who sees it**: one or more **ad sets**. Each ad set is an audience (a ready-made one, one you saved, or your own countries, ages and gender) plus where the ads appear. Use **Add another ad set** or **Duplicate** to compare audiences or places side by side.
 3. **Budget**: with several ad sets choose **one budget for the whole campaign** (Meta shares it) or **a separate budget for each ad set**. Optional start and end dates.
-4. **Ads**: drop in several images (each becomes an ad), write the text once and adjust any ad, pick the web page from a list, and for each ad tick **which ad sets show it**. An ad shown in two ad sets is created once per ad set (see below).
+4. **Ads**: drop in several images (each becomes an ad), pick one from your library, or **pick an image already on Meta** (you see the real image and its hash; or paste a hash and it is checked against the ad account). Write the text once and adjust any ad, pick the web page from a list, and for each ad tick **which ad sets show it**. An ad shown in two ad sets is created once per ad set (see below).
 5. **Review**: a plain summary with an ad set table, a checklist of anything to fix, then **Create on Meta (paused)**.
 
 It uploads the images, creates the campaign and all its ad sets, then the ads, all **paused**, with a progress list. If a step fails you get a plain explanation and a **Try again** button that skips what already worked. Drafts are saved as you go (and can be opened by link), and you can start from an earlier campaign. Names on Meta are generated (for example `Roopsee | Traffic | 17 Nov`); ad IDs come from the image names. Turning a campaign on is separate: **Run > Go live**, with the typed word `PUBLISH`.
@@ -224,13 +224,13 @@ It uploads the images, creates the campaign and all its ad sets, then the ads, a
 |---|---|
 | **New campaign** | The guided flow above |
 | **Overview** | Everything on Meta, read live: tiles, things that need attention, and a campaign > ad set > ad tree |
-| **Creatives** | Add images by theme, see which are used or on Meta, and copy hashes of images already in the ad account |
+| **Creatives** | Add images by theme and see which are used or on Meta. **Already on Meta** shows the actual images in your ad account with their hash: click one to see it full size, copy the hash, or use it in a new campaign |
 | **Campaigns & ad sets** | Edit campaigns, ad sets and audiences as plain cards (above) |
 | **Links & tracking** (advanced) | Web page links for the dropdown, and the tracking tags added to every link |
 | **Run** (advanced) | The three steps by hand with dry run / check with Meta / real, plus Go live |
 | **Health** (advanced) | The connection check |
 
-UI safety: it listens on 127.0.0.1 only and rejects other host names; changes need a header a web page on another site cannot send; the token and secret never reach the browser; one command runs at a time; the Sandbox / Production button (top right) switches the environment for that window only, and switching to Production needs the typed word `PRODUCTION`; restarting the UI returns to the value in `.env` (`META_ENV`, sandbox by default); production shows a red notice and needs an extra tick box before any change, and going live still needs the typed word `PUBLISH`.
+UI safety: it listens on 127.0.0.1 only and rejects other host names; changes need a header a web page on another site cannot send; the token and secret never reach the browser; one command runs at a time; the Sandbox / Production button (top right) is a simple switch for that window only (it is refused while a step is running or if that environment is not set up in `.env`); restarting the UI returns to the value in `.env` (`META_ENV`, sandbox by default); production shows a red notice and needs an extra tick box before any change, and going live still needs the typed word `PUBLISH`.
 
 ## 6. Running your first ad (sandbox walkthrough, command line)
 
@@ -258,7 +258,7 @@ After `prepare` succeeds, the batch is **frozen**: if you edit the file, `valida
 
 ## 7. Safety rules built in
 
-- **Sandbox by default.** Production needs `META_ENV=production` (or the UI switch with the typed word `PRODUCTION`) **and** `--confirm-production` (or the UI's tick box) for every write, and publishing in production always needs a typed `PUBLISH`.
+- **Sandbox by default.** Production needs `META_ENV=production` (or the UI switch) **and** `--confirm-production` (or the UI's tick box) for every write, and publishing in production always needs a typed `PUBLISH`.
 - **Everything is created PAUSED.** Campaign status other than `PAUSED` is rejected by `validate`.
 - **No duplicates.** Registries in `data/<env>/` remember Meta IDs. Before creating a campaign, ad set or ad, the launcher also looks for the same name on Meta. Creatives cannot be looked up by name, so only the local registry protects them. Do not delete `data/` mid-way.
 - **Writes are never blindly retried.** Reads and rate-limit errors are retried. A write that times out is not, because it may have gone through; re-run the command and it will adopt what exists.

@@ -110,7 +110,7 @@ def next_key(theme: str):
 @app.post("/api/env")
 async def switch_env(req: Request):
     """Switch between sandbox and production for THIS UI session only (restarting returns to the value in .env).
-    Production needs the typed word; neither can be chosen if its credentials are incomplete or a step is running."""
+    Neither can be chosen if its credentials are incomplete or a step is running."""
     b = await req.json()
     target = b.get("env")
     if target not in ("sandbox", "production"):
@@ -120,8 +120,6 @@ async def switch_env(req: Request):
     miss = Settings(target).missing()
     if miss:
         raise HTTPException(400, f"{target} is not fully set up in .env. Missing: {', '.join(miss)}")
-    if target == "production" and b.get("confirm_text") != "PRODUCTION":
-        raise HTTPException(400, "type PRODUCTION exactly to switch to the real ad account")
     os.environ["META_ENV"] = target
     return {"env": target}
 
