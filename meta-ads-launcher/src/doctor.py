@@ -76,6 +76,64 @@ def images(s: Settings) -> None:
         print(f"  {r['hash']}  {r.get('width')}x{r.get('height')}  {r.get('name', '')}  {r.get('created_time', '')[:10]}")
 
 
+def discover(s: Settings) -> None:
+    """Read-only: every ad account, Page, Instagram account and pixel this token can see, with the id to paste into .env."""
+    miss = s.missing(("ACCESS_TOKEN", "APP_SECRET"))
+    if miss:
+        raise LauncherError("missing in .env: " + ", ".join(miss))
+    meta = Meta(s)
+    prefix = f"META_{s.env.upper()}_"
+
+    def section(title, env_name, rows):
+        print(f"\n{title}  ->  {prefix}{env_name}")
+        for r in rows or [None]:
+            print("  " + (r if r else "(none visible to this token)"))
+
+    def attempt(fn):
+        try:
+            return fn()
+        except MetaError as e:
+            return [f"could not read: {str(e)[:150]}"]
+
+    print(f"Token owner: {meta.get('me', fields='name').get('name')}   environment: {s.env.upper()}")
+    section("AD ACCOUNTS", "AD_ACCOUNT_ID", attempt(lambda: [f"{a['id']}  {a.get('name')}  {a.get('currency')}  status {a.get('account_status')}"
+                                                         for a in meta.pages("me/adaccounts", fields="id,name,currency,account_status", limit=100)]))
+    section("FACEBOOK PAGES", "PAGE_ID", attempt(lambda: [f"{p['id']}  {p.get('name')}" for p in meta.pages("me/accounts", fields="id,name", limit=100)]))
+    accts = [a["id"] for a in meta.pages("me/adaccounts", fields="id", limit=25)] if not s.account else [s.account]
+    ig, px = [], []
+    for a in accts[:5]:
+        ig += attempt(lambda: [f"{i['id']}  @{i.get('username', '')}  (via {a})" for i in meta.pages(f"{a}/instagram_accounts", fields="id,username", limit=50)])
+        px += attempt(lambda: [f"{p['id']}  {p.get('name')}  (via {a})" for p in meta.pages(f"{a}/adspixels", fields="id,name", limit=50)])
+    section("INSTAGRAM ACCOUNTS (optional)", "INSTAGRAM_ID", ig)
+    section("PIXELS / DATASETS (needed for Sales)", "PIXEL_ID", px)
+
+
+def fetch_live(s: Settings) -> dict:
+    """Campaign > ad set > ad tree read straight from Meta, as plain data (used by `live` and by the UI)."""
+    meta = Meta(s)
+    acc = s.account
+    camps = meta.pages(f"{acc}/campaigns", fields="id,name,objective,effective_status,daily_budget,created_time", limit=100)
+    sets = meta.pages(f"{acc}/adsets", fields="id,name,campaign_id,effective_status,optimization_goal,daily_budget", limit=200)
+    ads = meta.pages(f"{acc}/ads", fields="id,name,adset_id,effective_status,creative{id}", limit=200)
+    try:
+        imgs = meta.pages(f"{acc}/adimages", fields="hash,name,width,height,created_time", limit=100)
+    except MetaError as e:
+        imgs = []
+        print(f"(could not list images: {str(e)[:120]})")
+    money = lambda v: round(int(v) / 100, 2) if v else None  # Meta reports minor units
+    tree = []
+    for c in camps:
+        node = {"id": c["id"], "name": c["name"], "status": c.get("effective_status"), "objective": c.get("objective"), "daily_budget": money(c.get("daily_budget")),
+                "created": (c.get("created_time") or "")[:10], "children": []}
+        for a in [x for x in sets if x.get("campaign_id") == c["id"]]:
+            an = {"id": a["id"], "name": a["name"], "status": a.get("effective_status"), "goal": a.get("optimization_goal"), "daily_budget": money(a.get("daily_budget")), "children": []}
+            for d in [x for x in ads if x.get("adset_id") == a["id"]]:
+                an["children"].append({"id": d["id"], "name": d["name"], "status": d.get("effective_status"), "creative": (d.get("creative") or {}).get("id")})
+            node["children"].append(an)
+        tree.append(node)
+    return {"tree": tree, "images": imgs, "counts": {"campaigns": len(camps), "adsets": len(sets), "ads": len(ads), "images": len(imgs)}}
+
+
 def live(s: Settings) -> None:
     """Everything that exists in the ad account right now, read straight from Meta (campaign > ad set > ad)."""
     meta = Meta(s)
@@ -83,7 +141,11 @@ def live(s: Settings) -> None:
     camps = meta.pages(f"{acc}/campaigns", fields="id,name,objective,effective_status,daily_budget,created_time", limit=100)
     sets = meta.pages(f"{acc}/adsets", fields="id,name,campaign_id,effective_status,optimization_goal,daily_budget", limit=200)
     ads = meta.pages(f"{acc}/ads", fields="id,name,adset_id,effective_status,creative{id}", limit=200)
-    imgs = meta.pages(f"{acc}/adimages", fields="hash,name", limit=100)
+    try:
+        imgs = meta.pages(f"{acc}/adimages", fields="hash,name", limit=100)
+    except MetaError as e:  # the image list is a nice-to-have; never lose the campaign tree because of it
+        imgs = []
+        print(f"(could not list images: {str(e)[:120]})")
     print(f"LIVE on Meta - {s.env.upper()} {acc}: {len(camps)} campaign(s), {len(sets)} ad set(s), {len(ads)} ad(s), {len(imgs)} image(s)\n")
     money = lambda v: f"INR {int(v) / 100:,.0f}/day" if v else "-"
     for c in camps:

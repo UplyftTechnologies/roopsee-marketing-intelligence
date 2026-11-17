@@ -5,7 +5,7 @@ import re
 import struct
 from urllib.parse import urlparse
 
-from .common import (CTAS, GOALS, KEY_RE, OBJECTIVES, PLACEMENTS, ROOT, STATUSES, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
+from .common import (AD_KEY_RE, CTAS, GOALS, KEY_RE, base_key, OBJECTIVES, PLACEMENTS, ROOT, STATUSES, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
                      audiences_cfg, batch_files, campaigns_cfg, image_path, jload, sha256)
 
 MAX_BYTES = 30 * 1024 * 1024
@@ -111,8 +111,8 @@ def validate(s: Settings, only: str | None = None) -> tuple[list[str], list[str]
             seen[key] = name
             if not scope:
                 continue
-            if not KEY_RE.match(key):
-                err(f"{where}: ad_key must look like RS_ACNE_001")
+            if not AD_KEY_RE.match(key):
+                err(f"{where}: ad_key must look like RS_ACNE_001 (or RS_ACNE_001_S2 for the copy in a second ad set)")
             if key in ad_reg and ad_reg.get(key, {}).get("batch") not in (None, name):
                 err(f"{where}: key already used by batch {ad_reg.get(key)['batch']}")
             status = ad.get("status")
@@ -149,8 +149,8 @@ def validate(s: Settings, only: str | None = None) -> tuple[list[str], list[str]
                 else:
                     if p.suffix.lower() not in (".jpg", ".jpeg", ".png"):
                         err(f"{where}: image must be JPG or PNG")
-                    if p.stem != key:
-                        err(f"{where}: filename '{p.name}' must match ad_key '{key}'")
+                    if p.stem != base_key(key):
+                        err(f"{where}: filename '{p.name}' must match ad_key '{base_key(key)}'")
                     if p.stat().st_size > MAX_BYTES:
                         err(f"{where}: image is over 30 MB")
                     size = image_size(p)

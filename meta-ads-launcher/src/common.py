@@ -10,7 +10,13 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KEY_RE = re.compile(r"^RS_[A-Z0-9]+_\d{3}$")
+KEY_RE = re.compile(r"^RS_[A-Z0-9]+_\d{3}$")  # an image / base ad ID, e.g. RS_ACNE_001
+AD_KEY_RE = re.compile(r"^RS_[A-Z0-9]+_\d{3}(_S\d{1,2})?$")  # an ad ID; _S2, _S3 ... mark the copy of the same ad in another ad set
+
+
+def base_key(k: str) -> str:
+    """RS_ACNE_001_S2 -> RS_ACNE_001 (the image file name)."""
+    return re.sub(r"_S\d{1,2}$", "", k or "")
 
 OBJECTIVES = {"OUTCOME_TRAFFIC", "OUTCOME_SALES", "OUTCOME_LEADS", "OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT"}
 CTAS = {"LEARN_MORE", "SHOP_NOW", "SIGN_UP", "GET_OFFER", "ORDER_NOW", "CONTACT_US", "SUBSCRIBE"}

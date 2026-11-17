@@ -5,3 +5,6 @@ logs/*.log
 data/*/*.json
 .venv/
 backups/
+ui/dist/
+ui-app/node_modules/
+drafts/

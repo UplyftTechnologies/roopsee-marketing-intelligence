@@ -1,0 +1,15 @@
+{
+  "batch_id": "ROOPSEE_PROD_TEST_001",
+  "ads": [
+    {
+      "ad_key": "RS_TEST_101",
+      "adset_key": "ZZ_TEST_ADSET_001",
+      "image": "creatives/test/RS_TEST_101.png",
+      "primary_text": "Launcher test ad - paused, never published.",
+      "headline": "Launcher test (do not activate)",
+      "cta": "LEARN_MORE",
+      "destination": "https://roopsee.com/",
+      "status": "READY"
+    }
+  ]
+}

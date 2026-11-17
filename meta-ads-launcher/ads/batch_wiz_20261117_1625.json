@@ -1,0 +1,15 @@
+{
+  "batch_id": "ROOPSEE_WIZ_20261117_1625",
+  "ads": [
+    {
+      "ad_key": "RS_TEST_102",
+      "adset_key": "Women India 18-45 | FB+IG | 17 Nov | 2",
+      "primary_text": "Hello World",
+      "headline": "Roopsee Se kharido Skincare",
+      "cta": "ORDER_NOW",
+      "destination": "https://roopsee.com/",
+      "status": "READY",
+      "image": "creatives/test/RS_TEST_102.jpg"
+    }
+  ]
+}

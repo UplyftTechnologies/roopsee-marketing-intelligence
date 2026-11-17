@@ -6,6 +6,34 @@
       "budget_strategy": "CBO",
       "daily_budget": 500,
       "status": "PAUSED"
+    },
+    {
+      "key": "ROOPSEE_TRAFFIC_002",
+      "objective": "OUTCOME_TRAFFIC",
+      "budget_strategy": "CBO",
+      "daily_budget": 5000,
+      "status": "PAUSED"
+    },
+    {
+      "key": "ZZ_TEST_LAUNCHER_001",
+      "objective": "OUTCOME_TRAFFIC",
+      "budget_strategy": "CBO",
+      "daily_budget": 500,
+      "status": "PAUSED"
+    },
+    {
+      "key": "Roopsee | Traffic | 17 Nov",
+      "objective": "OUTCOME_TRAFFIC",
+      "budget_strategy": "CBO",
+      "daily_budget": 500.0,
+      "status": "PAUSED"
+    },
+    {
+      "key": "Roopsee | Traffic | 17 Nov | 2",
+      "objective": "OUTCOME_TRAFFIC",
+      "budget_strategy": "CBO",
+      "daily_budget": 500.0,
+      "status": "PAUSED"
     }
   ]
 }

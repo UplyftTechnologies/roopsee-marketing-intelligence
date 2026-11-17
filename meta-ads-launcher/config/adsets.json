@@ -4,7 +4,48 @@
       "key": "PROSPECTING_001",
       "campaign_key": "ROOPSEE_TRAFFIC_001",
       "audience": "BROAD",
-      "placements": ["instagram"],
+      "placements": [
+        "instagram"
+      ],
+      "optimization_goal": "LINK_CLICKS"
+    },
+    {
+      "key": "PROSPECTING_002",
+      "campaign_key": "ROOPSEE_TRAFFIC_002",
+      "audience": "WOMEN_BROAD",
+      "placements": [
+        "instagram",
+        "facebook"
+      ],
+      "optimization_goal": "LINK_CLICKS",
+      "optimization_event": "PURCHASE"
+    },
+    {
+      "key": "ZZ_TEST_ADSET_001",
+      "campaign_key": "ZZ_TEST_LAUNCHER_001",
+      "audience": "BROAD",
+      "placements": [
+        "instagram"
+      ],
+      "optimization_goal": "LINK_CLICKS"
+    },
+    {
+      "key": "India 18-45 | Instagram | 17 Nov",
+      "campaign_key": "Roopsee | Traffic | 17 Nov",
+      "audience": "WIZ_IN_ALL_18_45",
+      "placements": [
+        "instagram"
+      ],
+      "optimization_goal": "LINK_CLICKS"
+    },
+    {
+      "key": "Women India 18-45 | FB+IG | 17 Nov | 2",
+      "campaign_key": "Roopsee | Traffic | 17 Nov | 2",
+      "audience": "WIZ_IN_WOMEN_18_45",
+      "placements": [
+        "facebook",
+        "instagram"
+      ],
       "optimization_goal": "LINK_CLICKS"
     }
   ]

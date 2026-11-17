@@ -1,0 +1,15 @@
+{
+  "batch_id": "ROOPSEE_WIZ_20261117_1610",
+  "ads": [
+    {
+      "ad_key": "RS_TEST_103",
+      "adset_key": "India 18-45 | Instagram | 17 Nov",
+      "primary_text": "Hello World",
+      "headline": "roopsee karoo",
+      "cta": "SIGN_UP",
+      "destination": "https://roopsee.com/",
+      "status": "READY",
+      "image": "creatives/test/RS_TEST_103.png"
+    }
+  ]
+}

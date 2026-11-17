@@ -8,10 +8,32 @@ Web UI:  python run.py ui
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+from pathlib import Path
+from shutil import which
 
 from src.common import LauncherError
 from src.pipeline import COMMANDS, execute
+
+
+def ensure_ui_built(force: bool = False) -> None:
+    """Build the React UI (once, and again whenever its source changes). Needs Node.js only for this."""
+    root = Path(__file__).resolve().parent
+    app, dist = root / "ui-app", root / "ui" / "dist" / "index.html"
+    srcs = [p for p in (app / "src").rglob("*") if p.is_file()] + [app / "index.html", app / "package.json", app / "vite.config.js"]
+    if dist.exists() and not force and not any(p.stat().st_mtime > dist.stat().st_mtime for p in srcs):
+        return
+    if not which("npm"):
+        if dist.exists():
+            print("Note: Node.js (npm) was not found, so the UI was not rebuilt. Using the existing build.")
+            return
+        raise LauncherError("Node.js is needed once to build the UI. Install the LTS version from https://nodejs.org/ and run again.")
+    if not (app / "node_modules").exists():
+        print("Installing UI packages (one time, about a minute)...")
+        subprocess.run("npm install --no-audit --no-fund", cwd=app, shell=True, check=True)
+    print("Building the UI...")
+    subprocess.run("npm run build", cwd=app, shell=True, check=True)
 
 
 def main() -> int:
@@ -26,6 +48,11 @@ def main() -> int:
     ap.add_argument("--no-browser", action="store_true", help="ui: do not open the browser")
     a = ap.parse_args()
     if a.command == "ui":
+        try:
+            ensure_ui_built()
+        except (LauncherError, subprocess.CalledProcessError) as e:
+            print(f"\nERROR: {e}", file=sys.stderr)
+            return 1
         from ui.server import serve
         serve(open_browser=not a.no_browser)
         return 0

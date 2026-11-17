@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 
@@ -80,7 +81,9 @@ class Meta:
             nxt = res.get("paging", {}).get("next")
             if not nxt or len(out) > 5000:
                 return out
-            res = self._send("GET", nxt.replace(self.base, ""))
+            u = urlparse(nxt)  # Meta's "next" link may name another API version, so rebuild the request ourselves
+            q = {k: v for k, v in parse_qsl(u.query) if k not in ("access_token", "appsecret_proof")}
+            res = self._send("GET", u.path.split("/", 2)[2], params=q)
 
     def post(self, path, data: dict, files=None, validate_only: bool = False):
         """Every write goes through here, so dry-run and validate_only apply to all of them."""

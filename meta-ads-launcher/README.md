@@ -43,6 +43,7 @@ Each command can be re-run safely. Finished work is skipped, and objects that al
 meta-ads-launcher/
 ├── run.py                  the one command you use
 ├── requirements.txt        requests, fastapi, uvicorn, python-multipart
+├── drafts/                 saved wizard drafts (created on demand)
 ├── SANDBOX_TEST.md         what was tested in the sandbox, and the result
 ├── .env.example            copy to .env and fill in (never commit .env)
 ├── plan.md                 the original plan this was built from
@@ -61,7 +62,8 @@ meta-ads-launcher/
 │   └── production/         the same, kept separate for production
 ├── logs/launcher.log       every run, with secrets redacted
 ├── reports/                reserved for exports
-├── ui/                     the web UI (server.py + static/ HTML, CSS, JS; no build step)
+├── ui/                     web UI backend (server.py, wizard.py, jobs.py); ui/dist is the built screens
+├── ui-app/                 web UI source (React + Vite; styles copied from the dashboard)
 └── src/                    the implementation (see section 9)
 ```
 
@@ -167,6 +169,10 @@ python run.py upload   --batch batch_001          # images -> image hashes
 python run.py setup    --batch batch_001          # campaigns + ad sets (PAUSED)
 python run.py prepare  --batch batch_001          # creatives + ads (PAUSED)
 python run.py status   [--live]                   # what exists; --live asks Meta for current state
+python run.py live                                # everything in the ad account right now, straight from Meta
+python run.py discover                            # list the ad accounts, Pages, Instagram accounts and pixels your token can see (to fill .env)
+python run.py images                              # images already in the ad account, with hashes
+python run.py ui                                  # the web UI
 python run.py publish  --batch batch_001          # ACTIVATE (asks you to type PUBLISH)
 ```
 
@@ -189,23 +195,38 @@ Every write command runs `validate` first and stops if there are errors.
 
 ---
 
-## 5b. Web UI (optional)
+## 5b. Web UI (the easy way)
 
 ```
 python run.py ui            # opens http://127.0.0.1:8765  (change with META_UI_PORT)
 python run.py ui --no-browser
 ```
-The UI wraps the same code as the CLI (`src/pipeline.py`), so both always behave identically.
+The first run builds the screens (needs Node.js once; the dashboard needs it too). The look matches the performance dashboard: same sidebar, top bar, cards, badges and light/dark theme. It runs on the same code as the command line (`src/pipeline.py`), so both always behave the same.
 
-| Tab | What it does |
+**New campaign (the guided way).** Five plain questions, then one button:
+1. **What for**: get website visitors, or get sales (Sales needs your pixel in `.env`).
+2. **Who sees it**: one or more **ad sets**. Each ad set is an audience (a ready-made one, one you saved, or your own countries, ages and gender) plus where the ads appear. Use **Add another ad set** or **Duplicate** to compare audiences or places side by side.
+3. **Budget**: with several ad sets choose **one budget for the whole campaign** (Meta shares it) or **a separate budget for each ad set**. Optional start and end dates.
+4. **Ads**: drop in several images (each becomes an ad), write the text once and adjust any ad, pick the web page from a list, and for each ad tick **which ad sets show it**. An ad shown in two ad sets is created once per ad set (see below).
+5. **Review**: a plain summary with an ad set table, a checklist of anything to fix, then **Create on Meta (paused)**.
+
+It uploads the images, creates the campaign and all its ad sets, then the ads, all **paused**, with a progress list. If a step fails you get a plain explanation and a **Try again** button that skips what already worked. Drafts are saved as you go (and can be opened by link), and you can start from an earlier campaign. Names on Meta are generated (for example `Roopsee | Traffic | 17 Nov`); ad IDs come from the image names. Turning a campaign on is separate: **Run > Go live**, with the typed word `PUBLISH`.
+
+**One ad in several ad sets.** Meta needs a separate ad for each ad set. The launcher makes them for you: the first keeps the image's ID (`RS_ACNE_001`) and the others get `_S2`, `_S3` and so on (`RS_ACNE_001_S2`), using the same image. Ad IDs ending in `_S<number>` are valid; the image file name stays `RS_ACNE_001`.
+
+**Campaigns & ad sets (the editing way).** A page of cards, one per campaign, with its ad sets inside, in plain words: what it is for ("Website visits", "Sales"), how the budget works, who sees it, where it shows, what Meta should aim for, dates. Define **audiences** once at the top and pick them anywhere. **Make a copy** duplicates an ad set or a whole campaign. Anything already created on Meta is locked and marked "on Meta" (Meta objects cannot be edited from config files); make a copy to change it. Names can only be set on new items, so existing batches are never broken.
+
+| Page | What it does |
 |---|---|
-| **Health** | Runs `doctor` as a checklist; shows what exists on Meta and the missing `.env` settings |
-| **Library** | Drag-and-drop images into `creatives/<category>/<KEY>`; suggests the next key; shows size warnings and whether each image is on Meta; lists hashes already in the ad account |
-| **Ads** | Pick a batch, add or edit ads in a form (image from the library or an image hash, character counters, CTA list) with a live feed-style preview; validates on every save; frozen batches are read-only |
-| **Setup** | Forms for campaigns, ad sets, audiences and the UTM template (they edit `config/*.json`) |
-| **Run** | Upload, Setup, Prepare with Dry run / Check with Meta / Run for real, live log, then review-and-publish with the typed `PUBLISH` confirmation |
+| **New campaign** | The guided flow above |
+| **Overview** | Everything on Meta, read live: tiles, things that need attention, and a campaign > ad set > ad tree |
+| **Creatives** | Add images by theme, see which are used or on Meta, and copy hashes of images already in the ad account |
+| **Campaigns & ad sets** | Edit campaigns, ad sets and audiences as plain cards (above) |
+| **Links & tracking** (advanced) | Web page links for the dropdown, and the tracking tags added to every link |
+| **Run** (advanced) | The three steps by hand with dry run / check with Meta / real, plus Go live |
+| **Health** (advanced) | The connection check |
 
-UI safety: it listens on 127.0.0.1 only and rejects other host names; writes need a custom header a web page on another site cannot send; the token and secret never reach the browser; only one command runs at a time; the environment (sandbox or production) comes only from `.env`, never from the page; production shows a red banner and needs an extra tick box before any write, and publish still needs the typed word.
+UI safety: it listens on 127.0.0.1 only and rejects other host names; changes need a header a web page on another site cannot send; the token and secret never reach the browser; one command runs at a time; the Sandbox / Production button (top right) switches the environment for that window only, and switching to Production needs the typed word `PRODUCTION`; restarting the UI returns to the value in `.env` (`META_ENV`, sandbox by default); production shows a red notice and needs an extra tick box before any change, and going live still needs the typed word `PUBLISH`.
 
 ## 6. Running your first ad (sandbox walkthrough)
 
@@ -272,7 +293,7 @@ Performance reading is done by the dashboard's **Meta Ads** page, not by this to
 | `create_campaigns.py`, `create_adsets.py` | Setup step |
 | `create_creatives.py`, `create_ads.py` | Prepare step; freezes the batch |
 | `publish.py` | The only code that activates anything |
-| `doctor.py` | `doctor`, `images` and `status` |
+| `doctor.py` | `doctor`, `discover`, `live`, `images` and `status` |
 | `pipeline.py` | The single entry point used by both `run.py` and the UI |
 
 ---
