@@ -49,3 +49,8 @@ Conclusion: the payload is not the problem. The sandbox user cannot act as the P
 
 ## Findings that changed the launcher
 - `doctor` previously demanded `ads_read`; this token has `ads_management` and reads fine without it, so the check now requires only `ads_management` and proves reading with a real request.
+
+## Addendum (later the same day)
+- **Your own token cannot open the sandbox account.** A check-only test with the production (personal login) token against the sandbox account failed with "Ad account owner has NOT grant ads_management or ads_read". It could read the Page, but not the sandbox account. So the sandbox needs the sandbox user's token for the account and a Page admin for the creative, and no single token has both. This looks like a limit of the sandbox, not a configuration mistake.
+- **The same creative works on the real account.** On production, with your own token, the creative and ad were created paused (campaign `ZZ_TEST_LAUNCHER_001`) and confirmed in Ads Manager. The Page permission problem is specific to the sandbox user.
+- **Multi ad set test (sandbox):** one campaign with two ad sets (separate budgets of 300 and 400 rupees, one targeting women only) was created paused and read back from Meta correctly; one ad placed in both ad sets became two ads (`RS_MULTI_001`, `RS_MULTI_001_S2`) sharing one image hash. The run stopped at the creative step for the same Page reason as above.

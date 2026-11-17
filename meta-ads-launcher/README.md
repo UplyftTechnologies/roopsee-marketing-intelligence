@@ -1,13 +1,13 @@
 # Roopsee Meta Ads Launcher
 
-A command-line tool that turns **local images + JSON files** into Meta (Facebook / Instagram) ads through the Marketing API.
+A tool that turns **local images + JSON files** into Meta (Facebook / Instagram) ads through the Marketing API. Use it from the **command line** or from the **web UI** (`python run.py ui`), which has a guided flow for creating campaigns with several ad sets and several ads.
 
 - You design the images and write the copy. Python validates, uploads and creates everything on Meta.
 - **Everything is created PAUSED.** Only `publish` activates anything, and only after you type `PUBLISH`.
-- The default environment is the **sandbox** (no delivery, no spend). Production is locked behind an explicit flag.
+- The default environment is the **sandbox** (no delivery, no spend). Production is locked behind an explicit flag (CLI) or a typed confirmation (UI).
 - Spend and orders per creative show up in the marketing dashboard (see [Tracking](#tracking-and-the-dashboard)).
 
-> Status: tested against a real Meta **sandbox** account. Image upload, campaign and ad set creation work; creative creation is blocked by a Page permission on the sandbox token. Full report: [SANDBOX_TEST.md](SANDBOX_TEST.md). See also [Known limits](#12-known-limits-and-unverified-points).
+> Status: tested on a real Meta **sandbox** and on the real (production) account. Sandbox: image upload, campaigns and ad sets work, including several ad sets in one campaign; creatives and ads are blocked there because the sandbox user cannot act as your Page (see [SANDBOX_TEST.md](SANDBOX_TEST.md)). Production: the full chain (image, campaign, ad set, creative, ad) was created **paused** and confirmed in Ads Manager. Going live (`publish`) has not been tested. See [Known limits](#12-known-limits-and-unverified-points).
 
 The original design is kept in [plan.md](plan.md). This README describes what is actually built, which differs from the plan in a few places (listed at the end).
 
@@ -43,20 +43,22 @@ Each command can be re-run safely. Finished work is skipped, and objects that al
 meta-ads-launcher/
 ├── run.py                  the one command you use
 ├── requirements.txt        requests, fastapi, uvicorn, python-multipart
-├── drafts/                 saved wizard drafts (created on demand)
+├── drafts/                 saved wizard drafts (created on demand, git-ignored)
+├── backups/                copies of config made before a reset (git-ignored)
 ├── SANDBOX_TEST.md         what was tested in the sandbox, and the result
 ├── .env.example            copy to .env and fill in (never commit .env)
 ├── plan.md                 the original plan this was built from
 ├── config/
 │   ├── account.json        currency + UTM template
 │   ├── audiences.json      named audiences (country, age, gender)
+│   ├── destinations.json   web page links shown as a dropdown in the UI
 │   ├── campaigns.json      campaigns: objective, budget
 │   └── adsets.json         ad sets: audience, placements, optimisation
 ├── creatives/              your images, one folder per angle
 │   ├── acne/  pigmentation/  trust/  retargeting/
 │   └── test/RS_TEST_001.png    generated test image for the sandbox
 ├── ads/
-│   └── batch_001.json      the ads: image, copy, CTA, URL, status
+│   └── batch_001.json      the ads: image, copy, CTA, URL, status (the UI writes batch_wiz_<date>_<time>.json for each campaign it creates)
 ├── data/
 │   ├── sandbox/            Meta IDs and image hashes for the sandbox
 │   └── production/         the same, kept separate for production
@@ -87,14 +89,14 @@ Fill in the **SANDBOX** block of `.env`:
 |---|---|
 | `META_ENV` | `sandbox` (default) or `production`. Selects which block below is used |
 | `META_API_VERSION` | `v25.0` |
-| `META_SANDBOX_ACCESS_TOKEN` | Token with `ads_management` and `ads_read`; for creatives also the Page permissions (`pages_read_engagement`, `pages_show_list`) |
+| `META_SANDBOX_ACCESS_TOKEN` | Token with `ads_management` (`ads_read` is also fine to have); for creatives also the Page permissions (`pages_read_engagement`, `pages_show_list`) |
 | `META_SANDBOX_APP_ID` / `_APP_SECRET` | Your Meta app. The secret is used to sign every call (`appsecret_proof`); the app id enables the token-expiry check in `doctor` |
 | `META_SANDBOX_AD_ACCOUNT_ID` | The sandbox ad account, `act_...` (the `act_` prefix is added if you leave it out) |
 | `META_SANDBOX_PAGE_ID` | The Facebook Page that ads are published from. Required for creatives |
 | `META_SANDBOX_INSTAGRAM_ID` | Optional Instagram account id for Instagram placements |
 | `META_SANDBOX_PIXEL_ID` | Optional. Only needed for conversion-optimised ad sets (Sales) |
 
-**One token for both?** That is fine. Put it once in the shared block (`META_ACCESS_TOKEN`, `META_APP_ID`, `META_APP_SECRET`, `META_PAGE_ID`, `META_INSTAGRAM_ID`) and leave the per-environment versions empty; they are used when a per-environment value is missing. The **ad account id and pixel id are never shared**, so the sandbox cannot touch the real account through the fallback. The environment is chosen only by `META_ENV` and its ad account.
+**One token for both?** That is fine. Put it once in the shared block (`META_ACCESS_TOKEN`, `META_APP_ID`, `META_APP_SECRET`, `META_PAGE_ID`, `META_INSTAGRAM_ID`) and leave the per-environment versions empty; they are used when a per-environment value is missing. The **ad account id and pixel id are never shared**, so the sandbox cannot touch the real account through the fallback. The environment starts as `META_ENV` and can be switched in the UI for that window (section 5b).
 
 The `META_PRODUCTION_*` block mirrors it. Leave it empty until you are ready for real money. Real environment variables starting with `META_` override the file.
 
@@ -104,7 +106,9 @@ Never paste tokens into chat, tickets or commits. If one was exposed, rotate it.
 ```
 python run.py doctor
 ```
-It verifies: credentials present, token accepted, token valid and its expiry, `ads_management` + `ads_read` scopes, ad account reachable (name, currency, timezone), currency matches `config/account.json`, Page reachable, and that config + a batch exist. Fix every `FAIL` line before going on.
+It verifies: credentials present, token accepted, token valid and its expiry, the `ads_management` permission, ad account reachable (name, currency, timezone), currency matches `config/account.json`, that campaigns can be read, Page reachable, and that config + a batch exist. Fix every `FAIL` line before going on.
+
+**Not sure which ID to use?** `python run.py discover` lists the ad accounts, Pages, Instagram accounts and pixels your token can see, each labelled with the `.env` variable it belongs in (set `META_ENV=production` for the real account, or switch for one command with `META_ENV=production python run.py discover`).
 
 ---
 
@@ -143,9 +147,9 @@ Named presets. `countries` (required, e.g. `["IN"]`), `age_min`, `age_max`, `gen
 ### `ads/batch_001.json` (one entry per ad)
 | Field | Meaning |
 |---|---|
-| `ad_key` | Unique, never reused, format `RS_<ANGLE>_<NNN>`, e.g. `RS_ACNE_001`. Becomes the ad and creative name |
+| `ad_key` | Unique, never reused, format `RS_<ANGLE>_<NNN>`, e.g. `RS_ACNE_001`. Becomes the ad and creative name. A second copy of the same ad in another ad set ends in `_S2`, `_S3`, e.g. `RS_ACNE_001_S2` |
 | `adset_key` | Which ad set it belongs to |
-| `image` | Path under `creatives/`. The file name must equal `ad_key` (JPG or PNG) |
+| `image` | Path under `creatives/`. The file name must equal `ad_key` without any `_S2` ending (JPG or PNG). Instead of `image` you may give `image_hash`, the 32-character hash of an image already in the ad account (list them with `python run.py images`) |
 | `primary_text` | The post text (about 125 characters show before "See more") |
 | `headline` | Short headline (about 40 characters) |
 | `description` | Optional |
@@ -228,7 +232,9 @@ It uploads the images, creates the campaign and all its ad sets, then the ads, a
 
 UI safety: it listens on 127.0.0.1 only and rejects other host names; changes need a header a web page on another site cannot send; the token and secret never reach the browser; one command runs at a time; the Sandbox / Production button (top right) switches the environment for that window only, and switching to Production needs the typed word `PRODUCTION`; restarting the UI returns to the value in `.env` (`META_ENV`, sandbox by default); production shows a red notice and needs an extra tick box before any change, and going live still needs the typed word `PUBLISH`.
 
-## 6. Running your first ad (sandbox walkthrough)
+## 6. Running your first ad (sandbox walkthrough, command line)
+
+The UI does all of this for you (section 5b); this is the same thing by hand.
 
 1. `python run.py doctor` -> all `OK`.
 2. Put your image at `creatives/<angle>/RS_<ANGLE>_001.jpg` (1080px wide or more; 1:1 or 4:5). For a first test use the generated `creatives/test/RS_TEST_001.png`.
@@ -252,11 +258,11 @@ After `prepare` succeeds, the batch is **frozen**: if you edit the file, `valida
 
 ## 7. Safety rules built in
 
-- **Sandbox by default.** Production needs `META_ENV=production` **and** `--confirm-production` for every write, and publishing in production always needs a typed `PUBLISH`.
+- **Sandbox by default.** Production needs `META_ENV=production` (or the UI switch with the typed word `PRODUCTION`) **and** `--confirm-production` (or the UI's tick box) for every write, and publishing in production always needs a typed `PUBLISH`.
 - **Everything is created PAUSED.** Campaign status other than `PAUSED` is rejected by `validate`.
 - **No duplicates.** Registries in `data/<env>/` remember Meta IDs. Before creating a campaign, ad set or ad, the launcher also looks for the same name on Meta. Creatives cannot be looked up by name, so only the local registry protects them. Do not delete `data/` mid-way.
 - **Writes are never blindly retried.** Reads and rate-limit errors are retried. A write that times out is not, because it may have gone through; re-run the command and it will adopt what exists.
-- **Keys are never reused**, across batches or against the registry.
+- **Keys are never reused**, across batches or against the registry (an ad's `_S2` copies count as separate keys).
 - **Batches are frozen** after their ads are created.
 - **Secrets**: the token goes in a header, calls are signed with `appsecret_proof`, and tokens are redacted from errors and `logs/launcher.log`.
 - **Separate environments**: separate credentials and separate registries per environment.
@@ -296,17 +302,19 @@ Performance reading is done by the dashboard's **Meta Ads** page, not by this to
 | `doctor.py` | `doctor`, `discover`, `live`, `images` and `status` |
 | `pipeline.py` | The single entry point used by both `run.py` and the UI |
 
+`ui/server.py` is the web backend (local only, header-protected, environment switch, creative upload, config and batch editing). `ui/wizard.py` turns the guided answers into a plan (several ad sets, shared or per-ad-set budgets, ads in several ad sets), writes the config and batch, and runs upload > setup > prepare. `ui/jobs.py` runs one background job at a time and turns common Meta errors into plain advice. `ui-app/` is the React source for the screens.
+
 ---
 
 ## 10. Going to production (checklist)
 
-Do not do this until the sandbox run is clean.
+Creative and ad creation have been proven on the real account (created paused, visible in Ads Manager). Going live (`publish`) has not.
 
 1. A real ad account with a payment method, and the Page and (if used) Instagram account connected to it.
 2. For Sales campaigns: a Meta pixel / dataset sending Purchase events; set `META_PRODUCTION_PIXEL_ID` and use `optimization_event`.
 3. A long-lived credential: replace the user token with a **System User** token (the dashboard's current user token expires 2027-01-09).
-4. Fill the `META_PRODUCTION_*` block; set `META_ENV=production`; `python run.py doctor`.
-5. Run with `--dry-run`, then `--validate-only`, then for real with `--confirm-production`. Review the paused ads in Ads Manager.
+4. Fill the `META_PRODUCTION_*` block (`python run.py discover` finds the IDs); then either set `META_ENV=production` or use the Sandbox / Production button in the UI; run `python run.py doctor`. The token you use now expires (check `doctor` for the date); use a System User token for something long-lived.
+5. In the UI: New campaign, tick the production confirmation, create. By hand: `--dry-run`, then `--validate-only`, then for real with `--confirm-production`. Either way, review the paused campaign in Ads Manager (search for its name).
 6. `publish` and type `PUBLISH`. Meta reviews the ad before it delivers.
 
 ---
@@ -322,7 +330,11 @@ Do not do this until the sandbox run is clean.
 | `batch ... edited after submission` | Restore the file, or move your changes to a new batch with new keys |
 | `campaign ... has no Meta id yet` | Run `setup` before `prepare`, in order |
 | `image not uploaded yet` | Run `upload` first |
-| `writes are blocked` | You are on `META_ENV=production`; add `--confirm-production` only if intended |
+| `writes are blocked` | You are on production; add `--confirm-production` (CLI) or tick the confirmation box (UI) only if intended |
+| `No permission to access this profile` (code 10, subcode 1341012) | The token's user cannot act as your Page. In the sandbox this is expected (the sandbox user cannot post as a Page); on production give the user access to the Page in Business Settings |
+| `this ad needs an Ad ID like RS_SKINCARE_001` (UI) | An ad added by image hash has no ID; type one on its card in step 4 |
+| `already been used in another campaign` (UI) | Every image can be used once; upload a new image or a new version |
+| `Sales campaigns need your pixel` | Set `META_<ENV>_PIXEL_ID` (find it with `python run.py discover`) |
 
 Full detail of every call (secrets removed) is in `logs/launcher.log`.
 
@@ -330,15 +342,18 @@ Full detail of every call (secrets removed) is in `logs/launcher.log`.
 
 ## 12. Known limits and unverified points
 
-- Sandbox-tested only up to the ad set. Creatives, ads and publish are untested (see SANDBOX_TEST.md).
-- Whether a sandbox account accepts creatives and image uploads exactly like a real one is unconfirmed.
+- Sandbox: creatives and ads fail with a Page permission error, so only campaigns, ad sets and image upload can be tested there (see SANDBOX_TEST.md). I could not confirm whether Meta supports creatives in the sandbox at all.
+- Production: one paused test campaign with ad set, creative and ad was created and seen in Ads Manager. Going live (`publish`) and a multi-ad-set campaign on production are untested.
+- The Ads Manager link on the UI's result screen is built from the account and campaign IDs and has not been verified to open the right page.
 - Image limits (30 MB, 600px minimum, 1080px recommended, aspect ratios) are from memory of Meta's guidance; check current docs.
-- Only static image ads with one image per ad (no video, carousel, dynamic creative, special ad categories, lookalike or custom audiences).
+- Only static image ads with one image per ad (no video, carousel, dynamic creative, special ad categories, lookalike or custom audiences). The guided flow offers Traffic and Sales goals only.
+- Meta objects cannot be changed or deleted from the launcher; editing a campaign or ad set that is already on Meta must be done in Ads Manager (the UI locks them and offers a copy).
 - Insights and reporting are intentionally left to the dashboard.
 
 ### Differences from `plan.md`
 - Insights/report commands (`fetch_insights`, `generate_report`) are not built; the dashboard covers them.
 - Added `doctor`, `status`, `--dry-run`, `--validate-only`, `--confirm-production`, the `entity_registry`, `batch_hashes` (batch freezing) and the DRAFT/READY gate.
 - Starter campaign is **Traffic**, not Sales, because Sales needs a pixel that the sandbox cannot provide.
+- Added a web UI with a guided flow, several ad sets per campaign, an environment switch, drafts, and a Campaigns & ad sets editor; ads can also be created from an existing image hash; ad IDs may end in `_S<number>` for copies of an ad in other ad sets.
 - UTMs use Meta's ID macros (so the dashboard can match them) plus `rs_creative`, instead of a static `utm_content=RS_ACNE_001`.
 - Environment credentials are split into `META_SANDBOX_*` / `META_PRODUCTION_*` blocks in a single `.env`.
