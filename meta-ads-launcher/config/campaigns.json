@@ -1,0 +1,11 @@
+{
+  "campaigns": [
+    {
+      "key": "ROOPSEE_TRAFFIC_001",
+      "objective": "OUTCOME_TRAFFIC",
+      "budget_strategy": "CBO",
+      "daily_budget": 500,
+      "status": "PAUSED"
+    }
+  ]
+}

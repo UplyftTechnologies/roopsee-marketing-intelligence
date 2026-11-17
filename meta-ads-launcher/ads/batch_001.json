@@ -1,0 +1,15 @@
+{
+  "batch_id": "ROOPSEE_BATCH_001",
+  "ads": [
+    {
+      "ad_key": "RS_TEST_001",
+      "adset_key": "PROSPECTING_001",
+      "image": "creatives/test/RS_TEST_001.png",
+      "primary_text": "Your skincare routine should fit your needs.",
+      "headline": "Know What Your Skin Needs",
+      "cta": "LEARN_MORE",
+      "destination": "https://roopsee.com/",
+      "status": "READY"
+    }
+  ]
+}

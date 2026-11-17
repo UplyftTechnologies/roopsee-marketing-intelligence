@@ -205,3 +205,11 @@ th.sel, td.sel { width: 36px; padding-right: 0; }
 .risk { color: var(--text-primary); }
 
 td.nw { white-space: nowrap; }
+
+/* ---------- chart type switch + bar legend swatches ---------- */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: none; padding: 3px 11px; font-size: 12px; cursor: pointer; color: var(--text-secondary); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.chart-legend i.sq { width: 10px; height: 10px; border: 0; border-radius: 2px; background: var(--series-1); }
+.chart-legend i.sq.prev { background: var(--text-muted); opacity: .45; }

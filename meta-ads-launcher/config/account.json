@@ -1,0 +1,6 @@
+{
+  "currency": "INR",
+  "currency_offset": 100,
+  "timezone": "Asia/Kolkata",
+  "url_tags": "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.id}}&utm_content={{ad.id}}&utm_term={{adset.id}}&rs_creative={ad_key}&rs_batch={batch_id}"
+}

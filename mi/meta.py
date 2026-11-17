@@ -137,12 +137,12 @@ class MetaClient:
         return out
 
 
-def parse_insight(r: dict) -> dict:
+def parse_insight(r: dict, account: str) -> dict:
     acts = {a["action_type"]: _f(a.get("value")) for a in r.get("actions", [])}
     vals = {a["action_type"]: _f(a.get("value")) for a in r.get("action_values", [])}
     pick = lambda d, keys: next((d[k] for k in keys if k in d), 0.0)  # noqa: E731
     return {
-        "account_id": r.get("account_id"), "date": r.get("date_start"), "campaign_id": r.get("campaign_id"), "campaign_name": r.get("campaign_name"),
+        "account_id": account, "date": r.get("date_start"), "campaign_id": r.get("campaign_id"), "campaign_name": r.get("campaign_name"),
         "adset_id": r.get("adset_id"), "adset_name": r.get("adset_name"), "ad_id": r.get("ad_id"), "ad_name": r.get("ad_name"),
         "spend": _f(r.get("spend")), "impressions": _i(r.get("impressions")), "reach": _i(r.get("reach")), "frequency": _f(r.get("frequency")),
         "clicks": _i(r.get("clicks")), "link_clicks": _i(r.get("inline_link_clicks")), "ctr": _f(r.get("ctr")), "cpc": _f(r.get("cpc")), "cpm": _f(r.get("cpm")),
@@ -164,6 +164,8 @@ def sync(con, full: bool = False) -> dict:
     if not accounts:
         raise MetaError("No ad account found: the token can see none with spend. Set META_AD_ACCOUNT_IDS in .env.")
     until = datetime.now(IST).date()
+    with DB_LOCK:  # clean-up of rows stored by an earlier version under the un-prefixed id (they could never be replaced, so they duplicated)
+        con.execute("DELETE FROM raw_meta_insights WHERE account_id NOT LIKE 'act!_%' ESCAPE '!'").fetchall()
     total = 0
     for acc in accounts:
         ents = c.entities(acc)
@@ -173,7 +175,7 @@ def sync(con, full: bool = False) -> dict:
         with DB_LOCK:
             last = con.execute("SELECT max(date) FROM raw_meta_insights WHERE account_id = ?", [acc]).fetchall()[0][0]
         since = c.since if (full or last is None) else str(max(date.fromisoformat(c.since), last - timedelta(days=LOOKBACK_DAYS)))
-        rows = [parse_insight(r) for r in c.insights(acc, since, str(until))]
+        rows = [parse_insight(r, acc) for r in c.insights(acc, since, str(until))]
         with DB_LOCK:
             con.execute("DELETE FROM raw_meta_insights WHERE account_id = ? AND date >= ?", [acc, since]).fetchall()
         _insert(con, "raw_meta_insights", _frame(rows, RAW_SCHEMAS["raw_meta_insights"]), ignore=False)
