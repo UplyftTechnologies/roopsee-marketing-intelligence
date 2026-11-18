@@ -8,3 +8,6 @@ backups/
 ui/dist/
 ui-app/node_modules/
 drafts/
+
+templates/
+media/

@@ -16,6 +16,14 @@ def run(s: Settings, meta: Meta, batch: str) -> None:
         return
     for ad in ads:
         key = ad["ad_key"]
+        if ad.get("creative_spec"):  # a whole creative: images and videos already on Meta need nothing; local files are uploaded once
+            from . import media
+            if media.files_in(ad["creative_spec"]):
+                print(f"  {key}: uploading its images/videos")
+                media.upload_files(s, meta, ad["creative_spec"])
+            else:
+                print(f"  {key}: full creative, nothing to upload")
+            continue
         if ad.get("image_hash"):  # an image already on Meta: nothing to upload, just record (and verify) its hash
             h = ad["image_hash"]
             if not meta.dry and reg.get(key, {}).get("meta_image_hash") != h:

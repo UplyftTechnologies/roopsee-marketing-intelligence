@@ -1,37 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import Icon from '../Icon'
-import { api, followJob, inr } from '../api'
-import { Badge, Banner, Card, Field, JobPanel, Loading, useLoad } from '../ui'
+import { api, inr } from '../api'
+import { Badge, Banner, Card, Field, JobPanel } from '../ui'
 import { MetaImageGrid, MetaImg } from '../MetaImages'
+import SpecAdCard from './SpecAd'
 
-const STEPS = ['What for', 'Who sees it', 'Budget', 'Ads', 'Review']
-const uid = () => 's' + Math.random().toString(36).slice(2, 7)
-const newSet = (x = {}) => ({ uid: uid(), audience: 'all', custom: { countries: 'IN', age_min: 18, age_max: 45, gender: 'all' }, placements: 'instagram', daily_budget: 500, ...x })
-const blank = (o) => ({
-  goal: 'traffic', budget_mode: 'campaign', daily_budget: 500, start_date: '', end_date: '', adsets: [newSet()], ads: [],
-  defaults: { primary_text: '', headline: '', description: '', cta: 'LEARN_MORE', destination: o.destinations[0]?.url || '' },
-})
-/** Older drafts had one audience; turn them into a list of ad sets. */
-const normalize = (x, o) => {
-  const b = blank(o)
-  const out = { ...b, ...x, defaults: { ...b.defaults, ...(x.defaults || {}) } }
-  if (!x.adsets || !x.adsets.length) out.adsets = [newSet({ audience: x.audience || 'all', custom: x.custom || b.adsets[0].custom, placements: x.placements || 'instagram' })]
-  out.adsets = out.adsets.map((s) => ({ ...s, uid: s.uid || uid() }))
-  return out
-}
-/** What the server needs: every ad knows exactly which ad sets it goes in. */
-const toServer = (a) => {
-  const all = a.adsets.map((s) => s.uid)
-  return { ...a, ads: a.ads.map((ad) => ({ ...ad, sets: (ad.sets || all).filter((u) => all.includes(u)) })) }
-}
+export const uid = () => 's' + Math.random().toString(36).slice(2, 7)
 
-const themeOf = (name, fallback) => { const m = /^RS_([A-Za-z0-9]+)_\d+/.exec(name || ''); return m ? m[1] : (fallback || 'meta') }
+export const themeOf = (name, fallback) => { const m = /^RS_([A-Za-z0-9]+)_\d+/.exec(name || ''); return m ? m[1] : (fallback || 'meta') }
 const CtaLabel = { LEARN_MORE: 'Learn more', SHOP_NOW: 'Shop now', SIGN_UP: 'Sign up', GET_OFFER: 'Get offer', ORDER_NOW: 'Order now', CONTACT_US: 'Contact us', SUBSCRIBE: 'Subscribe' }
-const audLabel = (o, s) => (s.audience === 'custom' ? `Custom (${s.custom.countries}, ${s.custom.age_min}-${s.custom.age_max}${s.custom.gender !== 'all' ? ', ' + s.custom.gender : ''})`
+export const audLabel = (o, s) => (s.audience === 'custom' ? `Custom (${s.custom.countries}, ${s.custom.age_min}-${s.custom.age_max}${s.custom.gender !== 'all' ? ', ' + s.custom.gender : ''})`
   : o.audiences.find((x) => x.id === s.audience)?.label || s.audience)
-const placeLabel = (o, s) => o.placements.find((x) => x.id === s.placements)?.label || s.placements
+export const placeLabel = (o, s) => o.placements.find((x) => x.id === s.placements)?.label || s.placements
 
-function Counter({ label, value, limit, children }) {
+export function Counter({ label, value, limit, children }) {
   const n = (value || '').length
   return (
     <label className="lf">
@@ -41,7 +23,7 @@ function Counter({ label, value, limit, children }) {
   )
 }
 
-function FeedPreview({ ad }) {
+export function FeedPreview({ ad }) {
   let host = ''
   try { host = new URL(ad.destination).host } catch { /* ignore */ }
   return (
@@ -54,240 +36,7 @@ function FeedPreview({ ad }) {
   )
 }
 
-export default function Wizard({ ctx, params }) {
-  const [opts] = useLoad(() => api('/api/wizard/options'))
-  return <Loading state={opts}>{(o) => <Flow o={o} ctx={ctx} params={params} />}</Loading>
-}
-
-function Flow({ o, ctx, params }) {
-  const [step, setStep] = useState(0) // 0 = start screen
-  const [a, setA] = useState(() => blank(o))
-  const [draftId, setDraftId] = useState('new')
-  const [phase, setPhase] = useState('edit') // edit | running | done
-  const [job, setJob] = useState(null)
-  const [plan, setPlan] = useState(null)
-  const [prodOk, setProdOk] = useState(false)
-  const [err, setErr] = useState(null)
-  const [batch, setBatch] = useState(null)
-  const [toast, setToast] = useState(null)
-  const prod = o.env === 'production'
-
-  useEffect(() => { // coming from the Creatives page with an image picked
-    if (params.image) { setA((x) => ({ ...x, ads: [{ image: params.image, ad_key: params.image.split('/').pop().replace(/\.[^.]+$/, ''), ...x.defaults }] })); setStep(Number(params.step) || 1) }
-  }, [params.image]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { // coming from Creatives > Already on Meta > Use in a campaign
-    if (!params.metahash) return
-    api('/api/meta-images?hashes=' + params.metahash).then(async (r) => {
-      const img = r.images?.[0]
-      if (!img) return
-      const key = (await api('/api/next-key?theme=' + encodeURIComponent(themeOf(img.name)))).key
-      setA((x) => ({ ...x, ads: [{ image_hash: img.hash, ad_key: key, preview_url: img.full || img.thumb, ...x.defaults }] }))
-      setStep(4)
-    }).catch(() => {})
-  }, [params.metahash]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { // a link to a saved draft: #new?draft=<id>
-    if (params.draft) api('/api/drafts/' + params.draft).then((d) => { setA(normalize(d.answers, o)); setDraftId(d.id); setStep(Number(params.step) || 1) }).catch(() => {})
-  }, [params.draft]) // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k, v) => setA((x) => ({ ...x, [k]: v }))
-  const say = (t) => { setToast(t); setTimeout(() => setToast(null), 2500) }
-
-  const saveDraft = async (quiet) => {
-    try {
-      const r = await api('/api/drafts/' + draftId, { method: 'PUT', body: { title: `${o.goals.find((g) => g.id === a.goal)?.label || 'Campaign'} · ${a.adsets.length} ad set(s) · ${a.ads.length} ad(s)`, answers: a } })
-      setDraftId(r.id); if (!quiet) say('Draft saved')
-    } catch { /* drafts are optional */ }
-  }
-  const goto = (n) => { setErr(null); setStep(n); window.scrollTo(0, 0); if (n >= 2) saveDraft(true) }
-
-  useEffect(() => { // review: ask the server for the plain-language plan
-    if (step !== 5) return
-    setPlan(null)
-    api('/api/wizard/preview', { method: 'POST', body: toServer(a) }).then(setPlan).catch((e) => setErr(e.message))
-  }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const create = async () => {
-    setErr(null)
-    try {
-      const r = await api('/api/wizard/create', { method: 'POST', body: { answers: toServer(a), confirm_production: prodOk } })
-      setBatch(r.batch); setPhase('running'); setJob(null)
-      const j = await followJob(r.job, setJob)
-      setPhase('done')
-      if (j.ok && draftId !== 'new') api('/api/drafts/' + draftId, { method: 'DELETE' }).catch(() => {})
-    } catch (e) { setErr(e.message) }
-  }
-  const retry = async () => {
-    setPhase('running'); setJob(null)
-    try { const r = await api('/api/wizard/retry', { method: 'POST', body: { batch, confirm_production: prodOk } }); await followJob(r.job, setJob) } catch (e) { setErr(e.message) }
-    setPhase('done')
-  }
-  const reset = () => { setA(blank(o)); setDraftId('new'); setPhase('edit'); setJob(null); setBatch(null); setPlan(null); setStep(0) }
-
-  if (phase !== 'edit') return <Progress job={job} phase={phase} prod={prod} ctx={ctx} retry={retry} back={() => { setPhase('edit'); setStep(5) }} again={reset} err={err} />
-
-  return (
-    <>
-      {step > 0 && (
-        <div className="stepper" role="list">
-          {STEPS.map((s, i) => (
-            <button type="button" key={s} role="listitem" className={`stp ${step === i + 1 ? 'on' : ''} ${step > i + 1 ? 'done' : ''}`} disabled={step <= i + 1} onClick={() => goto(i + 1)}>
-              <i>{step > i + 1 ? '✓' : i + 1}</i>{s}
-            </button>
-          ))}
-        </div>
-      )}
-      {err && <Banner tone="err">{err}</Banner>}
-      {step === 0 && <Start o={o} begin={() => goto(1)} load={(x, id) => { setA(normalize(x, o)); setDraftId(id); goto(1) }}
-        copy={(x) => { const n = normalize(x, o); const d = x.ads?.[0] || n.defaults; setA({ ...n, ads: [], adsets: n.adsets.map((s) => ({ ...s, uid: uid() })), defaults: { primary_text: d.primary_text || '', headline: d.headline || '', description: d.description || '', cta: d.cta || 'LEARN_MORE', destination: d.destination || o.destinations[0]?.url || '' } }); goto(1) }} />}
-      {step === 1 && <Step1 o={o} a={a} set={set} />}
-      {step === 2 && <Step2 o={o} a={a} setA={setA} />}
-      {step === 3 && <Step3 o={o} a={a} setA={setA} set={set} />}
-      {step === 4 && <Step4 o={o} a={a} setA={setA} set={set} />}
-      {step === 5 && <Step5 o={o} a={a} plan={plan} prod={prod} prodOk={prodOk} setProdOk={setProdOk} create={create} />}
-      {step > 0 && (
-        <div className="wiz-foot">
-          <button type="button" className="btn" onClick={() => goto(step - 1)}>Back</button>
-          <button type="button" className="btn" onClick={() => saveDraft(false)}>Save draft</button>
-          <div className="right row">{step < 5 && <NextBtn step={step} a={a} next={() => goto(step + 1)} />}</div>
-        </div>
-      )}
-      {toast && <div className="toast">{toast}</div>}
-    </>
-  )
-}
-
-function NextBtn({ step, a, next }) {
-  const budgetBad = a.budget_mode === 'adset' && a.adsets.length > 1 ? a.adsets.some((s) => !(Number(s.daily_budget) > 0)) : !(Number(a.daily_budget) > 0)
-  const bad = (step === 3 && budgetBad) || (step === 4 && a.ads.length === 0)
-  return <button type="button" className="btn primary" disabled={bad} onClick={next} title={bad ? (step === 3 ? 'Enter a daily budget' : 'Add at least one ad') : ''}>{step === 4 ? 'Review' : 'Next'}</button>
-}
-
-function Start({ o, begin, load, copy }) {
-  const [drafts, reloadD] = useLoad(() => api('/api/drafts'))
-  const [hist] = useLoad(() => api('/api/history'))
-  return (
-    <>
-      <Card title="Create a campaign" sub="Answer a few simple questions. You can add several ad sets and several ads. Everything is created paused, so nothing runs or spends until you go live.">
-        <div className="row"><button type="button" className="btn primary" onClick={begin}><Icon name="plus" size={16} /> Start a new campaign</button>
-          <span className="muted">Takes a few minutes. You end with a campaign on Meta that is switched off.</span></div>
-        {o.missing.length > 0 && <Banner tone="err">Missing in <span className="mono">.env</span>: {o.missing.join(', ')}. Creating will not work until this is fixed.</Banner>}
-      </Card>
-      {drafts.data?.length > 0 && (
-        <Card title="Continue a draft" sub="Saved automatically as you go">
-          {drafts.data.map((d) => (
-            <div key={d.id} className="list-row"><b className="grow">{d.title}</b><span className="muted">{(d.updated || '').replace('T', ' ').slice(0, 16)}</span>
-              <button type="button" className="btn small" onClick={async () => load((await api('/api/drafts/' + d.id)).answers, d.id)}>Continue</button>
-              <button type="button" className="btn small danger" onClick={async () => { await api('/api/drafts/' + d.id, { method: 'DELETE' }); reloadD() }}>Delete</button></div>
-          ))}
-        </Card>
-      )}
-      {hist.data?.length > 0 && (
-        <Card title="Start from an earlier campaign" sub="Copies the ad sets and text. You choose new images, because every image can be used only once.">
-          {hist.data.map((h) => (
-            <div key={h.batch} className="list-row"><span className="grow"><b>{h.campaign}</b><br /><span className="muted">{h.goal} · {inr(h.budget)}/day · {h.adsets || 1} ad set(s) · {h.ads} ad(s)</span></span>
-              <button type="button" className="btn small" disabled={!h.answers} onClick={() => copy(h.answers)}>Copy</button></div>
-          ))}
-        </Card>
-      )}
-    </>
-  )
-}
-
-function Step1({ o, a, set }) {
-  return (
-    <Card title="What should this campaign do?" sub="Pick the result you care about most">
-      <div className="choices">
-        {o.goals.map((g) => (
-          <button type="button" key={g.id} className={`choice ${a.goal === g.id ? 'on' : ''}`} onClick={() => set('goal', g.id)}>
-            <b>{g.label}</b><span>{g.help}</span>
-            {g.id === 'sales' && <span>{o.pixel ? <Badge tone="good">Pixel connected</Badge> : <Badge tone="bad">Pixel not set in .env</Badge>}</span>}
-          </button>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-function Step2({ o, a, setA }) {
-  const upd = (i, patch) => setA((x) => ({ ...x, adsets: x.adsets.map((s, j) => (j === i ? { ...s, ...patch } : s)) }))
-  const add = () => setA((x) => ({ ...x, adsets: [...x.adsets, newSet({ audience: x.adsets.length % 2 ? 'all' : 'women' })] }))
-  const dup = (i) => setA((x) => ({ ...x, adsets: [...x.adsets.slice(0, i + 1), { ...x.adsets[i], uid: uid(), custom: { ...x.adsets[i].custom } }, ...x.adsets.slice(i + 1)] }))
-  const del = (i) => setA((x) => ({ ...x, adsets: x.adsets.filter((_, j) => j !== i) }))
-  return (
-    <Card title="Who should see it, and where?" sub="One ad set is one audience in one kind of place. Add more ad sets to compare audiences or places side by side.">
-      {a.adsets.map((s, i) => (
-        <fieldset key={s.uid} className="set">
-          <legend>Ad set {i + 1}</legend>
-          <div className="fgrid">
-            <Field label="Who sees it">
-              <select className="field" value={s.audience} onChange={(e) => upd(i, { audience: e.target.value })}>
-                <optgroup label="Ready-made">{o.audiences.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</optgroup>
-                {o.saved_audiences?.length > 0 && <optgroup label="Your saved audiences">{o.saved_audiences.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</optgroup>}
-                <option value="custom">Something else…</option>
-              </select>
-            </Field>
-            <Field label="Where the ads appear">
-              <select className="field" value={s.placements} onChange={(e) => upd(i, { placements: e.target.value })}>{o.placements.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
-            </Field>
-          </div>
-          {s.audience === 'custom' && (
-            <div className="fgrid" style={{ marginTop: 10 }}>
-              <Field label="Countries" hint="Two-letter codes, separated by commas (IN, AE)"><input className="field" value={s.custom.countries} onChange={(e) => upd(i, { custom: { ...s.custom, countries: e.target.value } })} /></Field>
-              <Field label="Youngest"><input className="field" type="number" value={s.custom.age_min} onChange={(e) => upd(i, { custom: { ...s.custom, age_min: Number(e.target.value) } })} /></Field>
-              <Field label="Oldest"><input className="field" type="number" value={s.custom.age_max} onChange={(e) => upd(i, { custom: { ...s.custom, age_max: Number(e.target.value) } })} /></Field>
-              <Field label="Gender"><select className="field" value={s.custom.gender} onChange={(e) => upd(i, { custom: { ...s.custom, gender: e.target.value } })}><option value="all">Everyone</option><option value="women">Women</option><option value="men">Men</option></select></Field>
-            </div>
-          )}
-          <div className="row" style={{ marginTop: 10 }}>
-            <button type="button" className="btn small" onClick={() => dup(i)}>Duplicate</button>
-            <button type="button" className="btn small danger" disabled={a.adsets.length === 1} onClick={() => del(i)}>Remove</button>
-          </div>
-        </fieldset>
-      ))}
-      <div className="row" style={{ marginTop: 12 }}>
-        <button type="button" className="btn" onClick={add}><Icon name="plus" size={14} /> Add another ad set</button>
-        <span className="muted">{a.adsets.length === 1 ? 'Optional. Use it to try a second audience.' : `${a.adsets.length} ad sets`}</span>
-      </div>
-    </Card>
-  )
-}
-
-function Step3({ o, a, setA, set }) {
-  const many = a.adsets.length > 1
-  const per = many && a.budget_mode === 'adset'
-  const total = a.adsets.reduce((t, s) => t + (Number(s.daily_budget) || 0), 0)
-  const setBud = (i, v) => setA((x) => ({ ...x, adsets: x.adsets.map((s, j) => (j === i ? { ...s, daily_budget: v } : s)) }))
-  return (
-    <Card title="How much per day?" sub="The most Meta will try to spend each day once the campaign is on">
-      {many && (
-        <div className="choices" style={{ marginBottom: 14 }}>
-          <button type="button" className={`choice ${!per ? 'on' : ''}`} onClick={() => set('budget_mode', 'campaign')}><b>One budget for the whole campaign</b><span>Meta shares it between your ad sets, giving more to the one that does better.</span></button>
-          <button type="button" className={`choice ${per ? 'on' : ''}`} onClick={() => set('budget_mode', 'adset')}><b>A separate budget for each ad set</b><span>You decide exactly how much each audience gets.</span></button>
-        </div>
-      )}
-      {!per ? (
-        <>
-          <div className="fgrid"><Field label={many ? 'Daily budget for the whole campaign' : 'Daily budget'}><span className="pre"><b>₹</b><input className="field" type="number" min="1" value={a.daily_budget} onChange={(e) => set('daily_budget', e.target.value)} /></span></Field></div>
-          <div className="chip-row" style={{ marginTop: 8 }}>{[300, 500, 1000, 2000].map((v) => <button type="button" key={v} className={`chip ${Number(a.daily_budget) === v ? 'on' : ''}`} onClick={() => set('daily_budget', v)}>{inr(v)}</button>)}</div>
-        </>
-      ) : (
-        <>
-          <table><thead><tr><th>Ad set</th><th>Who sees it</th><th style={{ width: 170 }}>Daily budget</th></tr></thead>
-            <tbody>{a.adsets.map((s, i) => (
-              <tr key={s.uid}><td>Ad set {i + 1}</td><td>{audLabel(o, s)} · {placeLabel(o, s)}</td>
-                <td><span className="pre"><b>₹</b><input className="field" type="number" min="1" value={s.daily_budget} onChange={(e) => setBud(i, e.target.value)} /></span></td></tr>))}</tbody></table>
-          <div className="sub" style={{ marginTop: 8 }}>Together: <b>{inr(total)}</b> per day</div>
-        </>
-      )}
-      <div className="fgrid" style={{ marginTop: 16 }}>
-        <Field label="Start date (optional)" hint="Only used once you turn the campaign on"><input className="field" type="date" value={a.start_date} onChange={(e) => set('start_date', e.target.value)} /></Field>
-        <Field label="End date (optional)"><input className="field" type="date" value={a.end_date} onChange={(e) => set('end_date', e.target.value)} /></Field>
-      </div>
-      <Banner tone="ok">The campaign is created <b>paused</b>. No money is spent until you turn it on yourself.</Banner>
-    </Card>
-  )
-}
-
-function Step4({ o, a, setA, set }) {
+export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
   const d = a.defaults
   const [theme, setTheme] = useState(o.categories[0] || '')
   const [busy, setBusy] = useState(false)
@@ -327,7 +76,7 @@ function Step4({ o, a, setA, set }) {
   const openLib = async () => setLib((await api('/api/creatives')).filter((c) => !c.used && !a.ads.some((x) => x.image === c.path)))
 
   return (
-    <div className="wiz">
+    <div className={noPreview ? "" : "wiz"}>
       <div className="stack">
         <Card title="Your ads" sub={a.adsets.length > 1 ? 'Each image becomes one ad. Choose which ad sets show it. An ad shown in two ad sets is created once for each.' : 'Each image becomes one ad. Write the text once below, then adjust any ad if you want.'}>
           <fieldset className="set"><legend>Text used for every new ad</legend>
@@ -339,7 +88,7 @@ function Step4({ o, a, setA, set }) {
               </div>
               <DestPick o={o} value={d.destination} onChange={(v) => setD('destination', v)} />
             </div>
-            {a.ads.length > 0 && <button type="button" className="btn small" style={{ marginTop: 8 }} onClick={() => setA((x) => ({ ...x, ads: x.ads.map((ad) => ({ ...ad, primary_text: d.primary_text, headline: d.headline, cta: d.cta, destination: d.destination })) }))}>Apply this text to all {a.ads.length} ad(s)</button>}
+            {a.ads.some((ad) => !ad.creative_spec) && <button type="button" className="btn small" style={{ marginTop: 8 }} onClick={() => setA((x) => ({ ...x, ads: x.ads.map((ad) => (ad.creative_spec ? ad : { ...ad, primary_text: d.primary_text, headline: d.headline, cta: d.cta, destination: d.destination })) }))}>Apply this text to all {a.ads.filter((ad) => !ad.creative_spec).length} image ad(s)</button>}
           </fieldset>
 
           <div className="fgrid" style={{ margin: '14px 0 8px' }}>
@@ -379,7 +128,10 @@ function Step4({ o, a, setA, set }) {
           ))}
         </Card>
 
-        {a.ads.map((ad, i) => (
+        {a.ads.map((ad, i) => ad.kind && renderKind ? renderKind(ad, i, { upd, toggleSet, all, remove: () => setA((x) => ({ ...x, ads: x.ads.filter((_, j) => j !== i) })) }) : ad.creative_spec ? (
+          <SpecAdCard key={ad.ad_key + i} ad={ad} i={i} a={a} all={all} o={o} upd={upd} toggleSet={toggleSet} onSave={() => saveTpl && saveTpl('ad', ad)}
+            remove={() => setA((x) => ({ ...x, ads: x.ads.filter((_, j) => j !== i) }))} />
+        ) : (
           <div key={ad.ad_key + i} className="adcard">
             {ad.image ? <img className="pic" src={'/' + ad.image} alt="" /> : ad.preview_url ? <div className="pic metapic"><MetaImg src={ad.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div> : <div className="pic">image hash<br />{(ad.image_hash || '').slice(0, 8)}…</div>}
             <div className="stack">
@@ -399,16 +151,16 @@ function Step4({ o, a, setA, set }) {
           </div>
         ))}
       </div>
-      <div className="sticky">
+      {!noPreview && <div className="sticky">
         <div className="mini" style={{ marginBottom: 6 }}>How it will look</div>
         {a.ads.length === 0 ? <FeedPreview ad={{ ...d }} /> : a.ads.slice(0, 3).map((ad, i) => <FeedPreview key={i} ad={ad} />)}
         {a.ads.length > 3 && <div className="mini">+ {a.ads.length - 3} more</div>}
-      </div>
+      </div>}
     </div>
   )
 }
 
-function DestPick({ o, value, onChange }) {
+export function DestPick({ o, value, onChange }) {
   const known = o.destinations.some((x) => x.url === value)
   const [other, setOther] = useState(!known && !!value)
   return (
@@ -424,49 +176,7 @@ function DestPick({ o, value, onChange }) {
   )
 }
 
-function Step5({ o, a, plan, prod, prodOk, setProdOk, create }) {
-  if (!plan) return <div className="skeleton-wrap"><div className="skeleton" style={{ height: 160 }} /></div>
-  const s = plan.summary
-  const blocked = plan.errors.length > 0 || (prod && !prodOk)
-  const per = s.budget_mode === 'adset'
-  return (
-    <div className="wiz">
-      <div className="stack">
-        {plan.errors.length > 0 && <Banner tone="err"><b>Fix these first</b>{plan.errors.map((e, i) => <div key={i} style={{ marginTop: 4 }}>• {e}</div>)}</Banner>}
-        {plan.warnings.length > 0 && <Banner>{plan.warnings.map((e, i) => <div key={i}>• {e}</div>)}</Banner>}
-        <Card title="Check everything" sub="Nothing has been created yet">
-          <dl className="summary">
-            <dt>Goal</dt><dd>{s.goal}</dd>
-            <dt>Budget</dt><dd>{per ? `${inr(s.total_budget)} per day in total, split by you across the ad sets` : `${inr(s.daily_budget)} per day for the whole campaign`}{s.start ? ` · from ${s.start}` : ''}{s.end ? ` · until ${s.end}` : ''}</dd>
-            <dt>Campaign name</dt><dd>{plan.names.campaign}</dd>
-            <dt>Ads</dt><dd>{s.ads} ad(s) in total{s.ads !== a.ads.length ? ` (${a.ads.length} image(s), some shown in more than one ad set)` : ''}</dd>
-            <dt>Account</dt><dd>{o.account} · {prod ? 'PRODUCTION (real)' : 'sandbox'}</dd>
-          </dl>
-        </Card>
-        <Card title={`Ad sets (${s.adsets.length})`}>
-          <table><thead><tr><th>Ad set</th><th>Who sees it</th><th>Where</th>{per && <th className="num">Budget</th>}<th className="num">Ads</th></tr></thead>
-            <tbody>{s.adsets.map((x, i) => <tr key={i}><td>{i + 1}</td><td>{x.audience}</td><td>{x.placements}</td>{per && <td className="num">{inr(x.budget)}</td>}<td className="num">{x.ads}</td></tr>)}</tbody></table>
-        </Card>
-        <Card title="What happens when you press Create">
-          <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
-            <li>Your images are uploaded to Meta.</li>
-            <li>The campaign and its {s.adsets.length} ad set(s) are created <b>paused</b>.</li>
-            <li>Each of the {s.ads} ad(s) is created <b>paused</b>.</li>
-          </ol>
-          <div className="sub" style={{ marginTop: 6 }}>Nothing runs or spends. Turning it on is a separate step, afterwards.</div>
-          {prod && <label className="chk" style={{ marginTop: 10 }}><input type="checkbox" checked={prodOk} onChange={(e) => setProdOk(e.target.checked)} /><b>I understand this creates objects in the real ad account (paused)</b></label>}
-          <div className="wiz-foot"><button type="button" className="btn primary" disabled={blocked} onClick={create}>Create on Meta (paused)</button>{blocked && plan.errors.length === 0 && <span className="muted">Tick the box above to continue.</span>}</div>
-        </Card>
-      </div>
-      <div className="sticky">
-        <div className="mini" style={{ marginBottom: 6 }}>Previews</div>
-        {a.ads.slice(0, 3).map((ad, i) => <FeedPreview key={i} ad={ad} />)}
-      </div>
-    </div>
-  )
-}
-
-function Progress({ job, phase, prod, ctx, retry, back, again, err }) {
+export function Progress({ job, phase, prod, ctx, retry, back, again, err }) {
   const r = job?.result
   const ok = job?.status === 'done' && job.ok
   return (

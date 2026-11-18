@@ -1,7 +1,7 @@
 """Step 6a - campaigns. Always created PAUSED."""
 from __future__ import annotations
 
-from .common import Registry, Settings, account_cfg, campaigns_cfg, minor
+from .common import Registry, Settings, account_cfg, campaigns_cfg, clean_extra, deep_merge, minor
 from .ensure import ensure
 from .meta_api import Meta
 
@@ -13,7 +13,10 @@ def payload(c: dict, acc: dict) -> dict:
         p["bid_strategy"] = c.get("bid_strategy", "LOWEST_COST_WITHOUT_CAP")
     else:
         p["is_adset_budget_sharing_enabled"] = False  # budgets live on the ad sets
-    return p
+    if c.get("spend_cap"):
+        p["spend_cap"] = minor(c["spend_cap"], acc)
+    extra, _ = clean_extra(c.get("extra"))
+    return deep_merge(p, extra)  # anything not covered above (Meta setting names), already made safe
 
 
 def run(s: Settings, meta: Meta, keys: list[str], validate_only=False) -> None:

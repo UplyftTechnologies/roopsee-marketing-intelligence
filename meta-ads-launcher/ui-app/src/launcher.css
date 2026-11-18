@@ -98,3 +98,24 @@ fieldset.set + fieldset.set { margin-top: 12px; }
 .lb-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 @media (max-width: 800px) { .lb { grid-template-columns: 1fr; } }
 .adcard .pic.metapic { padding: 0; overflow: hidden; }
+
+/* ---- one-page builder ---- */
+.builder { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .builder { grid-template-columns: 1fr; } }
+.side-panel { display: grid; gap: 12px; top: 72px; max-height: calc(100vh - 90px); overflow-y: auto; padding-right: 2px; }
+.sect { padding: 0; }
+.sect-head { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 18px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; color: inherit; }
+.sect-head:hover { background: var(--hover); }
+.sect-n { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--text-secondary); font-weight: 600; flex: none; }
+.sect-n.done { background: var(--good); color: #fff; } .sect-n.bad { background: var(--critical); color: #fff; }
+.sect.open .sect-head { border-bottom: 1px solid var(--grid); border-radius: 12px 12px 0 0; }
+.sect-body { padding: 16px 18px 18px; }
+.sect-body > * + * { margin-top: 12px; }
+.more { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.more > summary { cursor: pointer; color: var(--accent); font-weight: 500; font-size: 13px; }
+.modal { background: var(--surface-1); border-radius: 14px; box-shadow: var(--shadow); width: min(720px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 18px; }
+.pick-list { margin-top: 8px; max-height: 340px; overflow: auto; }
+.pick-row { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--grid); text-align: left; cursor: pointer; padding: 8px 6px; color: inherit; }
+.pick-row:hover { background: var(--hover); }
+textarea.mono { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 12px; }
+.side-panel .summary dd { font-size: 13px; }

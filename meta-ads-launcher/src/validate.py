@@ -5,7 +5,7 @@ import re
 import struct
 from urllib.parse import urlparse
 
-from .common import (AD_KEY_RE, CTAS, GOALS, KEY_RE, base_key, OBJECTIVES, PLACEMENTS, ROOT, STATUSES, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
+from .common import (AD_KEY_RE, BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, FORBIDDEN_EXTRA, GOALS, KEY_RE, base_key, OBJECTIVES, PLACEMENTS, ROOT, STATUSES, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
                      audiences_cfg, batch_files, campaigns_cfg, image_path, jload, sha256)
 
 MAX_BYTES = 30 * 1024 * 1024
@@ -79,8 +79,28 @@ def validate(s: Settings, only: str | None = None) -> tuple[list[str], list[str]
         camp = camps.get(a.get("campaign_key"), {})
         if camp.get("objective") == "OUTCOME_SALES" and goal != "OFFSITE_CONVERSIONS":
             warn(f"ad set {k}: Sales campaigns normally optimise for conversions (needs a pixel/dataset)")
+    def shape(where, obj, keys):
+        for k in keys:
+            if obj.get(k) is not None and not isinstance(obj[k], dict):
+                err(f"{where}: {k} must be an object (curly brackets)")
+            bad = sorted(set((obj.get(k) or {}).keys()) & FORBIDDEN_EXTRA) if isinstance(obj.get(k), dict) else []
+            if bad:
+                warn(f"{where}: {k} contains {bad}; these are ignored (ids, names and status are managed by the launcher)")
+
+    for k, c in camps.items():
+        shape(f"campaign {k}", c, ("extra",))
+    for k, a in sets.items():
+        shape(f"ad set {k}", a, ("extra", "targeting_extra"))
+        if a.get("bid_strategy") and a["bid_strategy"] not in BID_STRATEGIES:
+            err(f"ad set {k}: bid_strategy must be one of {sorted(BID_STRATEGIES)}")
+        if a.get("billing_event") and a["billing_event"] not in BILLING_EVENTS:
+            err(f"ad set {k}: billing_event must be one of {sorted(BILLING_EVENTS)}")
+        if a.get("destination_type") and a["destination_type"] not in DESTINATIONS:
+            warn(f"ad set {k}: destination_type '{a['destination_type']}' is not one I know; Meta's check will tell you if it is valid")
+        if a.get("bid_strategy") in ("LOWEST_COST_WITH_BID_CAP", "COST_CAP") and not a.get("bid_amount"):
+            err(f"ad set {k}: {a['bid_strategy']} needs a bid_amount (in rupees)")
     for k, a in auds.items():
-        if not a.get("countries"):
+        if not a.get("countries") and not a.get("geo_in_adset"):
             err(f"audience {k}: countries is required, e.g. [\"IN\"]")
 
     # ---- batches ----
@@ -119,6 +139,15 @@ def validate(s: Settings, only: str | None = None) -> tuple[list[str], list[str]
             if status not in STATUSES:
                 err(f"{where}: status must be DRAFT or READY")
             ready = status == "READY"
+            if ad.get("creative_spec"):
+                cs = ad["creative_spec"]
+                if not isinstance(cs, dict) or not (cs.get("object_story_spec") or cs.get("asset_feed_spec") or cs.get("object_story_id")):
+                    err(f"{where}: creative_spec needs object_story_spec, asset_feed_spec or object_story_id")
+                if not ad.get("adset_key"):
+                    err(f"{where}: missing adset_key")
+                elif ad["adset_key"] not in sets:
+                    err(f"{where}: unknown adset_key '{ad['adset_key']}'")
+                continue
             miss = [f for f in ("adset_key", "primary_text", "headline", "cta", "destination") if not ad.get(f)]
             if not ad.get("image") and not ad.get("image_hash"):
                 miss.append("image (or image_hash)")

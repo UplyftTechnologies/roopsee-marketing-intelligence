@@ -1,4 +1,4 @@
-# Roopsee Meta Ads Launcher
+﻿# Roopsee Meta Ads Launcher
 
 A tool that turns **local images + JSON files** into Meta (Facebook / Instagram) ads through the Marketing API. Use it from the **command line** or from the **web UI** (`python run.py ui`), which has a guided flow for creating campaigns with several ad sets and several ads.
 
@@ -207,14 +207,37 @@ python run.py ui --no-browser
 ```
 The first run builds the screens (needs Node.js once; the dashboard needs it too). The look matches the performance dashboard: same sidebar, top bar, cards, badges and light/dark theme. It runs on the same code as the command line (`src/pipeline.py`), so both always behave the same.
 
-**New campaign (the guided way).** Five plain questions, then one button:
-1. **What for**: get website visitors, or get sales (Sales needs your pixel in `.env`).
-2. **Who sees it**: one or more **ad sets**. Each ad set is an audience (a ready-made one, one you saved, or your own countries, ages and gender) plus where the ads appear. Use **Add another ad set** or **Duplicate** to compare audiences or places side by side.
-3. **Budget**: with several ad sets choose **one budget for the whole campaign** (Meta shares it) or **a separate budget for each ad set**. Optional start and end dates.
-4. **Ads**: drop in several images (each becomes an ad), pick one from your library, or **pick an image already on Meta** (you see the real image and its hash; or paste a hash and it is checked against the ad account). Write the text once and adjust any ad, pick the web page from a list, and for each ad tick **which ad sets show it**. An ad shown in two ad sets is created once per ad set (see below).
-5. **Review**: a plain summary with an ad set table, a checklist of anything to fix, then **Create on Meta (paused)**.
+**New campaign (one page).** Pick what you want to do (website visits, sell on your website, get known, or start from scratch) and everything sensible is filled in. The builder is one page with three sections and a live summary on the right:
+1. **Campaign**: the goal, one shared budget or a separate budget per ad set, dates. *More options*: a spending limit for the whole campaign, how Meta bids, special ad category, and an expert box for any other Meta campaign setting.
+2. **Ad sets**: add as many as you like (audience + where the ads appear + budget). *More options* on each: what Meta should aim for, which action counts, bid strategy and amount (bid cap or cost cap), what you pay for, where people go (website, app, messages, call, instant form...), lifetime budget, its own start and end dates, and two expert boxes (extra targeting and extra ad set settings) for anything else Meta supports: cities, interests, your custom audiences, exclusions, manual placements, attribution window and more.
+3. **Ads**: drop in images, pick from your library, or **pick an image already on Meta** (you see the real image and its hash). Write the text once and adjust any ad, pick the web page, and tick which ad sets show each ad.
 
-It uploads the images, creates the campaign and all its ad sets, then the ads, all **paused**, with a progress list. If a step fails you get a plain explanation and a **Try again** button that skips what already worked. Drafts are saved as you go (and can be opened by link), and you can start from an earlier campaign. Names on Meta are generated (for example `Roopsee | Traffic | 17 Nov`); ad IDs come from the image names. Turning a campaign on is separate: **Run > Go live**, with the typed word `PUBLISH`.
+The summary panel always says what is still missing in plain words. **Check with Meta** asks Meta whether it would accept the campaign, ad sets and ads (using Meta's check-only mode, so **nothing is created**) and shows Meta's own reason for anything it would refuse. Ad sets are tested against one of your existing campaigns with the same goal (nothing on it is changed); if you have none, that ad set is shown as "Not pre-checked". **Create on Meta (paused)** then uploads the images and creates everything paused, with a progress list and a **Try again** button that skips what already worked. Drafts are saved automatically.
+
+**Import or export an ad set as JSON.** In the Ad sets section: **Import from JSON or Meta** reads a file (or pasted text) in either the launcher's friendly format or Meta's own ad set JSON, or copies an ad set from your ad account. It shows what was filled in, converted (rupees from paise), kept as extra settings, and ignored, and anything it did not understand. The form fills in and stays fully editable. **Export as JSON** saves your ad sets in the friendly format so you can edit them elsewhere and load them back. Sample files are available in the dialog. Files are only ever read as data, are limited to 200 KB and 10 ad sets, ids and status are ignored, and anything marked active is created paused.
+
+```json
+{ "format": "roopsee-adset", "version": 1, "name": "Women 18-35",
+  "result": "purchases", "audience": { "countries": ["IN"], "age": [18, 35], "gender": "women" },
+  "placements": "instagram", "budget": { "daily": 500 }, "schedule": { "start": "2026-12-01" },
+  "bid": { "strategy": "COST_CAP", "amount": 120 }, "conversion": { "event": "PURCHASE" } }
+```
+`result` words: clicks, landing_page_views, purchases, value, reach, impressions, video_views, thruplay, engagement, leads, messages, installs, recall (or Meta's own goal names). Anything else goes in `targeting_extra` / `extra` using Meta's setting names.
+
+**Copy or import at every level (campaign, ad set, ad).** Each section has an import button with three tabs: *From a JSON file* (Meta's own JSON or the launcher's), *Copy from my Meta account*, and *My templates*.
+- **Whole campaign:** on the New campaign start screen or in the Campaign section. Copying from Meta brings the campaign with up to 10 ad sets and 40 ads. The same creative used in several ad sets becomes one ad shown in all of them. A campaign JSON may hold `campaign`, `adsets` and `ads`. **Export the whole campaign as JSON** writes the launcher's own format back (`format: roopsee-campaign`, amounts in rupees).
+- **Ads:** carousel, video, catalog, Advantage+/dynamic creative and existing-post ads are brought in as a full creative (shown as a card with what it is, its text, link and images). Meta's own fields that it fills in itself are left out (ids, tracking, expiring image links), and the Page and Instagram account are set to the current environment's. Edit the creative as JSON on the card if you need to. Ad IDs `RS_COPY_001…` are assigned and can be renamed.
+- **Ad sets:** regions, cities, zips, neighbourhoods and map pins are kept as they are. When no whole country is targeted, India is not added on top (Meta would call that a conflict).
+- **Templates:** *Save as template* stores any ad set, campaign setup or ad in `templates/` for reuse.
+- Catalog ads need their product set. Copy them from your Meta account (that includes it); a file without it is flagged.
+
+**Detailed targeting (per ad set, under More options).** Search places by name (country, state, city with radius, postcode, neighbourhood) and include or exclude them; search interests and languages; pick your saved custom or lookalike audiences; switch Advantage audience on; choose the exact placements per platform (Facebook, Instagram, Messenger, Audience Network, Threads, WhatsApp) and devices; set the attribution window. It reads and writes Meta's own targeting JSON, so the expert box below always matches. Choosing a state or city replaces the whole-country setting for that country, because Meta rejects both together.
+
+**Build other kinds of ads (Ads section).** Besides image ads you can add: **Video** (upload an MP4 or MOV, or pick one from your Meta videos; Meta processes it, which can take a few minutes, and the launcher waits), **Carousel** (2 to 10 cards, each with a picture, headline, description and its own link; optional end card and Meta-optimised order), **Existing post** (pick one of your Page's recent posts or paste its id), **Advantage+** (up to 5 texts, 5 headlines, 5 descriptions and 10 pictures or videos; Meta tries the combinations) and **Catalog** (product set plus `{{product.name}}` and `{{product.price}}` templates). Pictures and videos you upload are kept in `media/` and sent to Meta only when you create, once each (never twice). Each card has a **Meta preview** that draws the ad in a real placement (for pictures and videos already on Meta). Advantage+ marks its ad set as a dynamic-creative ad set automatically.
+- Catalog ads: listing your catalogs needs a permission your app may not have; if the lookup fails, paste the product set id from Commerce Manager.
+- Videos over 300 MB are not supported yet (they need Meta's chunked upload).
+
+**Campaign options.** *Minimum return on ad spend* (for example 2.5) is a bid strategy that needs the result "Highest purchase value"; the launcher sets that for you and adds the target to the ad sets. *Special ad categories* (jobs, housing, financial products and services, political, gambling) are tick boxes with the country the ads run in; Meta limits targeting for these ads and the launcher warns. The old Credit category no longer exists on Meta.
 
 **One ad in several ad sets.** Meta needs a separate ad for each ad set. The launcher makes them for you: the first keeps the image's ID (`RS_ACNE_001`) and the others get `_S2`, `_S3` and so on (`RS_ACNE_001_S2`), using the same image. Ad IDs ending in `_S<number>` are valid; the image file name stays `RS_ACNE_001`.
 
@@ -222,7 +245,7 @@ It uploads the images, creates the campaign and all its ad sets, then the ads, a
 
 | Page | What it does |
 |---|---|
-| **New campaign** | The guided flow above |
+| **New campaign** | The one-page builder above |
 | **Overview** | Everything on Meta, read live: tiles, things that need attention, and a campaign > ad set > ad tree |
 | **Creatives** | Add images by theme and see which are used or on Meta. **Already on Meta** shows the actual images in your ad account with their hash: click one to see it full size, copy the hash, or use it in a new campaign |
 | **Campaigns & ad sets** | Edit campaigns, ad sets and audiences as plain cards (above) |
@@ -302,7 +325,7 @@ Performance reading is done by the dashboard's **Meta Ads** page, not by this to
 | `doctor.py` | `doctor`, `discover`, `live`, `images` and `status` |
 | `pipeline.py` | The single entry point used by both `run.py` and the UI |
 
-`ui/server.py` is the web backend (local only, header-protected, environment switch, creative upload, config and batch editing). `ui/wizard.py` turns the guided answers into a plan (several ad sets, shared or per-ad-set budgets, ads in several ad sets), writes the config and batch, and runs upload > setup > prepare. `ui/jobs.py` runs one background job at a time and turns common Meta errors into plain advice. `ui-app/` is the React source for the screens.
+`ui/server.py` is the web backend (local only, header-protected, environment switch, creative upload, config and batch editing). `ui/wizard.py` turns the builder's answers into a plan (several ad sets, budgets, bids, extra settings, ads in several ad sets), runs the Check with Meta, writes the config and batch, and runs upload > setup > prepare. `ui/importer.py` reads ad set JSON (both formats) and copies ad sets from Meta. `ui/jobs.py` runs one background job at a time and turns common Meta errors into plain advice. `ui-app/` is the React source for the screens.
 
 ---
 
@@ -346,7 +369,9 @@ Full detail of every call (secrets removed) is in `logs/launcher.log`.
 - Production: one paused test campaign with ad set, creative and ad was created and seen in Ads Manager. Going live (`publish`) and a multi-ad-set campaign on production are untested.
 - The Ads Manager link on the UI's result screen is built from the account and campaign IDs and has not been verified to open the right page.
 - Image limits (30 MB, 600px minimum, 1080px recommended, aspect ratios) are from memory of Meta's guidance; check current docs.
-- Only static image ads with one image per ad (no video, carousel, dynamic creative, special ad categories, lookalike or custom audiences). The guided flow offers Traffic and Sales goals only.
+- Ads are single-image only so far (carousel, video, catalog and existing-post ads are the next phases). The recipes cover website visits, sales and awareness; other objectives are reachable through the expert boxes and are only as verified as Meta's check-only run says.
+- **Check with Meta** needs a campaign of the same goal in your ad account to test ad sets against; with no match the ad set is shown as not pre-checked. Meta also limits how often an ad account can be asked, so avoid pressing it repeatedly (results for the parent campaign and a stand-in image are cached for five minutes).
+- Cities and interests must be given as Meta's own targeting JSON (with Meta's ids); searching them by name is a later phase.
 - Meta objects cannot be changed or deleted from the launcher; editing a campaign or ad set that is already on Meta must be done in Ads Manager (the UI locks them and offers a copy).
 - Insights and reporting are intentionally left to the dashboard.
 
@@ -357,3 +382,4 @@ Full detail of every call (secrets removed) is in `logs/launcher.log`.
 - Added a web UI with a guided flow, several ad sets per campaign, an environment switch, drafts, and a Campaigns & ad sets editor; ads can also be created from an existing image hash; ad IDs may end in `_S<number>` for copies of an ad in other ad sets.
 - UTMs use Meta's ID macros (so the dashboard can match them) plus `rs_creative`, instead of a static `utm_content=RS_ACNE_001`.
 - Environment credentials are split into `META_SANDBOX_*` / `META_PRODUCTION_*` blocks in a single `.env`.
+

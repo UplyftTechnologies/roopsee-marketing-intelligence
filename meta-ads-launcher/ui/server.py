@@ -15,6 +15,10 @@ from src import validate as validate_mod
 from src.common import CTAS, GOALS, KEY_RE, OBJECTIVES, PLACEMENTS, ROOT, LauncherError, Registry, Settings, batch_files, jload, jsave, sha256
 from src.pipeline import COMMANDS, execute
 from ui.jobs import JOBS, RUN_LOCK, start_job
+from ui.importer import router as importer_router
+from ui.library import router as library_router
+from ui.targeting import router as targeting_router
+from ui.formats import router as formats_router
 from ui.wizard import router as wizard_router
 
 DIST = Path(__file__).parent / "dist"
@@ -25,6 +29,10 @@ CATEGORY_RE = re.compile(r"^[a-z0-9_]{2,30}$")
 
 app = FastAPI(title="Roopsee Meta Ads Launcher", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(wizard_router)
+app.include_router(importer_router)
+app.include_router(library_router)
+app.include_router(targeting_router)
+app.include_router(formats_router)
 
 
 # ---- protection: local only, and no cross-site writes ---------------------------------------------------------------------

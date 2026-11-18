@@ -18,9 +18,33 @@ def base_key(k: str) -> str:
     """RS_ACNE_001_S2 -> RS_ACNE_001 (the image file name)."""
     return re.sub(r"_S\d{1,2}$", "", k or "")
 
-OBJECTIVES = {"OUTCOME_TRAFFIC", "OUTCOME_SALES", "OUTCOME_LEADS", "OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT"}
+OBJECTIVES = {"OUTCOME_TRAFFIC", "OUTCOME_SALES", "OUTCOME_LEADS", "OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT", "OUTCOME_APP_PROMOTION"}
 CTAS = {"LEARN_MORE", "SHOP_NOW", "SIGN_UP", "GET_OFFER", "ORDER_NOW", "CONTACT_US", "SUBSCRIBE"}
-GOALS = {"LINK_CLICKS", "LANDING_PAGE_VIEWS", "OFFSITE_CONVERSIONS", "REACH", "IMPRESSIONS"}
+GOALS = {"LINK_CLICKS", "LANDING_PAGE_VIEWS", "OFFSITE_CONVERSIONS", "REACH", "IMPRESSIONS", "VALUE", "POST_ENGAGEMENT", "PAGE_LIKES", "VIDEO_VIEWS", "THRUPLAY",
+         "AD_RECALL_LIFT", "LEAD_GENERATION", "QUALITY_LEAD", "CONVERSATIONS", "APP_INSTALLS", "PROFILE_VISIT", "QUALITY_CALL", "REPLIES",
+         "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS", "ENGAGED_USERS", "VISIT_INSTAGRAM_PROFILE", "MESSAGING_PURCHASE_CONVERSION", "ONSITE_CONVERSIONS"}  # Meta rejects invalid combinations; the check-only run tells you
+BID_STRATEGIES = {"LOWEST_COST_WITHOUT_CAP", "LOWEST_COST_WITH_BID_CAP", "COST_CAP", "LOWEST_COST_WITH_MIN_ROAS"}
+BILLING_EVENTS = {"IMPRESSIONS", "LINK_CLICKS", "THRUPLAY", "POST_ENGAGEMENT", "PAGE_LIKES"}
+DESTINATIONS = {"WEBSITE", "APP", "MESSENGER", "WHATSAPP", "INSTAGRAM_PROFILE", "PHONE_CALL", "ON_AD", "ON_POST", "ON_VIDEO", "FACEBOOK", "SHOP_AUTOMATIC"}
+# things a file can never set: ids, state, credentials. Status is always PAUSED here, by design.
+FORBIDDEN_EXTRA = {"id", "account_id", "campaign_id", "adset_id", "ad_id", "status", "effective_status", "configured_status", "created_time", "updated_time",
+                   "access_token", "appsecret_proof", "execution_options", "name", "issues_info", "recommendations", "bid_info", "learning_stage_info"}
+
+
+def clean_extra(d) -> tuple[dict, list[str]]:
+    """Make a pass-through dict safe: keep only allowed top-level keys. Returns (clean, dropped key names)."""
+    if not isinstance(d, dict):
+        return {}, []
+    clean = {k: v for k, v in d.items() if k not in FORBIDDEN_EXTRA}
+    return clean, sorted(k for k in d if k in FORBIDDEN_EXTRA)
+
+
+def deep_merge(base: dict, over: dict) -> dict:
+    """Return base with `over` laid on top (dicts merge, everything else is replaced)."""
+    out = dict(base)
+    for k, v in (over or {}).items():
+        out[k] = deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
 PLACEMENTS = {"instagram", "facebook", "automatic"}
 STATUSES = {"DRAFT", "READY"}  # DRAFT = validated only; READY = will be uploaded / prepared
 

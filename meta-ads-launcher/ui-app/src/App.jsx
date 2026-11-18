@@ -3,7 +3,7 @@ import Icon from './Icon'
 import EnvSwitch from './EnvSwitch'
 import { api } from './api'
 import Overview from './pages/Overview'
-import Wizard from './pages/Wizard'
+import Builder from './pages/Builder'
 import Creatives from './pages/Creatives'
 import Campaigns from './pages/Campaigns'
 import Setup from './pages/Setup'
@@ -12,7 +12,7 @@ import Health from './pages/Health'
 
 // key, label, icon, description, page, group
 const NAV = [
-  ['new', 'New campaign', 'plus', 'Create a campaign step by step', Wizard, 'Create'],
+  ['new', 'New campaign', 'plus', 'Create a campaign step by step', Builder, 'Create'],
   ['overview', 'Overview', 'overview', 'Everything on Meta, live', Overview, 'Manage'],
   ['campaigns', 'Campaigns & ad sets', 'setup', 'Set up campaigns, ad sets and audiences', Campaigns, 'Manage'],
   ['creatives', 'Creatives', 'image', 'Your images', Creatives, 'Library'],
