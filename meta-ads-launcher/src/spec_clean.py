@@ -65,6 +65,10 @@ def clean_creative(raw: dict, page_id: str | None = None, instagram_id: str | No
             dof.pop("creative_features_spec")
         if not dof:
             spec.pop("degrees_of_freedom_spec")
+    afs0 = spec.get("asset_feed_spec")  # "message extensions" (a Messenger / WhatsApp chat button) need messaging permission the app does not have: Meta answers "(#3) capability"
+    if isinstance(afs0, dict) and afs0.get("message_extensions"):
+        afs0.pop("message_extensions")
+        notes.append("this ad uses message extensions (a chat button). They were left out, because the app has no messaging permission and Meta rejects the ad with '(#3) Application does not have the capability'")
     oss = spec.get("object_story_spec")
     if isinstance(oss, dict):
         if page_id:
