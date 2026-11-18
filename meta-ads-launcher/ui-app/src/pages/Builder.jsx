@@ -55,16 +55,40 @@ function JsonBox({ label, hint, value, onChange }) {
   )
 }
 
+const LEVEL = { 1: ['camp', 'Campaign'], 2: ['set', 'Ad sets'], 3: ['ad', 'Ads'] }
 function Section({ n, title, sub, state, open, onToggle, children }) {
+  const [lv, lvName] = LEVEL[n] || ['', '']
   return (
-    <section className={`card sect ${open ? 'open' : ''}`}>
+    <section className={`card sect ${open ? 'open' : ''}`} data-lv={lv}>
       <button type="button" className="sect-head" onClick={onToggle} aria-expanded={open}>
         <span className={`sect-n ${state}`}>{state === 'done' ? '✓' : state === 'bad' ? '!' : n}</span>
-        <span className="grow"><b>{title}</b><span className="sub" style={{ display: 'block' }}>{sub}</span></span>
+        <span className="grow"><span className="lvtag">Level {n} · {lvName}</span><b>{title}</b><span className="sub" style={{ display: 'block' }}>{sub}</span></span>
         <span style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s' }}><Icon name="chevron" size={18} /></span>
       </button>
       {open && <div className="sect-body">{children}</div>}
     </section>
+  )
+}
+
+/** What extra mechanisms came with an import, in three groups: sent as is, to check, and left out on purpose (with the reason). */
+function ExtrasNotice({ found }) {
+  if (!found?.length) return null
+  const groups = [['dropped', 'Left out on purpose', 'bad'], ['review', 'Check before creating', 'warn'], ['kept', 'Imported as is', 'good']]
+  return (
+    <div className="xnotice" role="note">
+      <div className="xn-head"><b>This import carries {found.length} extra setting{found.length === 1 ? '' : 's'}</b>
+        <span>The builder has no field for some of them. This is what happens to each one.</span></div>
+      {groups.map(([st, title, tone]) => {
+        const rows = found.filter((x) => x.status === st)
+        if (!rows.length) return null
+        return (
+          <div key={st} className={`xn-group ${tone}`}>
+            <div className="xn-title"><i />{title} <span className="muted">({rows.length})</span></div>
+            {rows.map((x, i) => <div key={i} className="xn-row"><span className="xn-where">{x.where}</span><span className="xn-what"><b>{x.what}</b><span className="muted"> {x.why}</span></span></div>)}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -78,11 +102,15 @@ function ReportView({ r, kind }) {
     <div>
       <div className="chip-row"><Badge tone={r.errors.length ? 'bad' : 'good'}>{r.errors.length ? 'Problem' : `${r.count} ${what} read`}</Badge><Badge>{r.format || 'unknown format'}</Badge></div>
       {block('Problems', r.errors, 'bad')}
+      <ExtrasNotice found={r.special} />
       {block('Needs your attention', r.warnings)}
-      {block('Filled in', r.filled)}
-      {block('Converted for you', r.converted)}
-      {block('Kept as extra settings (shown under More options)', r.kept_as_extra)}
-      {block('Left out (Meta fills these in itself, or the launcher manages them)', r.ignored)}
+      <details className="xn-more">
+        <summary>Full details of the import</summary>
+        {block('Filled in', r.filled)}
+        {block('Converted for you', r.converted)}
+        {block('Kept as extra settings (shown under More options)', r.kept_as_extra)}
+        {block('Left out (Meta fills these in itself, or the launcher manages them)', r.ignored)}
+      </details>
     </div>
   )
 }
@@ -189,7 +217,7 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
   const [tab, setTab] = useState(() => (/[?&]tab=(\w+)/.exec(window.location.hash) || [])[1] || 'basics')
   const has = (v) => v && typeof v === 'object' && Object.keys(v).length > 0
   const delivery = !!(s.goal || s.event || s.bid_strategy || s.bid_amount || s.billing_event || s.destination_type || s.start_date || s.end_date || s.lifetime_budget || s.roas)
-  const tabs = [['basics', 'Basics', false], ['targeting', 'Detailed targeting', has(s.targeting_extra)], ['delivery', 'Bidding and schedule', delivery], ['expert', 'Expert (JSON)', has(s.extra)]]
+  const tabs = [['basics', 'Basics', false], ['targeting', 'Targeting', has(s.targeting_extra)], ['delivery', 'Bidding & schedule', delivery], ['expert', 'Expert', has(s.extra)]]
   const conv = CONVERSION.includes(s.goal)
   const places = o.placements.filter((x) => x.id !== 'custom' || s.placements === 'custom')
   return (
@@ -510,14 +538,37 @@ function Flow({ o, ctx, params }) {
         <Card title="Summary" sub={errs.length ? `${errs.length} thing${errs.length === 1 ? '' : 's'} to fix` : plan ? 'Ready to create' : 'Working it out…'}
           right={plan ? <Badge tone={errs.length ? 'bad' : 'good'}>{errs.length ? 'Not ready' : 'Ready'}</Badge> : null}>
           {plan && (
-            <dl className="summary" style={{ gridTemplateColumns: '90px minmax(0,1fr)' }}>
-              <dt>Campaign</dt><dd><b style={{ wordBreak: 'break-word' }}>{plan.summary.campaign_name}</b></dd>
-              <dt>Goal</dt><dd>{plan.summary.goal}</dd>
-              <dt>Budget</dt><dd>{plan.summary.budget_mode === 'adset' ? `${inr(plan.summary.total_budget)}/day in total` : `${inr(plan.summary.daily_budget)}/day`}</dd>
-              <dt>Ad sets</dt><dd>{plan.summary.adsets.map((x, i) => <div key={i} style={{ marginBottom: 6 }}>{i + 1}. <b style={{ wordBreak: 'break-word' }}>{x.name}</b><br /><span className="muted">{x.audience} · {x.placements} · {x.goal}{x.bid ? ' · ' + x.bid : ''}{x.extras?.length ? ' · +extra settings' : ''} · {x.ads} ad(s)</span></div>)}</dd>
-              <dt>Ads</dt><dd>{plan.summary.ad_list?.length ? plan.summary.ad_list.map((x, i) => <div key={i} style={{ marginBottom: 6 }}><b style={{ wordBreak: 'break-word' }}>{x.name}</b>{x.name !== x.id && <span className="muted"> · {x.id}</span>}<br /><span className="muted">in {x.adset}</span></div>) : `${plan.summary.ads} in total`}</dd>
-              <dt>Account</dt><dd>{o.account} · {prod ? 'PRODUCTION' : 'sandbox'}</dd>
-            </dl>
+            <>
+              <div className="tree" aria-label="Structure of the campaign">
+                <button type="button" className="tn camp" onClick={() => setOpenSec('campaign')}>
+                  <span className="tlv">Campaign</span><b>{plan.summary.campaign_name}</b>
+                  <span className="tmeta">{plan.summary.goal} · {plan.summary.budget_mode === 'adset' ? `${inr(plan.summary.total_budget)}/day in total` : `${inr(plan.summary.daily_budget)}/day`}</span>
+                </button>
+                <div className="tkids">
+                  {plan.summary.adsets.map((x, i) => {
+                    const kids = (plan.summary.ad_list || []).filter((ad) => ad.adset === x.name)
+                    return (
+                      <div key={i} className="tbranch">
+                        <button type="button" className="tn set" onClick={() => setOpenSec('adsets')}>
+                          <span className="tlv">Ad set {i + 1}</span><b>{x.name}</b>
+                          <span className="tmeta">{x.audience} · {x.placements}{x.goal ? ' · ' + x.goal : ''}{x.bid ? ' · ' + x.bid : ''}{x.extras?.length ? ' · +extra settings' : ''}</span>
+                        </button>
+                        <div className="tkids">
+                          {kids.map((ad, j) => (
+                            <button type="button" key={j} className="tn ad" onClick={() => setOpenSec('ads')}>
+                              <span className="tlv">Ad</span><b>{ad.name}</b>
+                              <span className="tmeta">{ad.type}</span>
+                            </button>
+                          ))}
+                          {kids.length === 0 && <button type="button" className="tn empty" onClick={() => setOpenSec('ads')}>No ads in this ad set yet</button>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="tacct">{o.account} · {prod ? 'PRODUCTION' : 'sandbox'} · created paused</div>
+            </>
           )}
           {errs.length > 0 && <Banner tone="err"><b>Fix these</b>{errs.map((e, i) => <div key={i} className="fixrow"><button type="button" className="linkish" onClick={() => setOpenSec(goSec(e))}>• {e}</button></div>)}</Banner>}
           {plan?.warnings?.length > 0 && <Banner><b>Worth knowing</b>{plan.warnings.map((e, i) => <div key={i} style={{ marginTop: 3 }}>• {e}</div>)}</Banner>}

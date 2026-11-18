@@ -34,6 +34,21 @@
       "budget_strategy": "CBO",
       "daily_budget": 500.0,
       "status": "PAUSED"
+    },
+    {
+      "key": "ROOPSEE_NEW_AD_CAMPAIGN_1",
+      "objective": "OUTCOME_TRAFFIC",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 500.0
+    },
+    {
+      "key": "ROOPSEE_SALE_1",
+      "objective": "OUTCOME_SALES",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 500.0,
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
     }
   ]
 }

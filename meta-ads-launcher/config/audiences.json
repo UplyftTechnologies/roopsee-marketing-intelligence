@@ -35,6 +35,16 @@
       "genders": [
         2
       ]
+    },
+    "WIZ_IN_WOMEN_18_50": {
+      "countries": [
+        "IN"
+      ],
+      "age_min": 18,
+      "age_max": 50,
+      "genders": [
+        2
+      ]
     }
   }
 }

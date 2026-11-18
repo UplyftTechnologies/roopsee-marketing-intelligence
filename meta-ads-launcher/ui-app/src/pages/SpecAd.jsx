@@ -4,6 +4,7 @@ import { api } from '../api'
 import { Badge, Banner, Field } from '../ui'
 import { MetaImg } from '../MetaImages'
 import PreviewBtn from './Preview'
+import AdvancedAd from './Advanced'
 
 /** An ad that carries a whole creative copied from Meta or imported as JSON (carousel, video, catalog, dynamic, existing post ...). */
 export default function SpecAdCard({ ad, i, a, all, o, upd, remove, toggleSet, onSave }) {
@@ -60,6 +61,7 @@ export default function SpecAdCard({ ad, i, a, all, o, upd, remove, toggleSet, o
             <div className="row"><button type="button" className="btn small primary" onClick={apply}>Apply changes</button><span className="mini">Meta's own creative JSON. Page and Instagram ids are set for you; Meta checks it before anything is created.</span></div>
           </div>
         )}
+        <AdvancedAd extra={ad.extra} onChange={(v) => upd(i, 'extra', v)} />
         {err && <Banner tone="err">{err}</Banner>}
       </div>
     </div>

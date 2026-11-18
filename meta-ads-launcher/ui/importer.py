@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from src.common import BID_STRATEGIES, BILLING_EVENTS, DESTINATIONS, FORBIDDEN_EXTRA, GOALS, Settings, account_cfg, audiences_cfg
 from src.meta_api import Meta, MetaError
+from src.special import adset_findings
 
 router = APIRouter()
 MAX_BYTES = 200 * 1024
@@ -281,7 +282,7 @@ def _looks_meta(o: dict) -> bool:
 
 def convert(data: Any, offset: int = 100) -> dict:
     saved = audiences_cfg()
-    rep: dict = {"format": None, "count": 0, "filled": [], "converted": [], "kept_as_extra": [], "ignored": [], "warnings": [], "errors": []}
+    rep: dict = {"format": None, "count": 0, "filled": [], "converted": [], "kept_as_extra": [], "ignored": [], "warnings": [], "errors": [], "special": []}
     items: list = []
     fmt = None
     if isinstance(data, dict) and isinstance(data.get("data"), list):  # a Graph API list response
@@ -311,6 +312,8 @@ def convert(data: Any, offset: int = 100) -> dict:
         for k in ("filled", "converted", "kept_as_extra", "ignored", "warnings", "errors"):
             pre = f"Ad set {i}: " if len(items) > 1 and k in ("warnings", "errors") else ""
             rep[k] += [pre + x for x in sub[k]] if pre else sub[k]
+        form["targeting_extra"], form["extra"], found = adset_findings(form["targeting_extra"], form["extra"], form.get("label") or f"Ad set {i}")
+        rep["special"] += found
         # light sanity so the form never opens with nonsense
         cs = form["custom"]
         try:

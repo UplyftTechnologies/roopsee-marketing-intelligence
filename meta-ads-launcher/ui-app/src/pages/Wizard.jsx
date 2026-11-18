@@ -4,6 +4,7 @@ import { api, inr } from '../api'
 import { Badge, Banner, Card, Field, JobPanel } from '../ui'
 import { MetaImageGrid, MetaImg } from '../MetaImages'
 import SpecAdCard from './SpecAd'
+import AdvancedAd from './Advanced'
 
 export const uid = () => 's' + Math.random().toString(36).slice(2, 7)
 
@@ -147,6 +148,7 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
                 <Field label="Button"><select className="field" value={ad.cta} onChange={(e) => upd(i, 'cta', e.target.value)}>{o.ctas.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}</select></Field>
               </div>
               <DestPick o={o} value={ad.destination} onChange={(v) => upd(i, 'destination', v)} />
+              <AdvancedAd extra={ad.extra} onChange={(v) => upd(i, 'extra', v)} />
             </div>
           </div>
         ))}

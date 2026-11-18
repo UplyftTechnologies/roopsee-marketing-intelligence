@@ -1,0 +1,76 @@
+{
+  "batch_id": "ROOPSEE_WIZ_20261118_1249",
+  "ads": [
+    {
+      "ad_key": "RS_COPY_001",
+      "adset_key": "Women IN 18-50 | Auto | 18 Nov",
+      "creative_spec": {
+        "object_story_spec": {
+          "page_id": "1175723048967774",
+          "instagram_user_id": "17841433192662267",
+          "template_data": {
+            "link": "https://roopsee.com/products",
+            "name": "{{product.name}}",
+            "caption": "roopsee.com/shop",
+            "call_to_action": {
+              "type": "SHOP_NOW"
+            },
+            "multi_share_end_card": false,
+            "show_multiple_images": false,
+            "page_welcome_message": "{\"type\":\"VISUAL_EDITOR\",\"version\":2,\"landing_screen_type\":\"welcome_message\",\"media_type\":\"text\",\"text_format\":{\"customer_action_type\":\"autofill_message\",\"message\":{\"autofill_message\":{\"content\":\"Hello! Can I get more info on this?\"},\"text\":\"Hi! Please let us know how we can help you.\"}},\"image_format\":{\"customer_action_type\":\"quick_replies\",\"message\":{\"attachment\":{\"type\":\"template\",\"payload\":{\"template_type\":\"generic\",\"elements\":[{\"title\":\"\",\"buttons\":[],\"image_hash\":\"\"}]}},\"quick_replies\":[{\"title\":\"I'd like to learn more\",\"content_type\":\"text\",\"response_type\":null}],\"text\":\"Hi! Please let us know how we can help you.\"}},\"video_format\":{\"customer_action_type\":\"quick_replies\",\"message\":{\"attachment\":{\"type\":\"video\",\"payload\":{\"attachment_id\":\"\"}},\"quick_replies\":[{\"title\":\"I'd like to learn more\",\"content_type\":\"text\",\"response_type\":null}],\"text\":\"Hi! Please let us know how we can help you.\"}},\"ai_generated_icebreaker_toggle_enabled\":null,\"user_edit\":false,\"surface\":\"visual_editor_new\"}"
+          }
+        },
+        "asset_feed_spec": {
+          "ad_formats": [
+            "CAROUSEL",
+            "COLLECTION"
+          ],
+          "optimization_type": "FORMAT_AUTOMATION"
+        },
+        "url_tags": "utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.name}}&utm_adset={{adset.name}}&utm_content={{ad.name}}&utm_id={{ad.id}}&fb_ad_id={{ad.id}}",
+        "degrees_of_freedom_spec": {
+          "creative_features_spec": {
+            "adapt_to_placement": {
+              "enroll_status": "OPT_IN",
+              "customizations": {
+                "aspect_ratio_config": {
+                  "ar_4_5": {
+                    "adapt": {
+                      "enroll_status": "OPT_IN"
+                    }
+                  },
+                  "ar_9_16": {
+                    "adapt": {
+                      "enroll_status": "OPT_IN"
+                    }
+                  }
+                },
+                "image_crop_style": "AUTO"
+              }
+            },
+            "image_background_gen": {
+              "enroll_status": "OPT_IN"
+            },
+            "image_uncrop": {
+              "enroll_status": "OPT_IN"
+            },
+            "media_type_automation": {
+              "enroll_status": "OPT_IN"
+            },
+            "product_browsing": {
+              "enroll_status": "OPT_IN"
+            },
+            "product_metadata_automation": {
+              "enroll_status": "OPT_IN"
+            },
+            "standard_enhancements_catalog": {
+              "enroll_status": "OPT_IN"
+            }
+          }
+        },
+        "product_set_id": "1913241236355682"
+      },
+      "status": "READY"
+    }
+  ]
+}

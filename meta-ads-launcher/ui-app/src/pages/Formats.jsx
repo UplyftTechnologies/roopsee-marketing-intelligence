@@ -5,6 +5,7 @@ import { Badge, Banner, Field } from '../ui'
 import { MetaImageGrid, MetaImg } from '../MetaImages'
 import { Counter, DestPick, audLabel } from './Wizard'
 import PreviewBtn from './Preview'
+import AdvancedAd from './Advanced'
 
 export const KIND_INFO = {
   video: { label: 'Video', help: 'One video with text and a button.' },
@@ -240,6 +241,7 @@ export default function FormatCard({ ad, i, a, o, all, upd, toggleSet, remove, o
             {prev && <PreviewBtn ad={ad} />}
           </div>
         </details>
+        <AdvancedAd extra={ad.extra} onChange={(v) => set({ extra: v })} />
         <div className="row"><button type="button" className="btn small" onClick={onSave}>Save as template</button></div>
       </div>
     </div>

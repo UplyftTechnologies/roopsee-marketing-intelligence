@@ -15,6 +15,7 @@ from src import doctor, validate as validate_mod
 from src.common import (BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, GOALS as GOALS_ALL, ROOT, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
                         audiences_cfg, campaigns_cfg, clean_extra, deep_merge, jload, jsave)
 from src.common import batch_files, jload
+from src.spec_clean import describe
 from src.meta_api import Meta, MetaError
 from src import create_adsets, create_campaigns, create_creatives, media
 from src.pipeline import execute
@@ -265,6 +266,11 @@ def build_plan(a: dict, s: Settings) -> dict:
             val = sp.get(key)
             if val in (None, "", {}):
                 continue
+            if key == "targeting_extra" and isinstance(val, dict) and "subscriber_universe" in val:  # a WhatsApp / Messenger customer audience: needs messaging permission, Meta answers "(#3) capability"
+                val = {k: v for k, v in val.items() if k != "subscriber_universe"}
+                warns.append(f"{label}: the WhatsApp customer audience (subscriber_universe) was left out, because the app has no messaging permission and Meta rejects the ad set with '(#3) Application does not have the capability'.")
+                if not val:
+                    continue
             if not isinstance(val, dict):
                 errs.append(f"{label}: the extra settings ({key}) must be a JSON object.")
                 continue
@@ -463,7 +469,8 @@ def build_plan(a: dict, s: Settings) -> dict:
     return {"errors": errs, "warnings": warns, "campaign": camp, "adsets": sets_out, "audiences": audiences, "ads": ads, "batch": batch,
             "batch_id": f"ROOPSEE_WIZ_{now.strftime('%Y%m%d_%H%M')}", "names": {"campaign": name, "adsets": [x["key"] for x in sets_out]},
             "summary": {"goal": goal["label"], "budget_mode": "adset" if per_set else "campaign", "daily_budget": daily, "total_budget": total, "ads": len(ads), "start": start, "end": end, "campaign_name": name,
-                        "ad_list": [{"name": x.get("name") or x["ad_key"], "id": x["ad_key"], "adset": x["adset_key"]} for x in ads],
+                        "ad_list": [{"name": x.get("name") or x["ad_key"], "id": x["ad_key"], "adset": x["adset_key"],
+                                    "type": (describe(x["creative_spec"])["kind"] if x.get("creative_spec") else "Single image")} for x in ads],
                         "adsets": [{"name": x["key"], "audience": sp["_aud"]["label"], "placements": sp["_plc"]["label"], "budget": x.get("daily_budget") or x.get("lifetime_budget"),
                                     "goal": RESULT_LABELS.get(x["optimization_goal"], x["optimization_goal"]), "bid": BID_LABELS.get(x.get("bid_strategy", ""), x.get("bid_strategy", "")),
                                     "extras": sorted(k for k in ("targeting_extra", "extra") if x.get(k)), "ads": per_set_count[j]}

@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from src.common import BID_STRATEGIES, FORBIDDEN_EXTRA, ROOT, Registry, Settings, account_cfg, batch_files, jload, jsave
 from src.meta_api import Meta, MetaError
 from src.spec_clean import clean_creative, describe
+from src.special import creative_findings
 from ui.importer import MAX_ADSETS, MAX_BYTES, convert
 from ui.wizard import GOALS as WIZ_GOALS
 from ui.formats import KINDS as FORMAT_KINDS
@@ -27,8 +28,18 @@ CREATIVE_FIELDS = "id,object_story_spec,asset_feed_spec,object_story_id,effectiv
 AD_FIELDS = f"name,adset_id,campaign_id,status,effective_status,creative{{{CREATIVE_FIELDS}}}"
 
 
+def _uniq(items: list) -> list:
+    seen, out = set(), []
+    for x in items:
+        k = (x["where"], x["what"], x["status"])
+        if k not in seen:
+            seen.add(k)
+            out.append(x)
+    return out
+
+
 def _rep() -> dict:
-    return {"format": None, "count": 0, "filled": [], "converted": [], "kept_as_extra": [], "ignored": [], "warnings": [], "errors": []}
+    return {"format": None, "count": 0, "filled": [], "converted": [], "kept_as_extra": [], "ignored": [], "warnings": [], "errors": [], "special": []}
 
 
 def _num(v):
@@ -175,6 +186,7 @@ def ad_form(raw: dict, s: Settings, rep: dict, key: str = "") -> dict | None:
     if not isinstance(spec_in, dict):
         rep["errors"].append("creative_spec must be an object.")
         return None
+    rep.setdefault("special", []).extend(creative_findings(spec_in, str(raw.get("name") or key or "Ad")))
     spec, notes = clean_creative(spec_in, s.page_id, s.instagram_id)
     if not (spec.get("object_story_spec") or spec.get("asset_feed_spec") or spec.get("object_story_id")):
         rep["errors"].append("The creative has nothing to build the ad from (no story, no asset feed, no existing post).")
@@ -226,7 +238,7 @@ def bundle_from_meta(camp: dict, adsets: list, ads: list, s: Settings, offset: i
         rep["warnings"].append(f"The campaign has {len(live)} ad sets; only the first {MAX_ADSETS} were copied.")
         live = live[:MAX_ADSETS]
     conv = convert({"data": live}, offset)
-    for k in ("filled", "converted", "kept_as_extra", "ignored", "warnings", "errors"):
+    for k in ("filled", "converted", "kept_as_extra", "ignored", "warnings", "errors", "special"):
         rep[k] += conv["report"][k]
     forms = conv["adsets"]
     for f, raw in zip(forms, live):
@@ -258,10 +270,12 @@ def bundle_from_meta(camp: dict, adsets: list, ads: list, s: Settings, offset: i
         if idx[raw["adset_id"]] not in by_sig[sig]["set_idx"]:
             by_sig[sig]["set_idx"].append(idx[raw["adset_id"]])
         rep["ignored"] += sub["ignored"]
+        rep["special"] += sub["special"]
     if skipped:
         rep["warnings"].append(f"{skipped} ad(s) could not be copied (over the {MAX_ADS}-ad limit or unreadable).")
     rep["converted"] = list(dict.fromkeys(rep["converted"]))
     rep["ignored"] = list(dict.fromkeys(rep["ignored"]))
+    rep["special"] = _uniq(rep["special"])
     rep["count"] = len(forms)
     answers["adsets"], answers["ads"] = forms, list(by_sig.values())
     rep["warnings"].append("Ad IDs (RS_COPY_001 ...) were given to the copied ads. Rename them if you like; the launcher never reuses an ID.")
@@ -312,7 +326,7 @@ async def import_campaign(req: Request):
         raw_sets = raw_sets["data"]
     if raw_sets:
         conv = convert(raw_sets if isinstance(raw_sets, list) else [raw_sets], offset)
-        for k in ("filled", "converted", "kept_as_extra", "ignored", "warnings", "errors"):
+        for k in ("filled", "converted", "kept_as_extra", "ignored", "warnings", "errors", "special"):
             rep[k] += conv["report"][k]
         answers["adsets"] = conv["adsets"]
         rep["count"] = len(conv["adsets"])
@@ -345,9 +359,11 @@ async def import_campaign(req: Request):
         f["set_idx"] = mine or list(range(len(answers.get("adsets", []))))
         out_ads.append(f)
         rep["ignored"] += sub["ignored"]
+        rep["special"] += sub["special"]
     if out_ads:
         answers["ads"] = out_ads
     rep["ignored"] = list(dict.fromkeys(rep["ignored"]))
+    rep["special"] = _uniq(rep["special"])
     return {"answers": answers, "report": rep}
 
 
@@ -369,6 +385,7 @@ async def import_ad(req: Request):
     rep["count"] = len(ads)
     for k in ("filled", "converted", "ignored"):
         rep[k] = list(dict.fromkeys(rep[k]))
+    rep["special"] = _uniq(rep["special"])
     return {"ads": ads, "report": rep}
 
 
