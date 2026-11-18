@@ -24,8 +24,9 @@ def run(s: Settings, meta: Meta, batch: str, validate_only=False) -> None:
             print(f"  ad:{k}: exists ({reg.get(k)['meta_ad_id']})")
             done += 1
             continue
-        payload = {"name": k, "adset_id": aset, "creative": {"creative_id": creative}, "status": "PAUSED"}
-        existing = None if validate_only else meta.find_by_name("ads", k)
+        shown = ad.get("name") or k  # the name people see in Ads Manager (the Ad ID is the default)
+        payload = {"name": shown, "adset_id": aset, "creative": {"creative_id": creative}, "status": "PAUSED"}
+        existing = None if (validate_only or ad.get("name")) else meta.find_by_name("ads", k)
         if existing:
             ad_id = existing
             print(f"  ad:{k}: found on Meta by name, adopted ({ad_id})")

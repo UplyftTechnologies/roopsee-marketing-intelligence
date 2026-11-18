@@ -35,6 +35,7 @@ export default function SpecAdCard({ ad, i, a, all, o, upd, remove, toggleSet, o
         </div>
         <div className="fgrid">
           <Field label="Ad ID (must be new, like RS_SKINCARE_001)"><input className="field" value={ad.ad_key || ''} onChange={(e) => upd(i, 'ad_key', e.target.value.toUpperCase())} /></Field>
+          <Field label="Ad name (optional)" hint="Shown in Ads Manager. Empty uses the Ad ID"><input className="field" value={ad.name || ''} placeholder={ad.ad_key || ''} onChange={(e) => upd(i, 'name', e.target.value)} /></Field>
         </div>
         {a.adsets.length > 1 && (
           <div><span className="lf-label">Show this ad in</span>

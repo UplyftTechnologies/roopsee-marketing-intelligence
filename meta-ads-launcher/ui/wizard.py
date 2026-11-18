@@ -48,6 +48,8 @@ DEST_LABELS = {"": "Website", "WEBSITE": "Website", "APP": "App", "MESSENGER": "
 RECIPES = [
     {"id": "traffic", "title": "Get website visits", "text": "Send people to your website or quiz. The simplest place to start.", "goal": "traffic", "placements": "instagram"},
     {"id": "sales", "title": "Sell on my website", "text": "Meta looks for people likely to buy. Needs your pixel.", "goal": "sales", "placements": "automatic", "needs_pixel": True},
+    {"id": "leads", "title": "Get leads or sign-ups", "text": "People fill in a form or sign up on your website. Needs your pixel.", "goal": "leads", "placements": "automatic", "needs_pixel": True},
+    {"id": "engagement", "title": "Get likes and comments", "text": "More people interacting with your posts.", "goal": "engagement", "placements": "automatic"},
     {"id": "awareness", "title": "Get known", "text": "Reach as many different people as possible.", "goal": "awareness", "placements": "automatic"},
 ]
 AUDIENCES = {
@@ -170,9 +172,15 @@ def build_plan(a: dict, s: Settings) -> dict:
     base = f"Roopsee | {goal['short']} | {stamp}"
     existing = campaigns_cfg()
     name, n = base, 1
-    while name in existing:
-        n += 1
-        name = f"{base} | {n}"
+    own = ((a.get("campaign") or {}).get("name") or "").strip()
+    if own:  # the user chose the campaign name
+        name = own
+        if name in existing:
+            errs.append(f"A campaign called '{name}' was already created with this launcher. Choose a different campaign name.")
+    else:
+        while name in existing:
+            n += 1
+            name = f"{base} | {n}"
 
     taken = set(adsets_cfg())
     sets_out, audiences, uid_index = [], {}, {}
@@ -186,9 +194,15 @@ def build_plan(a: dict, s: Settings) -> dict:
             plc = PLACEMENTS["instagram"]
         nm0 = f"{aud['short']} | {plc['short']} | {stamp}" + (f" | {n}" if n > 1 else "")
         nm, m = nm0, 1
-        while nm in taken:
-            m += 1
-            nm = f"{nm0} | {m}"
+        own_set = (sp.get("name") or "").strip()
+        if own_set:  # the user chose this ad set's name
+            nm = own_set
+            if nm in taken:
+                errs.append(f"{label}: the name '{nm}' is already used by another ad set. Choose a different name.")
+        else:
+            while nm in taken:
+                m += 1
+                nm = f"{nm0} | {m}"
         taken.add(nm)
         akey = aud["key"] or f"WIZ_{'_'.join(aud['countries'])}_{aud['gender']}_{aud['age_min']}_{aud['age_max']}".upper()
         if not aud["key"]:
@@ -300,6 +314,8 @@ def build_plan(a: dict, s: Settings) -> dict:
                     errs.append(f"{tag}: the same ad ID is used twice.")
                 used.add(k)
                 entry = {"ad_key": k, "adset_key": sets_out[si]["key"], "creative_spec": cs, "status": "READY"}
+                if (ad.get("name") or "").strip():
+                    entry["name"] = ad["name"].strip() if pos == 0 else f"{ad['name'].strip()} - ad set {si + 1}"
                 if isinstance(ad.get("extra"), dict) and ad["extra"]:
                     entry["extra"] = clean_extra(ad["extra"])[0]
                 ads.append(entry)
@@ -340,6 +356,8 @@ def build_plan(a: dict, s: Settings) -> dict:
             used.add(k)
             entry = {"ad_key": k, "adset_key": sets_out[si]["key"], "primary_text": (ad.get("primary_text") or "").strip(), "headline": (ad.get("headline") or "").strip(),
                      "cta": ad.get("cta"), "destination": url, "status": "READY"}
+            if (ad.get("name") or "").strip():
+                entry["name"] = ad["name"].strip() if pos == 0 else f"{ad['name'].strip()} - ad set {si + 1}"
             if ad.get("description"):
                 entry["description"] = ad["description"].strip()
             for xk in ("extra", "link_extra"):
@@ -426,7 +444,8 @@ def build_plan(a: dict, s: Settings) -> dict:
     total = sum(x.get("daily_budget", 0) for x in sets_out) if per_set else daily
     return {"errors": errs, "warnings": warns, "campaign": camp, "adsets": sets_out, "audiences": audiences, "ads": ads, "batch": batch,
             "batch_id": f"ROOPSEE_WIZ_{now.strftime('%Y%m%d_%H%M')}", "names": {"campaign": name, "adsets": [x["key"] for x in sets_out]},
-            "summary": {"goal": goal["label"], "budget_mode": "adset" if per_set else "campaign", "daily_budget": daily, "total_budget": total, "ads": len(ads), "start": start, "end": end,
+            "summary": {"goal": goal["label"], "budget_mode": "adset" if per_set else "campaign", "daily_budget": daily, "total_budget": total, "ads": len(ads), "start": start, "end": end, "campaign_name": name,
+                        "ad_list": [{"name": x.get("name") or x["ad_key"], "id": x["ad_key"], "adset": x["adset_key"]} for x in ads],
                         "adsets": [{"name": x["key"], "audience": sp["_aud"]["label"], "placements": sp["_plc"]["label"], "budget": x.get("daily_budget") or x.get("lifetime_budget"),
                                     "goal": RESULT_LABELS.get(x["optimization_goal"], x["optimization_goal"]), "bid": BID_LABELS.get(x.get("bid_strategy", ""), x.get("bid_strategy", "")),
                                     "extras": sorted(k for k in ("targeting_extra", "extra") if x.get(k)), "ads": per_set_count[j]}

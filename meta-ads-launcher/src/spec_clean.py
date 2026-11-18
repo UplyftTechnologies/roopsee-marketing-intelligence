@@ -57,6 +57,14 @@ def clean_creative(raw: dict, page_id: str | None = None, instagram_id: str | No
     if dropped:
         notes.append("left out (Meta fills these in itself): " + ", ".join(sorted(dropped)))
     spec = _drop_urls(_strip_label_ids(spec))
+    dof = spec.get("degrees_of_freedom_spec")  # Meta removed the old all-in-one "standard enhancements" switch; only the individual features are accepted now
+    if isinstance(dof, dict) and isinstance(dof.get("creative_features_spec"), dict) and "standard_enhancements" in dof["creative_features_spec"]:
+        dof["creative_features_spec"].pop("standard_enhancements")
+        notes.append("left out the old 'standard enhancements' switch (Meta no longer accepts it)")
+        if not dof["creative_features_spec"]:
+            dof.pop("creative_features_spec")
+        if not dof:
+            spec.pop("degrees_of_freedom_spec")
     oss = spec.get("object_story_spec")
     if isinstance(oss, dict):
         if page_id:

@@ -8,7 +8,7 @@ const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? undefined
 const has = (o) => o && typeof o === 'object' && Object.keys(o).length > 0
 
 export function exportOne(s, i = 0) {
-  const out = { format: 'roopsee-adset', version: 1, name: s.label || `Ad set ${i + 1}` }
+  const out = { format: 'roopsee-adset', version: 1, name: s.name || s.label || `Ad set ${i + 1}` }
   if (s.goal) out.result = RESULT_WORD[s.goal] || s.goal
   if (s.audience === 'custom') {
     out.audience = {

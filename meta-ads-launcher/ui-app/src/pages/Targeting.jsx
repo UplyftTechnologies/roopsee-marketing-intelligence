@@ -219,8 +219,8 @@ export default function TargetingEditor({ s, upd }) {
   const incl = placeChips(geo, false)
   const excl = placeChips(exg, true)
   return (
-    <fieldset className="set" style={{ marginTop: 12 }}>
-      <legend>Detailed targeting</legend>
+    <fieldset className="set plain">
+      <legend className="sr">Detailed targeting</legend>
       {locked && <Banner>This ad set uses your saved audience “{s.audience}”. Choose “Something else…” under Who sees it to edit locations, interests and the rest here.</Banner>}
       <div style={{ opacity: locked ? 0.5 : 1, pointerEvents: locked ? 'none' : 'auto' }} className="stack">
         {note && <Banner>{note}</Banner>}

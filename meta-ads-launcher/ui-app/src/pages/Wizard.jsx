@@ -137,6 +137,7 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
             <div className="stack">
               <div className="row">{ad.image ? <b>{ad.ad_key}</b> : <label className="lf" style={{ minWidth: 220 }}><span className="lf-label">Ad ID (must be new, like RS_SKINCARE_001)</span><span className="mini mono">hash {(ad.image_hash || '').slice(0, 10)}…</span><input className="field" value={ad.ad_key || ''} onChange={(e) => upd(i, 'ad_key', e.target.value.toUpperCase())} /></label>}
                 <button type="button" className="btn small danger right" onClick={() => setA((x) => ({ ...x, ads: x.ads.filter((_, j) => j !== i) }))}><Icon name="trash" size={13} /> Remove</button></div>
+              <label className="lf"><span className="lf-label">Ad name <span className="muted">(shown in Ads Manager; empty uses the Ad ID)</span></span><input className="field" value={ad.name || ''} placeholder={ad.ad_key || 'For example Skincare | Serum | Video 1'} onChange={(e) => upd(i, 'name', e.target.value)} /></label>
               {a.adsets.length > 1 && (
                 <div><span className="lf-label">Show this ad in</span>
                   <div className="row" style={{ gap: 14 }}>{a.adsets.map((s, j) => <label key={s.uid} className="chk" title={`${audLabel(o, s)} · ${placeLabel(o, s)}`}><input type="checkbox" checked={(ad.sets || all).includes(s.uid)} onChange={() => toggleSet(i, s.uid)} />Ad set {j + 1}<span className="muted">· {s.audience === 'custom' ? 'Custom' : audLabel(o, s).split(',')[0]}</span></label>)}</div></div>

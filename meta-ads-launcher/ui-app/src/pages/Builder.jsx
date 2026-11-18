@@ -186,13 +186,27 @@ function ImportModal({ kind, onClose, onApply }) {
 }
 
 function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
-  const advanced = !!(s.imported || s.goal || s.event || s.bid_strategy || s.bid_amount || s.billing_event || s.destination_type || s.start_date || s.end_date || s.lifetime_budget || Object.keys(s.targeting_extra || {}).length || Object.keys(s.extra || {}).length)
+  const [tab, setTab] = useState(() => (/[?&]tab=(\w+)/.exec(window.location.hash) || [])[1] || 'basics')
+  const has = (v) => v && typeof v === 'object' && Object.keys(v).length > 0
+  const delivery = !!(s.goal || s.event || s.bid_strategy || s.bid_amount || s.billing_event || s.destination_type || s.start_date || s.end_date || s.lifetime_budget || s.roas)
+  const tabs = [['basics', 'Basics', false], ['targeting', 'Detailed targeting', has(s.targeting_extra)], ['delivery', 'Bidding and schedule', delivery], ['expert', 'Expert (JSON)', has(s.extra)]]
   const conv = CONVERSION.includes(s.goal)
   const places = o.placements.filter((x) => x.id !== 'custom' || s.placements === 'custom')
   return (
     <fieldset className="set">
       <legend>Ad set {i + 1}{s.label ? <span className="muted"> · {s.label}</span> : null} {s.imported && <Badge>imported</Badge>}</legend>
+      <div className="set-top">
+        <div className="stabs" role="tablist">
+          {tabs.map(([k, l, on]) => <button type="button" role="tab" aria-selected={tab === k} key={k} className={`stab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}{on && <i className="sdot" title="Has custom settings" />}</button>)}
+        </div>
+        <span className="set-actions">
+          <button type="button" className="btn small" onClick={dup}>Duplicate</button>
+          <button type="button" className="btn small danger" disabled={!many} onClick={del}>Remove</button>
+        </span>
+      </div>
+      {tab === 'basics' && <>
       <div className="fgrid">
+        <Field label="Ad set name" hint="Leave empty for an automatic name"><input className="field" value={s.name || ''} placeholder="For example Skincare | Women 25-40 | Reels" onChange={(e) => upd({ name: e.target.value })} /></Field>
         <Field label="Who sees it">
           <select className="field" value={s.audience} onChange={(e) => upd({ audience: e.target.value })}>
             <optgroup label="Ready-made">{o.audiences.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</optgroup>
@@ -206,16 +220,20 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
         {per && <Field label="Daily budget"><span className="pre"><b>₹</b><input className="field" type="number" min="1" value={s.daily_budget} onChange={(e) => upd({ daily_budget: e.target.value })} /></span></Field>}
       </div>
       {s.audience === 'custom' && (
-        <div className="fgrid" style={{ marginTop: 10 }}>
+        <div className="fgrid age" style={{ marginTop: 10 }}>
           <Field label="Countries" hint="Two-letter codes (IN, AE). Leave empty when you pick states or cities under Detailed targeting"><input className="field" value={s.custom.countries} onChange={(e) => upd({ custom: { ...s.custom, countries: e.target.value } })} /></Field>
           <Field label="Youngest"><input className="field" type="number" value={s.custom.age_min} onChange={(e) => upd({ custom: { ...s.custom, age_min: Number(e.target.value) } })} /></Field>
           <Field label="Oldest"><input className="field" type="number" value={s.custom.age_max} onChange={(e) => upd({ custom: { ...s.custom, age_max: Number(e.target.value) } })} /></Field>
           <Field label="Gender"><select className="field" value={s.custom.gender} onChange={(e) => upd({ custom: { ...s.custom, gender: e.target.value } })}><option value="all">Everyone</option><option value="women">Women</option><option value="men">Men</option></select></Field>
         </div>
       )}
-      <details className="more" open={advanced}>
-        <summary>More options</summary>
-        <div className="fgrid" style={{ marginTop: 10 }}>
+      </>}
+      {tab === 'targeting' && <div className="tabpane">
+        <div className="sub" style={{ marginBottom: 6 }}>Optional. Narrow or widen who sees the ads by place, interest, language and audiences you already have.</div>
+        <TargetingEditor s={s} upd={upd} />
+      </div>}
+      {tab === 'delivery' && <div className="tabpane">
+        <div className="fgrid">
           <Field label="What Meta should aim for" hint="Leave as the default unless you want something specific">
             <select className="field" value={s.goal} onChange={(e) => upd({ goal: e.target.value })}>{o.results.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
           </Field>
@@ -231,17 +249,14 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
           <Field label="Starts (this ad set only)"><input className="field" type="date" value={s.start_date} onChange={(e) => upd({ start_date: e.target.value })} /></Field>
           <Field label="Ends (this ad set only)"><input className="field" type="date" value={s.end_date} onChange={(e) => upd({ end_date: e.target.value })} /></Field>
         </div>
-        <TargetingEditor s={s} upd={upd} />
-        <div className="sub" style={{ margin: '12px 0 4px' }}><b>Anything else (expert).</b> Meta's own setting names, as JSON. Cities, interests, your custom audiences, exclusions, manual placements and more go here. Meta checks it before anything is created.</div>
+      </div>}
+      {tab === 'expert' && <div className="tabpane">
+        <div className="sub" style={{ margin: '0 0 8px' }}><b>Anything else (expert).</b> Meta's own setting names, as JSON. Cities, interests, your custom audiences, exclusions, manual placements and more go here. Meta checks it before anything is created.</div>
         <div className="fgrid">
           <JsonBox key={s.uid + 't' + (s.rev || 0)} label="Extra targeting" hint='For example {"flexible_spec":[{"interests":[{"id":"6003139266461"}]}]}' value={s.targeting_extra} onChange={(v) => upd({ targeting_extra: v })} />
           <JsonBox key={s.uid + 'x' + (s.rev || 0)} label="Extra ad set settings" hint='For example {"attribution_spec":[{"event_type":"CLICK_THROUGH","window_days":7}]}' value={s.extra} onChange={(v) => upd({ extra: v })} />
         </div>
-      </details>
-      <div className="row" style={{ marginTop: 10 }}>
-        <button type="button" className="btn small" onClick={dup}>Duplicate</button>
-        <button type="button" className="btn small danger" disabled={!many} onClick={del}>Remove</button>
-      </div>
+      </div>}
     </fieldset>
   )
 }
@@ -256,6 +271,8 @@ function Flow({ o, ctx, params }) {
   const [started, setStarted] = useState(false)
   const [a, setA] = useState(() => blank(o))
   const [openSec, setOpenSec] = useState(params.open || 'campaign')
+  const [seen, setSeen] = useState({})  // sections the person has opened: only those can show a red warning
+  useEffect(() => { if (openSec) setSeen((s) => (s[openSec] ? s : { ...s, [openSec]: true })) }, [openSec])
   const [plan, setPlan] = useState(null)
   const [check, setCheck] = useState(null)
   const [phase, setPhase] = useState('edit')
@@ -383,19 +400,34 @@ function Flow({ o, ctx, params }) {
   const per = many && a.budget_mode === 'adset'
   const goal = o.goals.find((g) => g.id === a.goal)
   const total = a.adsets.reduce((t, s) => t + (Number(s.daily_budget) || 0), 0)
-  const st = (bad, done) => (bad ? 'bad' : done ? 'done' : '')
+  const st = (bad, done, key) => (bad && seen[key] ? 'bad' : done && !bad ? 'done' : '')
   const checkStale = check && check.sig !== sig
+  const goSec = (e) => (/^Ad set \d|^Add at least one ad set/.test(e) ? 'adsets' : /^Ad \d|^Add at least one ad\b/.test(e) ? 'ads' : 'campaign')
+  const names = plan?.summary
+  const steps = [['campaign', 'Campaign', campErrs.length, true], ['adsets', 'Ad sets', setErrs.length, a.adsets.length > 0], ['ads', 'Ads', adErrs.length, a.ads.length > 0]]
+  const allOk = !!plan && errs.length === 0
 
   return (
     <div className="builder">
       <div className="stack">
         {err && <Banner tone="err">{err}</Banner>}
-        <Section n="1" title="Campaign" state={st(campErrs.length, Number(a.daily_budget) > 0 || per)} open={openSec === 'campaign'} onToggle={() => setOpenSec(openSec === 'campaign' ? '' : 'campaign')}
-          sub={`${goal?.label || ''} · ${per ? inr(total) + ' per day in total' : inr(a.daily_budget) + ' per day'}`}>
+        <nav className="pbar" aria-label="Steps">
+          {steps.map(([k, label, bad, filled], i) => (
+            <button type="button" key={k} className={`pstep ${openSec === k ? 'on' : ''} ${filled && !bad ? 'ok' : ''}`} onClick={() => setOpenSec(k)}>
+              <i>{filled && !bad ? '✓' : i + 1}</i><span>{label}</span>
+            </button>
+          ))}
+          <span className={`pstep end ${allOk ? 'ok' : ''}`}><i>{allOk ? '✓' : 4}</i><span>Check and create</span></span>
+        </nav>
+        <Section n="1" title="Campaign" state={st(campErrs.length, Number(a.daily_budget) > 0 || per, 'campaign')} open={openSec === 'campaign'} onToggle={() => setOpenSec(openSec === 'campaign' ? '' : 'campaign')}
+          sub={`${names?.campaign_name || 'New campaign'} · ${goal?.label || ''} · ${per ? inr(total) + ' per day in total' : inr(a.daily_budget) + ' per day'}`}>
           <div className="row" style={{ marginBottom: 10 }}>
             <button type="button" className="btn small" onClick={() => setModal('campaign')}><Icon name="plus" size={13} /> Import or copy a campaign</button>
             <button type="button" className="btn small" onClick={() => downloadJson(exportCampaign(a), 'campaign.json')}>Export the whole campaign as JSON</button>
             <button type="button" className="btn small" onClick={() => saveTpl('campaign', exportCampaign(a))}>Save as template</button>
+          </div>
+          <div className="fgrid" style={{ marginBottom: 12 }}>
+            <Field label="Campaign name" hint="Leave empty for an automatic name like Roopsee | Sales | 18 Nov"><input className="field" value={a.campaign.name || ''} placeholder="For example Skincare | Sales | Diwali" onChange={(e) => setCamp({ name: e.target.value })} /></Field>
           </div>
           <div className="choices">
             {o.goals.map((g) => (
@@ -435,8 +467,8 @@ function Flow({ o, ctx, params }) {
           <div className="row" style={{ marginTop: 12 }}><button type="button" className="btn primary" onClick={() => setOpenSec('adsets')}>Next: ad sets</button></div>
         </Section>
 
-        <Section n="2" title="Ad sets" state={st(setErrs.length, a.adsets.length > 0)} open={openSec === 'adsets'} onToggle={() => setOpenSec(openSec === 'adsets' ? '' : 'adsets')}
-          sub={`${a.adsets.length} ad set${a.adsets.length === 1 ? '' : 's'} · who sees the ads and where`}>
+        <Section n="2" title="Ad sets" state={st(setErrs.length, a.adsets.length > 0, 'adsets')} open={openSec === 'adsets'} onToggle={() => setOpenSec(openSec === 'adsets' ? '' : 'adsets')}
+          sub={names?.adsets?.length ? `${a.adsets.length} ad set${a.adsets.length === 1 ? '' : 's'} · ${names.adsets.map((x) => x.name).join(', ').slice(0, 90)}` : `${a.adsets.length} ad set${a.adsets.length === 1 ? '' : 's'} · who sees the ads and where`}>
           <div className="row" style={{ marginBottom: 10 }}>
             <button type="button" className="btn small" onClick={() => setModal('adset')}><Icon name="plus" size={13} /> Import from JSON or Meta</button>
             <button type="button" className="btn small" onClick={() => downloadJson(exportAdSets(a.adsets), 'adsets.json')}>Export as JSON</button>
@@ -455,7 +487,7 @@ function Flow({ o, ctx, params }) {
           {setErrs.length > 0 && <Banner tone="err">{setErrs.map((e, i) => <div key={i}>{e}</div>)}</Banner>}
         </Section>
 
-        <Section n="3" title="Ads" state={st(adErrs.length, a.ads.length > 0)} open={openSec === 'ads'} onToggle={() => setOpenSec(openSec === 'ads' ? '' : 'ads')}
+        <Section n="3" title="Ads" state={st(adErrs.length, a.ads.length > 0, 'ads')} open={openSec === 'ads'} onToggle={() => setOpenSec(openSec === 'ads' ? '' : 'ads')}
           sub={a.ads.length ? `${a.ads.length} ad${a.ads.length === 1 ? '' : 's'}` : 'Add your images and write the text'}>
           <div className="row" style={{ marginBottom: 10 }}>
             <button type="button" className="btn small" onClick={() => setModal('ad')}><Icon name="plus" size={13} /> Import or copy ads</button>
@@ -467,6 +499,10 @@ function Flow({ o, ctx, params }) {
           <Step4 o={o} a={a} setA={setA} set={set} noPreview saveTpl={saveTpl}
             renderKind={(ad, i, h) => <FormatCard key={ad.ad_key + i} ad={ad} i={i} a={a} o={o} all={h.all} upd={h.upd} toggleSet={h.toggleSet} remove={h.remove} onSave={() => saveTpl('ad', ad)} />} />
           {adErrs.length > 0 && <Banner tone="err">{adErrs.map((e, i) => <div key={i}>{e}</div>)}</Banner>}
+          <div className="row" style={{ marginTop: 12 }}>
+            <button type="button" className="btn primary" disabled={!allOk || check?.loading} onClick={runCheck}>{check?.loading ? 'Asking Meta…' : 'Next: check with Meta'}</button>
+            <span className="muted" style={{ fontSize: 12.5 }}>{allOk ? 'Nothing is created by the check.' : `Fix ${errs.length} thing${errs.length === 1 ? '' : 's'} first (see the summary on the right).`}</span>
+          </div>
         </Section>
       </div>
 
@@ -475,15 +511,16 @@ function Flow({ o, ctx, params }) {
           right={plan ? <Badge tone={errs.length ? 'bad' : 'good'}>{errs.length ? 'Not ready' : 'Ready'}</Badge> : null}>
           {plan && (
             <dl className="summary" style={{ gridTemplateColumns: '90px minmax(0,1fr)' }}>
+              <dt>Campaign</dt><dd><b style={{ wordBreak: 'break-word' }}>{plan.summary.campaign_name}</b></dd>
               <dt>Goal</dt><dd>{plan.summary.goal}</dd>
               <dt>Budget</dt><dd>{plan.summary.budget_mode === 'adset' ? `${inr(plan.summary.total_budget)}/day in total` : `${inr(plan.summary.daily_budget)}/day`}</dd>
-              <dt>Ad sets</dt><dd>{plan.summary.adsets.map((x, i) => <div key={i}>{i + 1}. {x.audience}<br /><span className="muted">{x.placements} · {x.goal}{x.bid ? ' · ' + x.bid : ''}{x.extras?.length ? ' · +extra settings' : ''} · {x.ads} ad(s)</span></div>)}</dd>
-              <dt>Ads</dt><dd>{plan.summary.ads} in total</dd>
+              <dt>Ad sets</dt><dd>{plan.summary.adsets.map((x, i) => <div key={i} style={{ marginBottom: 6 }}>{i + 1}. <b style={{ wordBreak: 'break-word' }}>{x.name}</b><br /><span className="muted">{x.audience} · {x.placements} · {x.goal}{x.bid ? ' · ' + x.bid : ''}{x.extras?.length ? ' · +extra settings' : ''} · {x.ads} ad(s)</span></div>)}</dd>
+              <dt>Ads</dt><dd>{plan.summary.ad_list?.length ? plan.summary.ad_list.map((x, i) => <div key={i} style={{ marginBottom: 6 }}><b style={{ wordBreak: 'break-word' }}>{x.name}</b>{x.name !== x.id && <span className="muted"> · {x.id}</span>}<br /><span className="muted">in {x.adset}</span></div>) : `${plan.summary.ads} in total`}</dd>
               <dt>Account</dt><dd>{o.account} · {prod ? 'PRODUCTION' : 'sandbox'}</dd>
             </dl>
           )}
-          {errs.length > 0 && <Banner tone="err"><b>Fix these</b>{errs.map((e, i) => <div key={i} style={{ marginTop: 3 }}>• {e}</div>)}</Banner>}
-          {plan?.warnings?.length > 0 && <Banner>{plan.warnings.map((e, i) => <div key={i}>• {e}</div>)}</Banner>}
+          {errs.length > 0 && <Banner tone="err"><b>Fix these</b>{errs.map((e, i) => <div key={i} className="fixrow"><button type="button" className="linkish" onClick={() => setOpenSec(goSec(e))}>• {e}</button></div>)}</Banner>}
+          {plan?.warnings?.length > 0 && <Banner><b>Worth knowing</b>{plan.warnings.map((e, i) => <div key={i} style={{ marginTop: 3 }}>• {e}</div>)}</Banner>}
         </Card>
 
         <Card title="Check with Meta" sub="Asks Meta whether it would accept this. Nothing is created.">
@@ -507,6 +544,8 @@ function Flow({ o, ctx, params }) {
           <div className="sub">Uploads your images, then creates the campaign, its ad sets and the ads. <b>Everything is created paused</b>, so nothing runs or spends.</div>
           {prod && <label className="chk" style={{ marginTop: 8 }}><input type="checkbox" checked={prodOk} onChange={(e) => setProdOk(e.target.checked)} /><b>I understand this creates objects in the real ad account (paused)</b></label>}
           <button type="button" className="btn primary" style={{ marginTop: 10, width: '100%' }} disabled={!plan || errs.length > 0 || (prod && !prodOk)} onClick={create}>Create on Meta (paused)</button>
+          {(!plan || errs.length > 0) && <div className="mini" style={{ marginTop: 6 }}>{errs.length ? `Fix ${errs.length} thing${errs.length === 1 ? '' : 's'} above to enable this.` : 'Working it out…'}</div>}
+          {allOk && prod && !prodOk && <div className="mini" style={{ marginTop: 6 }}>Tick the box above to enable this.</div>}
         </Card>
 
         {a.ads.some((x) => !x.creative_spec && !x.kind) && <div><div className="mini" style={{ marginBottom: 6 }}>How the first image ad will look</div><FeedPreview ad={a.ads.find((x) => !x.creative_spec && !x.kind)} /></div>}
@@ -523,14 +562,18 @@ function Start({ o, start, load, copy, onImport }) {
   return (
     <>
       <Card title="What do you want to do?" sub="Pick one and everything sensible is filled in for you. You can change anything afterwards. Everything is created paused.">
-        <div className="choices">
+        <div className="grp-label">Quick start with a goal</div>
+        <div className="choices even">
           {o.recipes.map((r) => (
             <button type="button" key={r.id} className="choice" onClick={() => start(r)}>
               <b>{r.title}</b><span>{r.text}</span>
             </button>
           ))}
-          <button type="button" className="choice" onClick={() => start(null)}><b>Start from scratch</b><span>Choose each setting yourself.</span></button>
-          <button type="button" className="choice" onClick={onImport}><b>Import or copy a campaign</b><span>From a JSON file, one of your campaigns on Meta (with its ad sets and ads), or a saved template.</span></button>
+        </div>
+        <div className="grp-label">Or</div>
+        <div className="choices even two">
+          <button type="button" className="choice alt" onClick={() => start(null)}><b>Start from scratch</b><span>Choose each setting yourself, with every option open.</span></button>
+          <button type="button" className="choice alt" onClick={onImport}><b>Import or copy a campaign</b><span>From a JSON file, one of your campaigns on Meta (with its ad sets and ads), or a saved template.</span></button>
         </div>
         {o.missing.length > 0 && <Banner tone="err">Missing in <span className="mono">.env</span>: {o.missing.join(', ')}. Creating will not work until this is fixed.</Banner>}
       </Card>

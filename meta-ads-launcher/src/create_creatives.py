@@ -13,7 +13,7 @@ def spec_payload(ad: dict, batch_id: str, s: Settings, acc: dict, lenient: bool 
     spec, _ = clean_creative(ad["creative_spec"], s.page_id, s.instagram_id)
     if media.files_in(spec):
         spec = media.resolve(spec, s, lenient=lenient, stand_in=stand_in)
-    out = {"name": ad["ad_key"], **spec}
+    out = {"name": ad.get("name") or ad["ad_key"], **spec}
     out.setdefault("url_tags", url_tags({"ad_key": ad["ad_key"]}, batch_id, acc))
     extra, _ = clean_extra(ad.get("extra"))
     return deep_merge(out, extra)
@@ -31,7 +31,7 @@ def payload(ad: dict, image_hash: str, batch_id: str, s: Settings, acc: dict) ->
         story["instagram_user_id"] = s.instagram_id
     link_extra, _ = clean_extra(ad.get("link_extra"))  # extra fields inside link_data (Meta's names), e.g. caption
     story["link_data"] = deep_merge(story["link_data"], link_extra)
-    out = {"name": ad["ad_key"], "object_story_spec": story, "url_tags": url_tags(ad, batch_id, acc)}
+    out = {"name": ad.get("name") or ad["ad_key"], "object_story_spec": story, "url_tags": url_tags(ad, batch_id, acc)}
     extra, _ = clean_extra(ad.get("extra"))  # extra fields on the creative itself, e.g. degrees_of_freedom_spec
     return deep_merge(out, extra)
 
