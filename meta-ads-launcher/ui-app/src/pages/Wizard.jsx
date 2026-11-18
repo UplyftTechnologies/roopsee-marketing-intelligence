@@ -92,7 +92,7 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
           </fieldset>
 
           <div className="fgrid" style={{ margin: '14px 0 8px' }}>
-            <Field label="Theme of the new images" hint="For example acne, pigmentation, trust. Names the images RS_ACNE_001…">
+            <Field label="Theme of the new images" hint="For example acne, pigmentation, trust. Used to name and group the image files you upload">
               <input className="field" list="wthemes" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="acne" />
             </Field>
           </div>
@@ -108,7 +108,6 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
             <details><summary className="btn small" style={{ display: 'inline-block', cursor: 'pointer' }}>Or paste an image hash</summary>
               <div className="fgrid" style={{ marginTop: 8 }}>
                 <Field label="Image hash"><input className="field" value={hash.hash} onChange={(e) => setHash({ ...hash, hash: e.target.value })} placeholder="32 letters and digits" /></Field>
-                <Field label="Ad ID (optional)" hint="Leave empty and one is made from the theme above, like RS_SKINCARE_001."><input className="field" value={hash.key} onChange={(e) => setHash({ ...hash, key: e.target.value.toUpperCase() })} /></Field>
               </div>
               <button type="button" className="btn small" style={{ marginTop: 8 }} onClick={async () => {
                 const h = hash.hash.trim().toLowerCase()
@@ -135,9 +134,9 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
           <div key={ad.ad_key + i} className="adcard">
             {ad.image ? <img className="pic" src={'/' + ad.image} alt="" /> : ad.preview_url ? <div className="pic metapic"><MetaImg src={ad.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div> : <div className="pic">image hash<br />{(ad.image_hash || '').slice(0, 8)}…</div>}
             <div className="stack">
-              <div className="row">{ad.image ? <b>{ad.ad_key}</b> : <label className="lf" style={{ minWidth: 220 }}><span className="lf-label">Ad ID (must be new, like RS_SKINCARE_001)</span><span className="mini mono">hash {(ad.image_hash || '').slice(0, 10)}…</span><input className="field" value={ad.ad_key || ''} onChange={(e) => upd(i, 'ad_key', e.target.value.toUpperCase())} /></label>}
+              <div className="row"><b>{ad.name || `Image ad ${i + 1}`}</b>{!ad.image && <span className="mini mono">hash {(ad.image_hash || '').slice(0, 10)}…</span>}
                 <button type="button" className="btn small danger right" onClick={() => setA((x) => ({ ...x, ads: x.ads.filter((_, j) => j !== i) }))}><Icon name="trash" size={13} /> Remove</button></div>
-              <label className="lf"><span className="lf-label">Ad name <span className="muted">(shown in Ads Manager; empty uses the Ad ID)</span></span><input className="field" value={ad.name || ''} placeholder={ad.ad_key || 'For example Skincare | Serum | Video 1'} onChange={(e) => upd(i, 'name', e.target.value)} /></label>
+              <label className="lf"><span className="lf-label">Ad name <span className="muted">(shown in Ads Manager; empty uses an automatic name)</span></span><input className="field" value={ad.name || ''} placeholder="For example Skincare | Serum | Image 1" onChange={(e) => upd(i, 'name', e.target.value)} /></label>
               {a.adsets.length > 1 && (
                 <div><span className="lf-label">Show this ad in</span>
                   <div className="row" style={{ gap: 14 }}>{a.adsets.map((s, j) => <label key={s.uid} className="chk" title={`${audLabel(o, s)} · ${placeLabel(o, s)}`}><input type="checkbox" checked={(ad.sets || all).includes(s.uid)} onChange={() => toggleSet(i, s.uid)} />Ad set {j + 1}<span className="muted">· {s.audience === 'custom' ? 'Custom' : audLabel(o, s).split(',')[0]}</span></label>)}</div></div>

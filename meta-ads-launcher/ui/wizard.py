@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from src import doctor, validate as validate_mod
 from src.common import (BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, GOALS as GOALS_ALL, ROOT, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
                         audiences_cfg, campaigns_cfg, clean_extra, deep_merge, jload, jsave)
+from src.common import batch_files, jload
 from src.meta_api import Meta, MetaError
 from src import create_adsets, create_campaigns, create_creatives, media
 from src.pipeline import execute
@@ -280,7 +281,24 @@ def build_plan(a: dict, s: Settings) -> dict:
     # an ad shown in several ad sets becomes one ad per ad set (the first keeps the plain ID, the others get _S2, _S3 ...)
     ads, used = [], set()
     per_set_count = [0] * len(sets_out)
-    for i, ad in enumerate(a.get("ads") or [], 1):
+    # Ad IDs are internal: any ad without a valid, unique one gets the next free one (a local image keeps its file name, which is its ID)
+    raw_ads = [dict(x) for x in (a.get("ads") or [])]
+    local = lambda x: bool((x.get("image") or "").strip()) and x.get("creative_spec") is None and not x.get("kind")
+    claimed: set = set()
+    for ad in raw_ads:
+        k = Path(ad["image"].strip()).stem if local(ad) else (ad.get("ad_key") or "").strip()
+        if local(ad):
+            claimed.add(k)
+        elif re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k) and k not in claimed:
+            claimed.add(k)
+            ad["ad_key"] = k
+        else:
+            ad["ad_key"] = ""
+    for ad in raw_ads:
+        if not local(ad) and not ad["ad_key"]:
+            ad["ad_key"] = next_ad_key(ad.get("kind") or ("COPY" if ad.get("creative_spec") is not None else "IMAGE"), claimed)
+            claimed.add(ad["ad_key"])
+    for i, ad in enumerate(raw_ads, 1):
         tag = f"Ad {i}"
         ad_patch: dict = {}
         if ad.get("kind") in FORMAT_KINDS:  # built here from scratch: video, carousel, existing post, Advantage+, catalog
@@ -450,6 +468,20 @@ def build_plan(a: dict, s: Settings) -> dict:
                                     "goal": RESULT_LABELS.get(x["optimization_goal"], x["optimization_goal"]), "bid": BID_LABELS.get(x.get("bid_strategy", ""), x.get("bid_strategy", "")),
                                     "extras": sorted(k for k in ("targeting_extra", "extra") if x.get(k)), "ads": per_set_count[j]}
                                    for j, (x, sp) in enumerate(zip(sets_out, set_specs))]}}
+
+
+def next_ad_key(theme: str, taken=()) -> str:
+    """The next unused internal ad ID for a theme, e.g. skincare -> RS_SKINCARE_001 (IDs are never reused). `taken` = IDs already claimed in the plan being built."""
+    tag = re.sub(r"[^A-Z0-9]", "", str(theme).upper())
+    if not tag:
+        raise ValueError("a theme is needed")
+    used = {p.stem for p in (ROOT / "creatives").rglob("*") if p.is_file()} | set(taken)
+    for f in batch_files():
+        used |= {x.get("ad_key") for x in jload(f, {}).get("ads", [])}
+    for env in ("sandbox", "production"):
+        used |= set(Registry(Settings(env), "ad_registry.json").d)
+    nums = [int(k.rsplit("_", 1)[1]) for k in used if k and k.startswith(f"RS_{tag}_") and k.rsplit("_", 1)[1].isdigit()]
+    return f"RS_{tag}_{max(nums, default=0) + 1:03d}"
 
 
 @router.post("/api/wizard/preview")

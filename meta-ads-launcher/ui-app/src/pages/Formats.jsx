@@ -148,8 +148,7 @@ export default function FormatCard({ ad, i, a, o, all, upd, toggleSet, remove, o
           <button type="button" className="btn small danger right" onClick={remove}><Icon name="trash" size={13} /> Remove</button>
         </div>
         <div className="fgrid">
-          <Field label="Ad ID (must be new, like RS_SKINCARE_001)"><input className="field" value={ad.ad_key || ''} onChange={(e) => set({ ad_key: e.target.value.toUpperCase() })} /></Field>
-          <Field label="Ad name (optional)" hint="Shown in Ads Manager. Empty uses the Ad ID"><input className="field" value={ad.name || ''} placeholder={ad.ad_key || ''} onChange={(e) => set({ name: e.target.value })} /></Field>
+          <Field label="Ad name (optional)" hint="Shown in Ads Manager. Empty uses an automatic name"><input className="field" value={ad.name || ''} placeholder="For example Skincare | Serum | Video 1" onChange={(e) => set({ name: e.target.value })} /></Field>
         </div>
         {a.adsets.length > 1 && (
           <div><span className="lf-label">Show this ad in</span>

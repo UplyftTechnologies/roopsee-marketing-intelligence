@@ -103,16 +103,11 @@ def state():
 @app.get("/api/next-key")
 def next_key(theme: str):
     """The next unused ad ID for a theme, e.g. skincare -> RS_SKINCARE_001 (IDs are never reused)."""
-    tag = re.sub(r"[^A-Z0-9]", "", theme.upper())
-    if not tag:
+    from ui.wizard import next_ad_key
+    try:
+        return {"key": next_ad_key(theme)}
+    except ValueError:
         raise HTTPException(400, "type a theme first (for example skincare)")
-    used = {p.stem for p in (ROOT / "creatives").rglob("*") if p.is_file()}
-    for f in batch_files():
-        used |= {a.get("ad_key") for a in jload(f, {}).get("ads", [])}
-    for env in ("sandbox", "production"):
-        used |= set(Registry(Settings(env), "ad_registry.json").d)
-    nums = [int(k.rsplit("_", 1)[1]) for k in used if k and k.startswith(f"RS_{tag}_") and k.rsplit("_", 1)[1].isdigit()]
-    return {"key": f"RS_{tag}_{max(nums, default=0) + 1:03d}"}
 
 
 @app.post("/api/env")
