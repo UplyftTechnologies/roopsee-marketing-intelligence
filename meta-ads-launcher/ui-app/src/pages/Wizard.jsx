@@ -74,7 +74,7 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
       setMsg(null); setPick(false)
     } catch (e) { setMsg(e.message) }
   }
-  const openLib = async () => setLib((await api('/api/creatives')).filter((c) => !c.used && !a.ads.some((x) => x.image === c.path)))
+  const openLib = async () => setLib((await api('/api/creatives')).filter((c) => !a.ads.some((x) => x.image === c.path)))
 
   return (
     <div className={noPreview ? "" : "wiz"}>
@@ -123,8 +123,8 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
             </details>
           </div>
           {pick && <div style={{ marginTop: 12 }}><MetaImageGrid limit={24} actions={(i) => <button type="button" className="btn small primary" onClick={() => addMeta(i)}>Use this image</button>} /></div>}
-          {lib && (lib.length === 0 ? <div className="muted" style={{ marginTop: 8 }}>No unused images in your library.</div> : (
-            <div className="picker" style={{ marginTop: 10 }}>{lib.map((c) => <button type="button" key={c.path} className="pick" onClick={() => { addAd({ image: c.path, ad_key: c.key }); setLib(lib.filter((x) => x.path !== c.path)) }}><img src={'/' + c.path} alt="" /><span>{c.key}</span></button>)}</div>
+          {lib && (lib.length === 0 ? <div className="muted" style={{ marginTop: 8 }}>No other images in your library.</div> : (
+            <div className="picker" style={{ marginTop: 10 }}>{lib.map((c) => <button type="button" key={c.path} className="pick" onClick={() => { addAd({ image: c.path, ad_key: c.key }); setLib(lib.filter((x) => x.path !== c.path)) }}><img src={'/' + c.path} alt="" /><span>{c.key}{c.used ? ' · used before' : ''}</span></button>)}</div>
           ))}
         </Card>
 

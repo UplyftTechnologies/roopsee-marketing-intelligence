@@ -149,7 +149,7 @@ Named presets. `countries` (required, e.g. `["IN"]`), `age_min`, `age_max`, `gen
 |---|---|
 | `ad_key` | Unique, never reused, format `RS_<ANGLE>_<NNN>`, e.g. `RS_ACNE_001`. Becomes the ad and creative name. A second copy of the same ad in another ad set ends in `_S2`, `_S3`, e.g. `RS_ACNE_001_S2` |
 | `adset_key` | Which ad set it belongs to |
-| `image` | Path under `creatives/`. The file name must equal `ad_key` without any `_S2` ending (JPG or PNG). Instead of `image` you may give `image_hash`, the 32-character hash of an image already in the ad account (list them with `python run.py images`) |
+| `image` | Path under `creatives/` (JPG or PNG). The same image may be used by any number of ads and batches: it is uploaded once and its hash reused. The file name does not have to match `ad_key`; the UI names an ad after its image while that ID is free and otherwise picks the next free ID for the theme (e.g. `RS_ACNE_001.png` used again becomes ad `RS_ACNE_004`). Instead of `image` you may give `image_hash`, the 32-character hash of an image already in the ad account (list them with `python run.py images`) |
 | `primary_text` | The post text (about 125 characters show before "See more") |
 | `headline` | Short headline (about 40 characters) |
 | `description` | Optional |
@@ -353,14 +353,14 @@ Creative and ad creation have been proven on the real account (created paused, v
 | `missing in .env: ...` | Fill the block for the selected `META_ENV` |
 | `Invalid OAuth access token` (code 190) | Wrong/expired token, or token and app secret are from different apps |
 | `... (code 10)` / permission errors | Token lacks `ads_management`, or the user has no access to the account or Page |
-| `image not found` | File name must equal `ad_key`, extension `.jpg/.jpeg/.png`, path as written in the batch |
+| `image not found` | Extension `.jpg/.jpeg/.png`, path as written in the batch |
 | `batch ... edited after submission` | Restore the file, or move your changes to a new batch with new keys |
 | `campaign ... has no Meta id yet` | Run `setup` before `prepare`, in order |
 | `image not uploaded yet` | Run `upload` first |
 | `writes are blocked` | You are on production; add `--confirm-production` (CLI) or tick the confirmation box (UI) only if intended |
 | `No permission to access this profile` (code 10, subcode 1341012) | The token's user cannot act as your Page. In the sandbox this is expected (the sandbox user cannot post as a Page); on production give the user access to the Page in Business Settings |
 | `this ad needs an Ad ID like RS_SKINCARE_001` (UI) | An ad added by image hash has no ID; type one on its card in step 4 |
-| `already been used in another campaign` (UI) | Every image can be used once; upload a new image or a new version |
+| `Ad IDs typed on an ad card is already used` (UI) | An Ad ID you typed belongs to an earlier campaign; clear it (a free one is chosen) or type a new one. Images themselves can be reused freely |
 | `Sales campaigns need your pixel` | Set `META_<ENV>_PIXEL_ID` (find it with `python run.py discover`) |
 
 Full detail of every call (secrets removed) is in `logs/launcher.log`.

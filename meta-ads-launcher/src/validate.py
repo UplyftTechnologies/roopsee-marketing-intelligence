@@ -5,7 +5,7 @@ import re
 import struct
 from urllib.parse import urlparse
 
-from .common import (AD_KEY_RE, BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, FORBIDDEN_EXTRA, GOALS, KEY_RE, base_key, OBJECTIVES, PLACEMENTS, ROOT, STATUSES, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
+from .common import (AD_KEY_RE, BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, FORBIDDEN_EXTRA, GOALS, KEY_RE, OBJECTIVES, PLACEMENTS, ROOT, STATUSES, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
                      audiences_cfg, batch_files, campaigns_cfg, image_path, jload, sha256)
 
 MAX_BYTES = 30 * 1024 * 1024
@@ -178,8 +178,6 @@ def validate(s: Settings, only: str | None = None) -> tuple[list[str], list[str]
                 else:
                     if p.suffix.lower() not in (".jpg", ".jpeg", ".png"):
                         err(f"{where}: image must be JPG or PNG")
-                    if p.stem != base_key(key):
-                        err(f"{where}: filename '{p.name}' must match ad_key '{base_key(key)}'")
                     if p.stat().st_size > MAX_BYTES:
                         err(f"{where}: image is over 30 MB")
                     size = image_size(p)

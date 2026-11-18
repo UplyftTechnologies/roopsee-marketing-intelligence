@@ -287,22 +287,31 @@ def build_plan(a: dict, s: Settings) -> dict:
     # an ad shown in several ad sets becomes one ad per ad set (the first keeps the plain ID, the others get _S2, _S3 ...)
     ads, used = [], set()
     per_set_count = [0] * len(sets_out)
-    # Ad IDs are internal: any ad without a valid, unique one gets the next free one (a local image keeps its file name, which is its ID)
+    # Ad IDs are internal and never reused, but an image can be used any number of times: a local image lends its file name as the
+    # ad's ID only while that ID is still free; otherwise the ad gets the next free ID for the same theme and keeps pointing at the image
     raw_ads = [dict(x) for x in (a.get("ads") or [])]
     local = lambda x: bool((x.get("image") or "").strip()) and x.get("creative_spec") is None and not x.get("kind")
+    prior = taken_ad_keys()
     claimed: set = set()
-    for ad in raw_ads:
-        k = Path(ad["image"].strip()).stem if local(ad) else (ad.get("ad_key") or "").strip()
+    themes: dict = {}
+    for i, ad in enumerate(raw_ads, 1):
         if local(ad):
-            claimed.add(k)
-        elif re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k) and k not in claimed:
-            claimed.add(k)
-            ad["ad_key"] = k
+            k = Path(ad["image"].strip()).stem
+            m = re.fullmatch(r"RS_([A-Z0-9]+)_\d{3}", k)
+            themes[id(ad)] = m.group(1) if m else "IMAGE"
+            free = bool(m) and k not in prior and k not in claimed and not any(x.startswith(k + "_S") for x in prior)
         else:
-            ad["ad_key"] = ""
+            k = (ad.get("ad_key") or "").strip()
+            free = bool(re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k)) and k not in claimed
+            if free and k in prior:
+                errs.append(f"Ad {i}: the Ad ID {k} is already used by an earlier campaign. Clear it (a free one is then chosen for you) or type a new one.")
+        ad["ad_key"] = k if free else ""
+        if free:
+            claimed.add(k)
     for ad in raw_ads:
-        if not local(ad) and not ad["ad_key"]:
-            ad["ad_key"] = next_ad_key(ad.get("kind") or ("COPY" if ad.get("creative_spec") is not None else "IMAGE"), claimed)
+        if not ad["ad_key"]:
+            theme = themes.get(id(ad)) or ad.get("kind") or ("COPY" if ad.get("creative_spec") is not None else "IMAGE")
+            ad["ad_key"] = next_ad_key(theme, claimed)
             claimed.add(ad["ad_key"])
     for i, ad in enumerate(raw_ads, 1):
         tag = f"Ad {i}"
@@ -348,7 +357,7 @@ def build_plan(a: dict, s: Settings) -> dict:
                     sets_out[si]["extra"] = deep_merge(sets_out[si].get("extra") or {}, ad_patch)
             continue
         img, h = (ad.get("image") or "").strip(), (ad.get("image_hash") or "").strip()
-        key = Path(img).stem if img else (ad.get("ad_key") or "").strip()
+        key = (ad.get("ad_key") or "").strip()
         if not img and not h:
             errs.append(f"{tag}: add an image.")
         if img and not (ROOT / img).is_file():
@@ -477,16 +486,22 @@ def build_plan(a: dict, s: Settings) -> dict:
                                    for j, (x, sp) in enumerate(zip(sets_out, set_specs))]}}
 
 
+def taken_ad_keys() -> set:
+    """Every ad ID already in a batch file or in either environment's ad registry (IDs are never reused)."""
+    used: set = set()
+    for f in batch_files():
+        used |= {x.get("ad_key") for x in jload(f, {}).get("ads", []) if x.get("ad_key")}
+    for env in ("sandbox", "production"):
+        used |= set(Registry(Settings(env), "ad_registry.json").d)
+    return used
+
+
 def next_ad_key(theme: str, taken=()) -> str:
     """The next unused internal ad ID for a theme, e.g. skincare -> RS_SKINCARE_001 (IDs are never reused). `taken` = IDs already claimed in the plan being built."""
     tag = re.sub(r"[^A-Z0-9]", "", str(theme).upper())
     if not tag:
         raise ValueError("a theme is needed")
-    used = {p.stem for p in (ROOT / "creatives").rglob("*") if p.is_file()} | set(taken)
-    for f in batch_files():
-        used |= {x.get("ad_key") for x in jload(f, {}).get("ads", [])}
-    for env in ("sandbox", "production"):
-        used |= set(Registry(Settings(env), "ad_registry.json").d)
+    used = {p.stem for p in (ROOT / "creatives").rglob("*") if p.is_file()} | set(taken) | taken_ad_keys()
     nums = [int(k.rsplit("_", 1)[1]) for k in used if k and k.startswith(f"RS_{tag}_") and k.rsplit("_", 1)[1].isdigit()]
     return f"RS_{tag}_{max(nums, default=0) + 1:03d}"
 
@@ -535,7 +550,7 @@ async def create(req: Request):
         bpath.unlink(missing_ok=True)
         msg = str(e)
         if "never reused" in msg or "already used" in msg:
-            msg = "One of these images has already been used in another campaign. Every image can be used only once, so upload a new image (or a new version of it)."
+            msg = "One of the Ad IDs typed on an ad card is already used by another campaign. Clear that Ad ID (a free one is then chosen for you) or type a new one."
         raise HTTPException(400, {"errors": [f"Could not prepare this campaign. {msg}"]})
 
     batch = plan["batch"]

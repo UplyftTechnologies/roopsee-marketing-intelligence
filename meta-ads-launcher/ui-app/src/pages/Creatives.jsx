@@ -38,7 +38,7 @@ export default function Creatives({ ctx }) {
         {msg && <div className={`banner ${msg.tone}`} style={{ marginTop: 10 }}><div>{msg.text}</div></div>}
       </Card>
 
-      <Card title="Your images" sub="The image ID (RS_…) becomes the ad ID, so it can never be reused">
+      <Card title="Your images" sub="Each image can be used in any number of campaigns. It is uploaded to Meta once and reused">
         <Loading state={st}>
           {(items) => items.length === 0 ? <div className="empty">No images yet.</div> : (
             <div className="thumbs">
@@ -53,7 +53,7 @@ export default function Creatives({ ctx }) {
                       {i.used && <Badge>used in an ad</Badge>}
                       {i.width && i.width < 1080 && <Badge tone="warn">small</Badge>}
                     </div>
-                    {!i.used && <button type="button" className="btn small" onClick={() => ctx.go('new', { image: i.path })}>Use in a campaign</button>}
+                    {<button type="button" className="btn small" onClick={() => ctx.go('new', { image: i.path })}>Use in a campaign</button>}
                   </div>
                 </div>
               ))}

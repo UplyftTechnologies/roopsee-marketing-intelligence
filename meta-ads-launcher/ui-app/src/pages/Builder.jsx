@@ -638,7 +638,7 @@ function Start({ o, start, load, copy, onImport }) {
         </Card>
       )}
       {hist.data?.length > 0 && (
-        <Card title="Start from an earlier campaign" sub="Copies the ad sets and text. You choose new images, because every image can be used only once.">
+        <Card title="Start from an earlier campaign" sub="Copies the ad sets and text. Then add the images you want, including ones you used before.">
           {hist.data.map((h) => (
             <div key={h.batch} className="list-row"><span className="grow"><b>{h.campaign}</b><br /><span className="muted">{h.goal} · {inr(h.budget)}/day · {h.adsets || 1} ad set(s) · {h.ads} ad(s)</span></span>
               <button type="button" className="btn small" disabled={!h.answers} onClick={() => copy(h.answers)}>Copy</button></div>
