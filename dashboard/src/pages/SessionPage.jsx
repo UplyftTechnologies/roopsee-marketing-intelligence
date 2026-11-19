@@ -1,16 +1,18 @@
+import { useState } from 'react'
 import { dt, dur, inr, num, tod, useApi, useFilters } from '../api'
 import { Badge, Card, Table } from '../ui'
 import { STAGE, STAGE_TONE } from '../shared'
-import { CopyBtn, ExcludeMenu, Facts, Journey, SessionTimeline, pretty } from '../components/profile'
+import { AddressCard, CopyBtn, ExcludeMenu, Facts, Journey, SessionTimeline, pretty } from '../components/profile'
 import Icon from '../components/Icon'
 
 export default function SessionPage() {
   const f = useFilters()
   const id = f.prefill?.key
+  const [evq, setEvq] = useState('')
   const s = useApi(`/sessions/${encodeURIComponent(id || '')}`, {}, { scoped: false })
   if (s.error) return <div className="banner err">Could not load this session: {s.error} <button className="btn small" onClick={() => f.go('sessions')}>Back to Sessions</button></div>
   if (!s.data) return <div className="skeleton" style={{ height: 320 }} />
-  const { session: x, events, pages, event_types: types, extra, orders, person, prev, next } = s.data
+  const { session: x, events, pages, event_types: types, extra, orders, addresses, person, prev, next } = s.data
   const who = person.name || (person.is_registered ? 'Registered user' : 'Anonymous browser')
   const maxType = Math.max(1, ...types.map((t) => t.n))
   const t0 = events.length ? new Date(events[0].at).getTime() : 0
@@ -48,13 +50,14 @@ export default function SessionPage() {
 
       <div className="grid g-main">
         <Card title="What they did, step by step" sub="clock time and time since the session started · key actions are highlighted">
-          <SessionTimeline events={events} max={600} />
+          <SessionTimeline events={events} max={600} query={evq} onQuery={setEvq} />
         </Card>
         <div className="grid" style={{ gap: 14 }}>
           <Card title="Who" right={person.person_key && <button type="button" className="btn small" onClick={() => f.go('person', { key: person.person_key })}>View full profile →</button>}>
             <Facts rows={[['Person', who], ['Phone', x.phone10], ['Email', person.email], ['Segment', person.segment], ['All sessions', person.sessions ? num(person.sessions) : null],
               ['Browser id', <span className="mono" key="b">{x.visitor_key}</span>], ['User id', x.user_id && <span className="mono" key="u">{x.user_id}</span>]]} />
           </Card>
+          <AddressCard data={addresses} />
           <Card title="Where they came from">
             <Facts rows={[['Channel', x.channel], ['Source / medium', `${x.source} / ${x.medium}`], ['Campaign', x.campaign !== '(not set)' ? x.campaign : null], ['Ad content', extra.utm_content], ['Search term', extra.utm_term],
               ['Referrer', extra.referrer], ['Landing page', <span className="mono" key="l">{pretty(x.landing_path)}</span>], ['Click id', x.has_gclid ? 'Google click id (gclid)' : x.has_fbclid ? 'Meta click id (fbclid)' : null]]} />
@@ -73,7 +76,8 @@ export default function SessionPage() {
           <Card title="Event types">
             <div className="mini-list">
               {types.slice(0, 10).map((t) => (
-                <div key={t.event_name} className="mini-row">
+                <div key={t.event_name} className="mini-row" style={{ cursor: 'pointer' }} role="button" tabIndex={0} title="Search the timeline for this event"
+                  onClick={() => setEvq(t.event_name)} onKeyDown={(e) => { if (e.key === 'Enter') setEvq(t.event_name) }}>
                   <span className="name" title={t.event_name}>{t.event_name.replace(/_/g, ' ')}</span><span className="val">{num(t.n)}</span>
                   <span className="mini-bar"><i style={{ width: `${(t.n / maxType) * 100}%` }} /></span>
                 </div>

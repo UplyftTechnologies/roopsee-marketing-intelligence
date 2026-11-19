@@ -40,7 +40,7 @@ export default function Users() {
           return (
             <>
               <Chips value={segment} onChange={setSegment} options={[{ value: '', label: 'All segments' }, ...segments.map((g) => ({ value: g.segment, label: `${g.segment} (${num(g.n)})` }))]} />
-              <Card title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser · click a row for their full profile · click a column title to sort · a person who later ordered is never a cart or checkout abandoner"
+              <Card sticky title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser · click a row for their full profile · click a column title to sort · a person who later ordered is never a cart or checkout abandoner"
                 right={<ExportBtn name="people" rows={rows} fields={[['Name', 'name'], ['Phone', 'phone10'], ['Email', 'email'], ['Segment', 'segment'], ['First channel', 'first_channel'], ['City', 'city'], ['State', 'state'], ['Sessions', 'sessions'], ['Orders', 'orders'], ['Revenue', 'revenue'], ['Age', 'age_bucket'], ['Skin type', 'skin_type']]} />}>
                 <BulkExclude rows={chosen} noun="users" onClear={() => setSel(new Set())} fields={[
                   { label: 'user account', kind: 'user_id', get: (r) => r.user_id }, { label: 'browser', kind: 'visitor_id', get: (r) => (r.user_id ? null : r.person_key) },

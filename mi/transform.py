@@ -282,12 +282,16 @@ a AS (
     first(ip ORDER BY ts) FILTER (WHERE ip IS NOT NULL) AS ip,
     first(phone10 ORDER BY ts) FILTER (WHERE phone10 IS NOT NULL) AS phone10,
     bool_or(is_app) AS is_app, bool_or(is_dev) AS is_dev,
-    bool_or(event_key = 'product_view') AS f_product, bool_or(event_key = 'add_to_cart') AS f_cart,
-    bool_or(event_key = 'checkout_view') AS f_checkout, bool_or(event_key = 'pay_started') AS f_pay,
-    bool_or(event_key = 'order_placed') AS f_order, bool_or(event_key = 'quiz_started') AS f_quiz_start,
-    bool_or(event_key = 'quiz_completed') AS f_quiz_done, bool_or(event_key = 'login') AS f_login,
-    bool_or(event_key = 'search') AS f_search,
-    bool_or(event_key = 'address' OR pincode_ev IS NOT NULL) AS f_address,
+    coalesce(bool_or(event_key = 'product_view'), false) AS f_product, coalesce(bool_or(event_key = 'add_to_cart'), false) AS f_cart,
+    coalesce(bool_or(event_key = 'checkout_view'), false) AS f_checkout, coalesce(bool_or(event_key = 'pay_started'), false) AS f_pay,
+    coalesce(bool_or(event_key = 'order_placed'), false) AS f_order, coalesce(bool_or(event_key = 'quiz_started'), false) AS f_quiz_start,
+    coalesce(bool_or(event_key = 'quiz_completed'), false) AS f_quiz_done, coalesce(bool_or(event_key = 'login'), false) AS f_login,
+    coalesce(bool_or(event_key = 'search'), false) AS f_search,
+    -- an address was really saved: a save event that carries a valid 6-digit pincode
+    coalesce(bool_or(event_name IN ('address_saved', 'clicked_save_address', 'clicked_update_address_button') AND pincode_ev IS NOT NULL), false) AS f_address,
+    -- only picked a delivery pincode / location (typed it, searched a place, used current location, chose a saved one)
+    coalesce(bool_or(pincode_ev IS NOT NULL OR event_name IN ('delivery_location_set', 'location_search_selected', 'location_search_suggestion_picked',
+                                                              'checked_delivery_pincode', 'clicked_use_current_location', 'selected_saved_address')), false) AS f_location,
     last(pincode_ev ORDER BY ts) FILTER (WHERE pincode_ev IS NOT NULL) AS pincode,
     bool_or(event_name LIKE 'clicked\\_%' ESCAPE '\\' OR event_name IN ('ui_clicked','page_scrolled','scroll_depth','searchbar_typed','add_to_cart')
             OR event_key IN ('add_to_cart','view_cart','checkout_view','pay_started','order_placed','quiz_started','quiz_completed',

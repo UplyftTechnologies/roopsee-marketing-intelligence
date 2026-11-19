@@ -228,3 +228,28 @@ td.nw { white-space: nowrap; }
 .tree img { border-radius: 4px; object-fit: cover; flex: none; }
 .tree .share { height: 3px; border-radius: 2px; background: var(--series-1); opacity: .45; margin: 3px 0 0 auto; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+
+/* ---------- sticky table cards: title row + column headings stay under the top bar ---------- */
+.sticky-card > .card-head { position: sticky; top: var(--topbar-h, 56px); z-index: 12; background: var(--surface-1); padding: 10px 0 8px; margin: -4px 0 0; }
+.sticky-card thead th { top: calc(var(--topbar-h, 56px) + var(--head-h, 60px)); z-index: 11; }
+@media (min-width: 1200px) { .sticky-card .table-wrap { overflow-x: clip; } }  /* clip (not auto) so the headings can stick to the page; narrower screens keep horizontal scroll */
+@media (max-width: 1199px) { .sticky-card > .card-head { position: static; } .sticky-card thead th { top: 0; } }
+
+/* ---------- session filter panel ---------- */
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px 28px; }
+.filter-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
+.flag-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.flag-name { font-size: 13px; color: var(--text-secondary); }
+.flag-name.on { color: var(--text-primary); font-weight: 500; }
+.seg button.on.did { background: var(--good-bg); color: var(--text-primary); }
+.seg button.on.not { background: var(--critical-bg); color: var(--text-primary); }
+
+/* ---------- timeline event values ---------- */
+.tl-vals { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; margin-left: 6px; vertical-align: middle; }
+.tl-val { background: var(--surface-2); border-radius: 6px; padding: 0 7px; font-size: 12px; color: var(--text-primary); }
+.tl-val i { font-style: normal; color: var(--text-muted); margin-right: 3px; }
+.tl-more { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); cursor: pointer; font-size: 11px; line-height: 16px; padding: 0 7px; margin-left: 6px; border-radius: 10px; vertical-align: middle; }
+.tl-more:hover, .tl-more[aria-expanded='true'] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.tl-all { margin: 6px 0 4px; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; font-size: 12px; display: grid; gap: 3px; }
+.tl-all div { display: grid; grid-template-columns: 150px 1fr; gap: 8px; }
+.tl-all dt { color: var(--text-muted); } .tl-all dd { margin: 0; word-break: break-word; }

@@ -28,6 +28,11 @@ export function usePersisted(key, initial, fresh = false) {
   return [v, setV]
 }
 
+/** Forget the remembered filters of one page (keys are `mi:<page>.<name>`). */
+export function clearPersisted(page) {
+  try { Object.keys(sessionStorage).filter((k) => k.startsWith(`mi:${page}.`)).forEach((k) => sessionStorage.removeItem(k)) } catch { /* ignore */ }
+}
+
 /** Global filters shared by every tab. `tick` bumps after a refresh/exclusion apply so views reload. */
 export const FilterCtx = createContext(null)
 export const useFilters = () => useContext(FilterCtx)

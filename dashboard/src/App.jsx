@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FilterCtx, api, num } from './api'
+import { FilterCtx, api, clearPersisted, num } from './api'
 import Icon from './components/Icon'
 import Popover from './components/Popover'
 import DatePicker from './components/DatePicker'
@@ -70,6 +70,16 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(() => { const q = new URLSearchParams(location.search).get('rail'); return q ? q === '1' : localStorage.getItem('rail') === '1' })
   const [menu, setMenu] = useState(false)
   const inited = useRef(false)
+  const topbarRef = useRef(null)
+  useEffect(() => {  // the sticky bar can wrap on small screens; tables pin their headings just below it
+    const el = topbarRef.current
+    if (!el) return undefined
+    const set = () => document.documentElement.style.setProperty('--topbar-h', `${el.offsetHeight}px`)
+    set()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(set) : null
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [])
 
   const go = (key, pre = {}) => { setPrefill(pre); setTab(key); setNavKey((k) => k + 1); setMenu(false); window.scrollTo(0, 0) }
   useEffect(() => {
@@ -145,7 +155,7 @@ export default function App() {
               return (
                 <div key={k}>
                   {header}
-                  <button type="button" className={`rail-item ${railActive === k ? 'active' : ''}`} onClick={() => go(k)} title={`${label} – ${desc}`} aria-current={railActive === k ? 'page' : undefined}>
+                  <button type="button" className={`rail-item ${railActive === k ? 'active' : ''}`} onClick={() => { clearPersisted(k); go(k) }} title={`${label} – ${desc}`} aria-current={railActive === k ? 'page' : undefined}>
                     <Icon name={icon} /><span className="rail-label">{label}</span>
                   </button>
                 </div>
@@ -169,7 +179,7 @@ export default function App() {
         </aside>
 
         <div className="main">
-          <header className="topbar2">
+          <header className="topbar2" ref={topbarRef}>
             <button type="button" className="icon-btn menu-btn2" onClick={() => setMenu(!menu)} aria-label="Open menu"><Icon name="menu" /></button>
             <div><span className="crumb">{cur[5] || 'Roopsee'}</span><h1>{cur[1]}</h1></div>
             <div style={{ flex: 1 }} />

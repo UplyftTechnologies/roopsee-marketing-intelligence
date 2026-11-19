@@ -5,8 +5,14 @@ import { STAGE, STAGE_TONE } from '../shared'
 import BulkExclude from '../components/BulkExclude'
 import { Journey } from '../components/profile'
 
-const FLAGS = [['product', 'Viewed a product'], ['cart', 'Added to cart'], ['checkout', 'Reached checkout'], ['pay', 'Started payment'], ['order', 'Ordered'], ['login', 'Logged in'], ['quiz', 'Finished the quiz'], ['search', 'Searched'], ['address', 'Gave an address']]
-const NOT_FLAGS = FLAGS.filter(([k]) => ['cart', 'checkout', 'order', 'login', 'pay', 'address'].includes(k))
+// what a session can have done, grouped; each row is a three-way choice: Any / Did / Did not
+const GROUPS = [
+  ['Shopping', [['product', 'Viewed a product'], ['cart', 'Added to cart'], ['checkout', 'Reached checkout'], ['pay', 'Started payment'], ['order', 'Ordered']]],
+  ['Account', [['login', 'Known user', 'Logged in during this session or at any other time'], ['login_now', 'Logged in this session']]],
+  ['Engagement', [['quiz', 'Finished the quiz'], ['search', 'Searched']]],
+  ['Delivery', [['address', 'Saved an address', 'Saved a full address with a valid pincode'], ['location', 'Chose pincode / location', 'Typed a pincode, searched a place, used current location or picked a saved address']]],
+]
+const LABEL = Object.fromEntries(GROUPS.flatMap(([, rows]) => rows.map(([k, l]) => [k, l])))
 const PRESETS = [
   ['all', 'All sessions', [], [], 'any', null],
   ['cart_abandoners', 'Cart abandoners', ['cart'], ['order'], 'any', 'cart_abandoners'],
@@ -18,15 +24,16 @@ const STAGE_SHORT = ['Browsed', 'Product', 'Cart', 'Checkout', 'Payment', 'Order
 const TEXT_SORTS = ['name', 'email', 'channel', 'city', 'device', 'campaign', 'pincode']
 const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x))
 
-/** Multi-select chip group: click to add / remove a flag. */
-function FlagPicker({ label, options, value, onChange, hint }) {
+/** One behaviour as a three-way switch. */
+function FlagRow({ label, hint, state, onChange }) {
   return (
-    <div className="chip-row" role="group" aria-label={label}>
-      <span className="muted" style={{ fontSize: 12, minWidth: 96 }} title={hint}>{label}</span>
-      {options.map(([k, l]) => {
-        const on = value.includes(k)
-        return <button key={k} type="button" className={`chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== k) : [...value, k])}>{on ? '✓ ' : ''}{l}</button>
-      })}
+    <div className="flag-row" title={hint}>
+      <span className={`flag-name ${state !== 'any' ? 'on' : ''}`}>{label}</span>
+      <span className="seg" role="group" aria-label={label}>
+        {[['any', 'Any'], ['did', 'Did'], ['not', 'Did not']].map(([k, l]) => (
+          <button key={k} type="button" className={state === k ? `on ${k}` : ''} aria-pressed={state === k} onClick={() => onChange(k)}>{l}</button>
+        ))}
+      </span>
     </div>
   )
 }
@@ -46,11 +53,12 @@ export default function Sessions() {
   const [channel, setChannel] = usePersisted('sessions.channel', pre.channel || 'All', fresh)
   const [has, setHas] = usePersisted('sessions.has', [], fresh)
   const [lacks, setLacks] = usePersisted('sessions.lacks', [], fresh)
-  const [match, setMatch] = usePersisted('sessions.match', 'any', fresh)
+  const [match, setMatch] = usePersisted('sessions.match2', 'all', fresh)
   const [only, setOnly] = usePersisted('sessions.only', 'counted', fresh)
   const [pincode, setPincode] = usePersisted('sessions.pincode', '', fresh)
   const [sort, setSort] = usePersisted('sessions.sort', { key: 'started_at', dir: 'desc' }, fresh)
   const [limit, setLimit] = usePersisted('sessions.limit', 50)
+  const [panel, setPanel] = usePersisted('sessions.panel', false)
   const [offset, setOffset] = useState(0)
   const [sel, setSel] = useState(new Set())
   const pins = pincode.split(/[\s,]+/).filter((x) => /^\d{6}$/.test(x)).join(',')
@@ -61,44 +69,82 @@ export default function Sessions() {
   })
   useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, sort, limit])
   const activePreset = PRESETS.find(([, , h, l, m]) => same(h, has) && same(l, lacks) && (h.length < 2 || m === match))?.[0]
+  const stateOf = (k) => (has.includes(k) ? 'did' : lacks.includes(k) ? 'not' : 'any')
+  const setFlag = (k, st) => {
+    setHas((h) => (st === 'did' ? [...h.filter((x) => x !== k), k] : h.filter((x) => x !== k)))
+    setLacks((l) => (st === 'not' ? [...l.filter((x) => x !== k), k] : l.filter((x) => x !== k)))
+  }
+  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setChannel('All'); setSearch(''); setOnly('counted') }
+  const activeChips = [
+    ...has.map((k) => ({ id: `d-${k}`, text: `Did: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
+    ...lacks.map((k) => ({ id: `n-${k}`, text: `Did not: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
+    ...(pins ? [{ id: 'pin', text: `Pincode: ${pins.split(',').join(', ')}`, off: () => setPincode('') }] : []),
+    ...(channel !== 'All' ? [{ id: 'ch', text: `Channel: ${channel}`, off: () => setChannel('All') }] : []),
+    ...(only === 'excluded' ? [{ id: 'ex', text: 'Only hidden sessions', off: () => setOnly('counted') }] : []),
+  ]
+  const nFilters = activeChips.length
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const toggleAll = (ids, on) => setSel((p) => { const n = new Set(p); ids.forEach((i) => (on ? n.add(i) : n.delete(i))); return n })
 
   return (
     <>
       <div className="chip-row">
-        <Search value={search} onChange={setSearch} placeholder="Search session id, IP, phone, name, email, city, campaign…" />
+        <Search value={search} onChange={setSearch} placeholder="Search session id, IP, phone, name, email, city, campaign, pincode…" />
         <Chips value={only} onChange={setOnly} options={[{ value: 'counted', label: 'Normal view' }, { value: 'excluded', label: 'Only hidden (excluded)' }]} />
+        <button type="button" className={`btn ${nFilters ? 'primary' : ''}`} aria-expanded={panel} onClick={() => setPanel(!panel)}>
+          Filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
+        </button>
+        {(nFilters > 0 || search) && <button type="button" className="btn" onClick={clearAll}>Clear all</button>}
       </div>
       <div className="chip-row" role="group" aria-label="Quick views">
+        <span className="muted" style={{ fontSize: 12 }}>Quick views</span>
         {PRESETS.map(([id, label, h, l, m, key]) => (
-          <button key={id} type="button" className={`chip ${activePreset === id ? 'on' : ''}`} onClick={() => { setHas(h); setLacks(l); setMatch(m) }}>
+          <button key={id} type="button" className={`chip ${activePreset === id ? 'on' : ''}`} onClick={() => { setHas(h); setLacks(l); setMatch('all') }}>
             {label}{key && counts.data ? ` (${num(counts.data[key])})` : ''}
           </button>
         ))}
       </div>
-      <Card title="Filter by what the session did" sub="pick any combination; “did not” removes sessions that did that action (for example: added to cart but did not order)">
-        <FlagPicker label="Did" options={FLAGS} value={has} onChange={setHas} hint="Sessions where the visitor did these things" />
-        {has.length > 1 && (
-          <div className="chip-row" style={{ marginTop: 6 }}>
-            <span className="muted" style={{ fontSize: 12, minWidth: 96 }}>Match</span>
-            <Chips value={match} onChange={setMatch} options={[{ value: 'any', label: 'Any of them' }, { value: 'all', label: 'All of them' }]} />
-          </div>
-        )}
-        <div style={{ marginTop: 6 }}><FlagPicker label="Did not" options={NOT_FLAGS} value={lacks} onChange={setLacks} hint="Exclude sessions that did these things" /></div>
-        <div className="chip-row" style={{ marginTop: 6 }}>
-          <span className="muted" style={{ fontSize: 12, minWidth: 96 }} title="The pincode the visitor typed or picked as their delivery location">Event pincode</span>
-          <input className="field" value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="e.g. 400001, 560001" aria-label="Pincode" style={{ width: 200 }} />
-          {pincode && pins === '' && <span className="muted" style={{ fontSize: 12 }}>enter 6-digit pincodes, separated by commas</span>}
+      {activeChips.length > 0 && (
+        <div className="chip-row" role="status" aria-label="Active filters">
+          <span className="muted" style={{ fontSize: 12 }}>Showing sessions with</span>
+          {activeChips.map((c) => <button key={c.id} type="button" className="chip on" onClick={c.off} title="Remove this filter">{c.text} ✕</button>)}
         </div>
-        {(has.length > 0 || lacks.length > 0 || pincode) && <div style={{ marginTop: 8 }}><button type="button" className="btn small" onClick={() => { setHas([]); setLacks([]); setMatch('any'); setPincode('') }}>Clear filters</button></div>}
-      </Card>
-      <Chips value={channel} onChange={setChannel} options={['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']} />
+      )}
+      {panel && (
+        <Card title="Filter sessions" sub="for each action choose Any (ignore it), Did, or Did not. For example: Added to cart = Did, Ordered = Did not">
+          <div className="filter-grid">
+            {GROUPS.map(([title, rows]) => (
+              <div key={title} className="filter-group">
+                <div className="filter-title">{title}</div>
+                {rows.map(([k, label, hint]) => <FlagRow key={k} label={label} hint={hint} state={stateOf(k)} onChange={(st) => setFlag(k, st)} />)}
+              </div>
+            ))}
+            <div className="filter-group">
+              <div className="filter-title">Source & place</div>
+              <label className="flag-row"><span className="flag-name">Channel</span>
+                <select className="field" value={channel} onChange={(e) => setChannel(e.target.value)} aria-label="Channel">
+                  {['All', ...(counts.data?.channels || [])].map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </label>
+              <label className="flag-row" title="The pincode the visitor typed or picked as their delivery location"><span className="flag-name">Pincode</span>
+                <input className="field" value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="400001, 560001" aria-label="Pincode" style={{ width: 150 }} />
+              </label>
+              {pincode && pins === '' && <div className="muted" style={{ fontSize: 12 }}>6-digit pincodes, separated by commas</div>}
+            </div>
+          </div>
+          {has.length > 1 && (
+            <div className="chip-row" style={{ marginTop: 12 }}>
+              <span className="muted" style={{ fontSize: 12 }}>With several Did choices, show sessions that did</span>
+              <Chips value={match} onChange={setMatch} options={[{ value: 'all', label: 'All of them' }, { value: 'any', label: 'Any one of them' }]} />
+            </div>
+          )}
+        </Card>
+      )}
       <Loading state={s}>
         {({ rows, total }) => {
           const chosen = rows.filter((r) => sel.has(r.session_id))
           return (
-            <Card title={`${num(total)} sessions`} sub="click a row for the full session · click a column title to sort · tick rows to exclude them in bulk"
+            <Card sticky title={`${num(total)} sessions`} sub="click a row for the full session · click a column title to sort · tick rows to exclude them in bulk"
               right={<ExportBtn name="sessions" rows={rows} fields={[['Started', 'started_at'], ['Name', 'name'], ['Email', 'email'], ['Phone', 'phone10'], ['Journey', 'key_events'], ['Order value', 'order_value'], ['Channel', 'channel'], ['Campaign', 'campaign'], ['City', 'city'], ['Pincode', 'pincode'], ['Device', 'device'], ['Events', 'events'], ['Seconds', 'duration_s'], ['IP', 'ip'], ['Session id', 'session_id']]} />}>
               <BulkExclude rows={chosen} noun="sessions" onClear={() => setSel(new Set())} fields={[
                 { label: 'browser', kind: 'visitor_id', get: (r) => r.visitor_key }, { label: 'user account', kind: 'user_id', get: (r) => r.user_id },

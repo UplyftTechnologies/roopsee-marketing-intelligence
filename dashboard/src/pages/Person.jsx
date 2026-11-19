@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api, day, dt, dur, inr, num, useApi, useFilters } from '../api'
 import { Badge, Card, ExportBtn, axis, chartTip, Table } from '../ui'
-import { CopyBtn, ExcludeMenu, Journey, SessionTimeline } from '../components/profile'
+import { AddressCard, CopyBtn, ExcludeMenu, Journey, SessionTimeline } from '../components/profile'
 import Icon from '../components/Icon'
 
 const IST = { timeZone: 'Asia/Kolkata' }
@@ -144,6 +144,7 @@ export default function Person() {
               ]} rows={d.orders} />
             </Card>
           )}
+          <AddressCard data={d.addresses} title="Saved address" />
           {d.ips.length > 0 && (
             <Card title={`IP addresses (${d.ips.length})`}>
               <Table cols={[{ label: 'IP', cls: 'mono', key: 'ip' }, { label: 'Place', key: 'city' }, { label: 'Sessions', sortBy: 'sessions', num: true, render: (r) => num(r.sessions) }, { label: 'Last seen', sortBy: 'last_seen', render: (r) => dt(r.last_seen) }]} rows={d.ips.slice(0, 8)} />

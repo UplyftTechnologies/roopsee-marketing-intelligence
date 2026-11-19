@@ -58,6 +58,8 @@ RAW_SCHEMAS = {
     "raw_customer_address": {
         "id": "BIGINT", "user_id": "VARCHAR", "city": "VARCHAR", "state": "VARCHAR", "pincode": "VARCHAR",
         "is_default": "BOOLEAN", "created_at": "TIMESTAMPTZ", "latitude": "DOUBLE", "longitude": "DOUBLE",
+        "delivery_address": "VARCHAR", "formatted_address": "VARCHAR", "nearby_landmark": "VARCHAR", "full_name": "VARCHAR",
+        "phone": "VARCHAR", "email": "VARCHAR", "location_source": "VARCHAR", "updated_at": "TIMESTAMPTZ",
     },
 }
 

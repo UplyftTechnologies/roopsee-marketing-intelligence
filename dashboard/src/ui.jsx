@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 /* ---------- metric glossary: shown as hover/focus help next to labels ---------- */
 export const GLOSSARY = {
@@ -27,10 +27,22 @@ export const Help = ({ id, text }) => (
   <span className="help" tabIndex={0} data-tip={text || GLOSSARY[id]} aria-label={text || GLOSSARY[id]}>ⓘ</span>
 )
 
-export const Card = ({ title, sub, right, children, style, help }) => (
-  <section className="card" style={style}>
+/** `sticky`: the title row and the table's column headings stay pinned under the top bar while the page scrolls. */
+export function Card({ title, sub, right, children, style, help, sticky }) {
+  const section = useRef(null)
+  const head = useRef(null)
+  useEffect(() => {
+    if (!sticky || !head.current || !section.current) return undefined
+    const set = () => section.current && section.current.style.setProperty('--head-h', `${head.current.offsetHeight}px`)
+    set()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(set) : null
+    ro?.observe(head.current)
+    return () => ro?.disconnect()
+  }, [sticky, title, sub])
+  return (
+  <section className={`card${sticky ? ' sticky-card' : ''}`} style={style} ref={section}>
     {(title || right) && (
-      <div className="card-head">
+      <div className="card-head" ref={head}>
         <div>
           <h3>{title}{help && <> <Help id={help} /></>}</h3>
           {sub && <div className="sub">{sub}</div>}
@@ -40,7 +52,8 @@ export const Card = ({ title, sub, right, children, style, help }) => (
     )}
     {children}
   </section>
-)
+  )
+}
 
 /** Change vs the previous period. kind 'count' → relative %, 'rate' → percentage-point difference. */
 export function delta(cur, prev, kind = 'count') {
