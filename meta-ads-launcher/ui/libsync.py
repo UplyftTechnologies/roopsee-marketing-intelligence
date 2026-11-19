@@ -194,7 +194,8 @@ def status():
     ix = store.load_index(s)
     age = store.age_hours(s)
     return {"env": s.env, "account": s.account, "synced": bool(ix.get("synced_at")), "synced_at": ix.get("synced_at"), "age_hours": age,
-            "stale": bool(age is not None and age * 3600 > store.STALE_AFTER), "counts": ix.get("counts") or {},
+            "stale": bool(age is not None and age * 3600 > store.STALE_AFTER),
+            "counts": {"campaigns": len(ix.get("campaigns", {})), "adsets": len(ix.get("adsets", {})), "ads": len(ix.get("ads", {}))},  # what is stored now (a refresh or a removal changes it)
             "images": len(store.images(s)), "images_full": sum(1 for v in store.images(s).values() if v.get("file")), "videos": len(store.videos(s)),
             "megabytes": round(store.size_bytes(s) / 1e6, 1), "sync": dict(SYNC), "usage": usage_snapshot()}
 
@@ -222,7 +223,13 @@ def refresh_one(cid: str):
     try:
         camp, adsets, ads = _fetch_campaign(Meta(s), cid)
     except MetaError as e:
+        if "does not exist" in str(e).lower():  # deleted on Meta: the local copy is stale, so drop it
+            store.delete_campaign(s, cid)
+            return {"removed": True, "note": "This campaign no longer exists on Meta, so its local copy was removed."}
         raise HTTPException(502 if "limiting" not in str(e) else 429, f"Meta said: {s.redact(e)[:300]}")
+    if camp.get("effective_status") in DEAD:
+        store.delete_campaign(s, cid)
+        return {"removed": True, "note": "This campaign was deleted or archived on Meta, so its local copy was removed."}
     store.save_campaign(s, camp, adsets, ads)
     return {"refreshed": cid, "adsets": len(adsets), "ads": len(ads)}
 

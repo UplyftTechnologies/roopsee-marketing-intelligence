@@ -127,8 +127,10 @@ def compile_ad(ad: dict) -> tuple[dict, dict, list[str], list[str]]:
         spec = {"object_story_spec": {"link_data": ld}}
     elif kind == "post":
         pid = str(ad.get("post_id") or "").strip()
-        if not re.fullmatch(r"\d+_\d+", pid):
-            errs.append(f"{tag}: the post id looks like 1175723048967774_122127934839430745 (page id, underscore, post id). Pick a post from the list or paste its id.")
+        if not pid:
+            errs.append(f"{tag}: this is an Existing post ad but no post is chosen yet. Pick a post from the list on that card, or remove the card if you did not mean to add it.")
+        elif not re.fullmatch(r"\d+_\d+", pid):
+            errs.append(f"{tag}: '{pid[:40]}' is not a post id. A post id is the Page id, an underscore and the post number, for example 1175723048967774_122127934839430745. Pick a post from the list, or paste the id.")
         spec = {"object_story_id": pid}
         warns.append(f"{tag}: an existing post is used as it is. Its text and image cannot be changed here.")
     elif kind == "dynamic":

@@ -55,10 +55,10 @@ function Account({ acc }) {
     <Card title="Account and tracking">
       <div className="fgrid">
         <Field label="Currency"><input className="field" value={a.currency || ''} onChange={(e) => setA({ ...a, currency: e.target.value })} /></Field>
-        <Field label="Smallest units per 1 currency unit" hint="100 for rupees and paise"><input className="field" type="number" value={a.currency_offset || 100} onChange={(e) => setA({ ...a, currency_offset: Number(e.target.value) })} /></Field>
+        <Field label="Smallest units per 1 currency unit" hint="100 for rupees and paise"><input className="field" type="number" min="1" value={a.currency_offset ?? 100} onChange={(e) => setA({ ...a, currency_offset: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
       </div>
       <Field label="Tracking tags added to every link" hint="Meta fills {{campaign.id}}, {{ad.id}} and {{adset.id}}. The dashboard uses these to match visits to campaigns."><textarea className="field" value={a.url_tags || ''} onChange={(e) => setA({ ...a, url_tags: e.target.value })} /></Field>
-      <div className="row"><button type="button" className="btn primary" onClick={async () => { try { setRes(await api('/api/config/account', { method: 'PUT', body: a })) } catch (e) { setRes({ errors: [e.message], warnings: [] }) } }}>Save</button></div>
+      <div className="row"><button type="button" className="btn primary" onClick={async () => { try { setRes(await api('/api/config/account', { method: 'PUT', body: { ...a, currency_offset: Number(a.currency_offset) > 0 ? Number(a.currency_offset) : 100 } })) } catch (e) { setRes({ errors: [e.message], warnings: [] }) } }}>Save</button></div>
       <Result r={res} />
     </Card>
   )

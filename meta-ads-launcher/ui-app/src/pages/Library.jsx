@@ -45,7 +45,7 @@ export default function Library({ ctx }) {
   }
   const refresh = async (id) => {
     setBusy(id); setMsg(null)
-    try { await api(`/api/library/refresh/${id}`, { method: 'POST' }); await loadStatus(); await load(); setMsg({ tone: 'good', text: 'Refreshed from Meta.' }) } catch (e) { setMsg({ tone: 'err', text: e.message }) }
+    try { const r = await api(`/api/library/refresh/${id}`, { method: 'POST' }); await loadStatus(); await load(); setMsg({ tone: 'good', text: r.removed ? r.note : 'Refreshed from Meta.' }) } catch (e) { setMsg({ tone: 'err', text: e.message }) }
     setBusy(false)
   }
   const drop = async (id) => {

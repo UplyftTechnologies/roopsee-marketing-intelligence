@@ -48,7 +48,8 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
   const input = useRef(null)
   const setD = (k, v) => set('defaults', { ...d, [k]: v })
   const addAd = (extra) => setA((x) => ({ ...x, ads: [...x.ads, { ...x.defaults, ...extra }] }))
-  const upd = (i, k, v) => setA((x) => ({ ...x, ads: x.ads.map((ad, j) => (j === i ? { ...ad, [k]: v } : ad)) }))
+  // upd(i, 'field', value) changes one field; upd(i, { a: 1, b: 2 }) changes several (the format cards use this form)
+  const upd = (i, k, v) => setA((x) => ({ ...x, ads: x.ads.map((ad, j) => (j === i ? { ...ad, ...(k !== null && typeof k === 'object' ? k : { [k]: v }) } : ad)) }))
   const all = a.adsets.map((s) => s.uid)
   const toggleSet = (i, u) => {
     const cur = a.ads[i].sets || all

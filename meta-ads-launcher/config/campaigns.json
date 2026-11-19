@@ -49,6 +49,14 @@
       "status": "PAUSED",
       "daily_budget": 500.0,
       "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
+    },
+    {
+      "key": "ROOPSEE_NEW_SALES_CAMPAIGN_1",
+      "objective": "OUTCOME_SALES",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 500.0,
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
     }
   ]
 }

@@ -273,8 +273,8 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
       {s.audience === 'custom' && (
         <div className="fgrid age" style={{ marginTop: 10 }}>
           <Field label="Countries" hint="Two-letter codes (IN, AE). Leave empty when you pick states or cities under Detailed targeting"><input className="field" value={s.custom.countries} onChange={(e) => upd({ custom: { ...s.custom, countries: e.target.value } })} /></Field>
-          <Field label="Youngest"><input className="field" type="number" value={s.custom.age_min} onChange={(e) => upd({ custom: { ...s.custom, age_min: Number(e.target.value) } })} /></Field>
-          <Field label="Oldest"><input className="field" type="number" value={s.custom.age_max} onChange={(e) => upd({ custom: { ...s.custom, age_max: Number(e.target.value) } })} /></Field>
+          <Field label="Youngest"><input className="field" type="number" value={s.custom.age_min} onChange={(e) => upd({ custom: { ...s.custom, age_min: e.target.value === '' ? '' : Number(e.target.value) } })} /></Field>
+          <Field label="Oldest"><input className="field" type="number" value={s.custom.age_max} onChange={(e) => upd({ custom: { ...s.custom, age_max: e.target.value === '' ? '' : Number(e.target.value) } })} /></Field>
           <Field label="Gender"><select className="field" value={s.custom.gender} onChange={(e) => upd({ custom: { ...s.custom, gender: e.target.value } })}><option value="all">Everyone</option><option value="women">Women</option><option value="men">Men</option></select></Field>
         </div>
       )}
@@ -372,8 +372,12 @@ function Flow({ o, ctx, params }) {
     return () => { live = false; clearTimeout(t) }
   }, [sig, started])
   // autosave the draft
+  // (nothing is saved until something changes: opening the builder and leaving again must not leave an empty draft behind)
+  const baseSig = useRef(null)
   useEffect(() => {
-    if (!started || phase !== 'edit') return undefined
+    if (!started || phase !== 'edit') { baseSig.current = null; return undefined }
+    if (baseSig.current === null) { baseSig.current = sig; return undefined }
+    if (sig === baseSig.current) return undefined
     const t = setTimeout(() => api('/api/drafts/' + draftId, { method: 'PUT', body: { title: `${o.goals.find((g) => g.id === a.goal)?.label || 'Campaign'} · ${a.adsets.length} ad set(s) · ${a.ads.length} ad(s)`, answers: a } }).then((r) => setDraftId(r.id)).catch(() => {}), 2500)
     return () => clearTimeout(t)
   }, [sig, started]) // eslint-disable-line react-hooks/exhaustive-deps

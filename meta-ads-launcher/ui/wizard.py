@@ -17,6 +17,7 @@ from src.common import (BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, GOAL
                         audiences_cfg, campaigns_cfg, clean_extra, deep_merge, jload, jsave)
 from src import library_store as store
 from src.ensure import no_lookups
+from src import forget
 from src.common import batch_files, jload
 from src.spec_clean import describe
 from src.meta_api import Meta, MetaError
@@ -146,6 +147,24 @@ def _legacy(a: dict) -> list[dict]:
     return a.get("adsets") or [{"uid": "s1", "audience": a.get("audience", "all"), "custom": a.get("custom"), "placements": a.get("placements", "instagram")}]
 
 
+_STALE: dict = {}
+
+
+def _stale(s: Settings, camp_name: str) -> bool:
+    """True when an earlier campaign of this name was deleted on Meta, so its leftover launcher record can be cleared and the name used again.
+    Asks Meta (one call per environment that has it) and remembers the answer for 2 minutes."""
+    key = (s.env, s.account, camp_name)
+    hit = _STALE.get(key)
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    try:
+        val = forget.is_gone(camp_name)
+    except Exception:  # noqa: BLE001  (when in doubt the name stays taken)
+        val = False
+    _STALE[key] = (time.time(), val)
+    return val
+
+
 def build_plan(a: dict, s: Settings) -> dict:
     errs, warns = [], []
     goal = GOALS.get(a.get("goal"))
@@ -176,12 +195,17 @@ def build_plan(a: dict, s: Settings) -> dict:
     stamp = now.strftime("%d %b")
     base = f"Roopsee | {goal['short']} | {stamp}"
     existing = campaigns_cfg()
+    release: set = set()
     name, n = base, 1
     own = ((a.get("campaign") or {}).get("name") or "").strip()
     if own:  # the user chose the campaign name
         name = own
         if name in existing:
-            errs.append(f"A campaign called '{name}' was already created with this launcher. Choose a different campaign name.")
+            if _stale(s, name):
+                release.add(name)
+                warns.append(f"An earlier campaign called '{name}' was deleted on Meta. The launcher's old record of it is cleared (and backed up) when you create, so the name is free again.")
+            else:
+                errs.append(f"A campaign called '{name}' already exists. Choose a different campaign name.")
     else:
         while name in existing:
             n += 1
@@ -203,7 +227,11 @@ def build_plan(a: dict, s: Settings) -> dict:
         if own_set:  # the user chose this ad set's name
             nm = own_set
             if nm in taken:
-                errs.append(f"{label}: the name '{nm}' is already used by another ad set. Choose a different name.")
+                owner = forget.owner_of_adset(nm)
+                if owner and (owner in release or _stale(s, owner)):  # its campaign was deleted on Meta
+                    release.add(owner)
+                else:
+                    errs.append(f"{label}: the name '{nm}' is already used by another ad set. Choose a different name.")
         else:
             while nm in taken:
                 m += 1
@@ -477,7 +505,7 @@ def build_plan(a: dict, s: Settings) -> dict:
         camp["extra"] = {**camp.get("extra", {}), **clean}
     batch = f"batch_wiz_{now.strftime('%Y%m%d_%H%M')}"
     total = sum(x.get("daily_budget", 0) for x in sets_out) if per_set else daily
-    return {"errors": errs, "warnings": warns, "campaign": camp, "adsets": sets_out, "audiences": audiences, "ads": ads, "batch": batch,
+    return {"errors": errs, "warnings": warns, "release": sorted(release), "campaign": camp, "adsets": sets_out, "audiences": audiences, "ads": ads, "batch": batch,
             "batch_id": f"ROOPSEE_WIZ_{now.strftime('%Y%m%d_%H%M')}", "names": {"campaign": name, "adsets": [x["key"] for x in sets_out]},
             "summary": {"goal": goal["label"], "budget_mode": "adset" if per_set else "campaign", "daily_budget": daily, "total_budget": total, "ads": len(ads), "start": start, "end": end, "campaign_name": name,
                         "ad_list": [{"name": x.get("name") or x["ad_key"], "id": x["ad_key"], "adset": x["adset_key"],
@@ -526,6 +554,11 @@ async def create(req: Request):
     miss = s.missing()
     if miss:
         raise HTTPException(400, {"errors": ["Missing in .env: " + ", ".join(miss)]})
+    for old in plan.get("release", []):  # a campaign of this name was deleted on Meta: move the launcher's leftover record to backups/ so the name is free
+        try:
+            forget.forget_campaign(old)
+        except LauncherError as e:
+            raise HTTPException(400, {"errors": [str(e)]})
     files = {n: ROOT / "config" / f"{n}.json" for n in ("campaigns", "adsets", "audiences")}
     before = {n: (p.read_text(encoding="utf-8") if p.exists() else None) for n, p in files.items()}
     bpath = ROOT / "ads" / f"{plan['batch']}.json"
