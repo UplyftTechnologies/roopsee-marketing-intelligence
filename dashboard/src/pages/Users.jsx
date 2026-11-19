@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { dt, inr, num, useApi, useFilters } from '../api'
+import { dt, inr, num, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import BulkExclude from '../components/BulkExclude'
 
@@ -9,16 +9,16 @@ const TEXT_SORTS = ['name', 'email', 'city', 'segment', 'first_channel']
 
 export default function Users() {
   const f = useFilters()
-  const [search, setSearch] = useState('')
-  const [segment, setSegment] = useState('')
-  const [preset, setPreset] = useState('')
-  const [sort, setSort] = useState({ key: 'last_seen', dir: 'desc' })
+  const [search, setSearch] = usePersisted('users.search', '')
+  const [segment, setSegment] = usePersisted('users.segment', '')
+  const [preset, setPreset] = usePersisted('users.preset', '')
+  const [sort, setSort] = usePersisted('users.sort', { key: 'last_seen', dir: 'desc' })
   const [offset, setOffset] = useState(0)
   const [sel, setSel] = useState(new Set())
-  const limit = 50
+  const [limit, setLimit] = usePersisted('users.limit', 50)
   const counts = useApi('/users/counts')
   const s = useApi('/users', { search, segment: segment || undefined, preset: preset || undefined, sort: sort.key, direction: sort.dir, limit, offset })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, segment, preset, sort])
+  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, segment, preset, sort, limit])
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const toggleAll = (ids, on) => setSel((p) => { const n = new Set(p); ids.forEach((i) => (on ? n.add(i) : n.delete(i))); return n })
 
@@ -61,7 +61,7 @@ export default function Users() {
                     { label: 'Last seen', cls: 'nw', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },
                     { label: '', render: (r) => (r.is_excluded ? <Badge tone="bad">excluded</Badge> : null) },
                   ]} rows={rows} empty="Nobody matches these filters." />
-                <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} />
+                <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
               </Card>
             </>
           )

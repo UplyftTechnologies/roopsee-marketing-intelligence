@@ -195,8 +195,8 @@ def ad_form(raw: dict, s: Settings, rep: dict, key: str = "") -> dict | None:
     rep["filled"].append("creative")
     if (spec.get("object_story_spec") or {}).get("template_data") and not spec.get("product_set_id") and not (spec.get("asset_feed_spec") or {}).get("product_set_id"):
         rep["warnings"].append("This is a catalog (product) ad but the file does not say which product set it shows. Copy it from your Meta account (that includes it) or add product_set_id to the creative.")
-    rep["converted"] += [n for n in notes if n.startswith("this ad uses")]
-    rep["ignored"] += [n for n in notes if not n.startswith("this ad uses")]
+    rep["converted"] += [n for n in notes if n.startswith("this ad uses")] + [n[6:].strip() for n in notes if n.startswith("fixed:")]
+    rep["ignored"] += [n for n in notes if not n.startswith("this ad uses") and not n.startswith("fixed:")]
     if str(raw.get("status", "PAUSED")).upper() == "ACTIVE":
         rep["warnings"].append("The ad was ACTIVE. It will be created PAUSED.")
     if (spec.get("object_story_spec") or {}).get("page_id") and s.page_id:

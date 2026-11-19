@@ -199,10 +199,20 @@ export const RateBar = ({ v, max = 1, text }) => (
   </span>
 )
 
-export function Pager({ total, limit, offset, setOffset }) {
+export const ALL_ROWS = 5000
+const PAGE_SIZES = [25, 50, 100, ALL_ROWS]
+/** Prev / Next pager. Pass `setLimit` to also offer a rows-per-page choice including “All” (up to ALL_ROWS rows at a time). */
+export function Pager({ total, limit, offset, setOffset, setLimit }) {
   if (!total) return null
   return (
     <div className="pager">
+      {setLimit && (
+        <label className="muted" style={{ fontSize: 12 }}>Rows{' '}
+          <select className="field" value={limit} onChange={(e) => setLimit(+e.target.value)} aria-label="Rows per page">
+            {[...new Set([...PAGE_SIZES, limit])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n === ALL_ROWS ? 'All' : n}</option>)}
+          </select>
+        </label>
+      )}
       <span>{offset + 1}–{Math.min(offset + limit, total)} of {total.toLocaleString('en-IN')}</span>
       <button className="btn small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
       <button className="btn small" disabled={offset + limit >= total} onClick={() => setOffset(offset + limit)}>Next</button>

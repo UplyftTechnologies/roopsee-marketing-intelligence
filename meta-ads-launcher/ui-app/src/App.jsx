@@ -10,11 +10,13 @@ import Setup from './pages/Setup'
 import Run from './pages/Run'
 import Health from './pages/Health'
 import Library from './pages/Library'
+import Manage from './pages/Manage'
 
 // key, label, icon, description, page, group
 const NAV = [
   ['new', 'New campaign', 'plus', 'Create a campaign step by step', Builder, 'Create'],
   ['overview', 'Overview', 'overview', 'Everything on Meta, live', Overview, 'Manage'],
+  ['manage', 'Edit live campaigns', 'setup', 'Edit ad sets, add or change creatives, pause or turn on', Manage, 'Manage'],
   ['campaigns', 'Campaigns & ad sets', 'setup', 'Set up campaigns, ad sets and audiences', Campaigns, 'Manage'],
   ['library', 'Past campaigns', 'overview', 'Your saved copy of past campaigns, ad sets, ads and media', Library, 'Library'],
   ['creatives', 'Creatives', 'image', 'Your images', Creatives, 'Library'],

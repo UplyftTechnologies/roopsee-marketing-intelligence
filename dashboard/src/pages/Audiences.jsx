@@ -7,9 +7,9 @@ function People({ id, onClose }) {
   const [only, setOnly] = useState(true)
   const [offset, setOffset] = useState(0)
   const [sort, setSort] = useState({ key: 'reach', dir: 'desc' })
-  const limit = 25
+  const [limit, setLimit] = useState(25)
   const s = useApi(`/audiences/${id}/people`, { only_reachable: only, sort: sort.key, direction: sort.dir, limit, offset }, { scoped: true })
-  useEffect(() => setOffset(0), [id, only, sort])
+  useEffect(() => setOffset(0), [id, only, sort, limit])
   return (
     <Loading state={s}>
       {(d) => (
@@ -30,7 +30,7 @@ function People({ id, onClose }) {
             { label: 'Skin / age', render: (r) => [r.skin_type, r.age_bucket].filter(Boolean).join(' · ') || '–' },
             { label: 'Last seen', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },
           ]} rows={d.rows} empty="Nobody in this group has a phone number yet. Untick the box to see everyone." />
-          <Pager total={d.total} limit={limit} offset={offset} setOffset={setOffset} />
+          <Pager total={d.total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
         </Card>
       )}
     </Loading>

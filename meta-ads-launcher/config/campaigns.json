@@ -57,6 +57,38 @@
       "status": "PAUSED",
       "daily_budget": 500.0,
       "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
+    },
+    {
+      "key": "RS_Test_1",
+      "objective": "OUTCOME_SALES",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 500.0,
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
+    },
+    {
+      "key": "RS_Test_2",
+      "objective": "OUTCOME_SALES",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 250.0,
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
+    },
+    {
+      "key": "RS_Test_3",
+      "objective": "OUTCOME_SALES",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 500.0,
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
+    },
+    {
+      "key": "RS_TEST_4",
+      "objective": "OUTCOME_LEADS",
+      "budget_strategy": "CBO",
+      "status": "PAUSED",
+      "daily_budget": 2000.0,
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP"
     }
   ]
 }

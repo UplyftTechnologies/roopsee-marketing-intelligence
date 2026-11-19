@@ -8,6 +8,24 @@ from typing import Any
 NEEDS_MESSAGING = "needs messaging permission that the app does not have, so Meta rejects it with '(#3) Application does not have the capability'"
 
 
+# Targeting settings that Meta rejects. Anything copied, imported, saved in an old draft or template is cleaned with this before it is sent.
+REMOVED_TARGETING = {
+    "subscriber_universe": ("WhatsApp customer audience", NEEDS_MESSAGING),
+    "targeting_optimization": ("Old 'detailed targeting expansion' setting", "Meta removed it; Advantage detailed targeting is applied automatically"),
+}
+
+
+def scrub_targeting(te) -> tuple[dict, list]:
+    """(targeting without the removed keys, [(key, what, why)])."""
+    te = dict(te or {})
+    gone = []
+    for k, (what, why) in REMOVED_TARGETING.items():
+        if k in te:
+            te.pop(k)
+            gone.append((k, what, why))
+    return te, gone
+
+
 def _f(where: str, what: str, status: str, why: str) -> dict:
     return {"where": where, "what": what, "status": status, "why": why}
 
@@ -44,12 +62,9 @@ EXTRA_KEPT = {
 
 def adset_findings(targeting_extra: dict, extra: dict, where: str) -> tuple[dict, dict, list]:
     """Returns (targeting_extra without what must go, extra, findings)."""
-    te = dict(targeting_extra or {})
+    te, gone = scrub_targeting(targeting_extra)
     ex = dict(extra or {})
-    out: list = []
-    if "subscriber_universe" in te:
-        te.pop("subscriber_universe")
-        out.append(_f(where, "WhatsApp customer audience", "dropped", NEEDS_MESSAGING))
+    out: list = [_f(where, what, "dropped", why) for _k, what, why in gone]
     for k, (what, why) in TARGETING_KEPT.items():
         if te.get(k):
             out.append(_f(where, what, "kept", why))

@@ -83,7 +83,7 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
             </table>
           </div>
           <div className="rt-foot">
-            <span>Rows per page{' '}<select className="field" value={limit} onChange={(e) => setLimit(+e.target.value)}>{[10, 25, 50].map((n) => <option key={n}>{n}</option>)}</select></span>
+            <span>Rows per page{' '}<select className="field" value={limit} onChange={(e) => setLimit(+e.target.value)}>{[10, 25, 50, 100, 5000].map((n) => <option key={n} value={n}>{n === 5000 ? 'All' : n}</option>)}</select></span>
             <span>{d.groups ? `${offset + 1}–${Math.min(offset + limit, d.groups)} of ${num(d.groups)}` : '0 of 0'}</span>
             <span>
               <button className="icon-btn" aria-label="Previous page" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}><Icon name="left" size={18} /></button>

@@ -933,6 +933,1850 @@
         ],
         "is_dynamic_creative": false
       }
+    },
+    {
+      "key": "Women IN 18-50 | Auto | 19 Nov",
+      "campaign_key": "RS_Test_1",
+      "audience": "WIZ_IN_WOMEN_18_50",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "INITIATED_CHECKOUT",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-17T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "Women IN 18-50 | Auto | 19 Nov | 2",
+      "campaign_key": "RS_Test_1",
+      "audience": "WIZ_IN_WOMEN_18_50",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "INITIATED_CHECKOUT",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-17T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "Women IN 18-50 | Auto | 19 Nov | 3",
+      "campaign_key": "RS_Test_1",
+      "audience": "WIZ_IN_WOMEN_18_50",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "PURCHASE",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-13T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "RS_Test_ADSET_1",
+      "campaign_key": "RS_Test_2",
+      "audience": "WIZ__WOMEN_18_24",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "PURCHASE",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-11T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "cities": [
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "2677331",
+              "name": "Navi Mumbai (New Mumbai)",
+              "radius": 50,
+              "region": "Maharashtra",
+              "region_id": "1735"
+            }
+          ],
+          "zips": [
+            {
+              "key": "IN:400076",
+              "name": "400076",
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400077",
+              "name": "400077",
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400083",
+              "name": "400083",
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400601",
+              "name": "400601",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400602",
+              "name": "400602",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400603",
+              "name": "400603",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400604",
+              "name": "400604",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400605",
+              "name": "400605",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400606",
+              "name": "400606",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400607",
+              "name": "400607",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400610",
+              "name": "400610",
+              "primary_city_id": 1019572,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:400612",
+              "name": "400612",
+              "primary_city_id": 1045272,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "IN:421305",
+              "name": "421305",
+              "primary_city_id": 1019699,
+              "region_id": 1735,
+              "country": "IN"
+            }
+          ],
+          "places": [
+            {
+              "key": "100695693349996",
+              "name": "Mira Road",
+              "distance_unit": "mile",
+              "latitude": 19.27755,
+              "longitude": 72.86157,
+              "radius": 25,
+              "primary_city_id": 1019572,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "119123301447004",
+              "name": "Chembur",
+              "distance_unit": "mile",
+              "latitude": 18.9675102,
+              "longitude": 72.820343,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "1248058751977184",
+              "name": "Sion West",
+              "distance_unit": "mile",
+              "latitude": 19.049784625017,
+              "longitude": 72.864125799931,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "1656984457727249",
+              "name": "Dombivali",
+              "distance_unit": "mile",
+              "latitude": 19.06629,
+              "longitude": 72.87971,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "2238819579565347",
+              "name": "Goregaon West",
+              "distance_unit": "mile",
+              "latitude": 19.1554,
+              "longitude": 72.84352,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "324595157957488",
+              "name": "Lower Parel",
+              "distance_unit": "mile",
+              "latitude": 18.9927476,
+              "longitude": 72.8310679,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "357103494761743",
+              "name": "Prabhadevi",
+              "distance_unit": "mile",
+              "latitude": 19.218736,
+              "longitude": 72.833791,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            },
+            {
+              "key": "359822417813823",
+              "name": "Dahisar",
+              "distance_unit": "mile",
+              "latitude": 19.254432,
+              "longitude": 72.865645,
+              "radius": 25,
+              "primary_city_id": 1035921,
+              "region_id": 1735,
+              "country": "IN"
+            }
+          ],
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ],
+          "neighborhoods": [
+            {
+              "key": "1029115",
+              "country": "IN",
+              "name": "Kalwa",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "1035097",
+              "country": "IN",
+              "name": "Matunga East",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "1043615",
+              "country": "IN",
+              "name": "Sion",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2677292",
+              "country": "IN",
+              "name": "Kalyan West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797889",
+              "country": "IN",
+              "name": "Worli Sea Face",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797890",
+              "country": "IN",
+              "name": "Borivali West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797895",
+              "country": "IN",
+              "name": "Kandivali West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797901",
+              "country": "IN",
+              "name": "Matunga West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797903",
+              "country": "IN",
+              "name": "Ghatkopar West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797906",
+              "country": "IN",
+              "name": "Khar West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797913",
+              "country": "IN",
+              "name": "Andheri West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797915",
+              "country": "IN",
+              "name": "Dadar West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797917",
+              "country": "IN",
+              "name": "Bandra East",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797918",
+              "country": "IN",
+              "name": "Bandra West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797920",
+              "country": "IN",
+              "name": "Santacruz West",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797933",
+              "country": "IN",
+              "name": "Khar East",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797938",
+              "country": "IN",
+              "name": "Powai",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2797989",
+              "country": "IN",
+              "name": "Santacruz East",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2798001",
+              "country": "IN",
+              "name": "Ghatkopar East",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2800539",
+              "country": "IN",
+              "name": "Church Gate",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "key": "2804639",
+              "country": "IN",
+              "name": "Pune University",
+              "region": "Maharashtra",
+              "region_id": "1735"
+            }
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "Women IN 18-50 | Auto | 19 Nov | 4",
+      "campaign_key": "RS_Test_3",
+      "audience": "WIZ_IN_WOMEN_18_50",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "INITIATED_CHECKOUT",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-17T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "Women IN 18-50 | Auto | 19 Nov | 5",
+      "campaign_key": "RS_Test_3",
+      "audience": "WIZ_IN_WOMEN_18_50",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "INITIATED_CHECKOUT",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-17T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "Women IN 18-50 | Auto | 19 Nov | 6",
+      "campaign_key": "RS_Test_3",
+      "audience": "WIZ_IN_WOMEN_18_50",
+      "placements": [
+        "automatic"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "PURCHASE",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-11-13T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ]
+        },
+        "excluded_geo_locations": {
+          "countries": [
+            "PK",
+            "BD"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            },
+            {
+              "key": "486",
+              "name": "Bumthang District",
+              "country": "BT"
+            },
+            {
+              "key": "489",
+              "name": "Dagana District",
+              "country": "BT"
+            },
+            {
+              "key": "490",
+              "name": "Sarpang District",
+              "country": "BT"
+            },
+            {
+              "key": "491",
+              "name": "Haa District",
+              "country": "BT"
+            },
+            {
+              "key": "494",
+              "name": "Paro District",
+              "country": "BT"
+            },
+            {
+              "key": "496",
+              "name": "Punakha District",
+              "country": "BT"
+            },
+            {
+              "key": "499",
+              "name": "Zhemgang District",
+              "country": "BT"
+            },
+            {
+              "key": "500",
+              "name": "Trashigang District",
+              "country": "BT"
+            },
+            {
+              "key": "501",
+              "name": "Thimphu District",
+              "country": "BT"
+            },
+            {
+              "key": "502",
+              "name": "Trongsa District",
+              "country": "BT"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24
+        ],
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 0,
+            "geo": 0
+          }
+        },
+        "user_age_unknown": false
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
+    },
+    {
+      "key": "Women places 18-55 | FB+IG | 19 Nov",
+      "campaign_key": "RS_TEST_4",
+      "audience": "WIZ__WOMEN_18_55",
+      "placements": [
+        "facebook",
+        "instagram"
+      ],
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "optimization_event": "SUBMIT_APPLICATION",
+      "billing_event": "IMPRESSIONS",
+      "start_time": "2026-09-10T00:00:00+0530",
+      "targeting_extra": {
+        "geo_locations": {
+          "cities": [
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1017930",
+              "name": "Bengaluru",
+              "radius": 10,
+              "region": "Karnataka",
+              "region_id": "1738"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1020734",
+              "name": "Kolkata",
+              "radius": 25,
+              "region": "West Bengal",
+              "region_id": "1746"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1021534",
+              "name": "Chennai",
+              "radius": 25,
+              "region": "Tamil Nadu",
+              "region_id": "1744"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1026297",
+              "name": "Gurugram",
+              "radius": 25,
+              "region": "Haryana",
+              "region_id": "1730"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1027234",
+              "name": "Hyderabad",
+              "radius": 25,
+              "region": "Telangana",
+              "region_id": "4100"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1027344",
+              "name": "Indore",
+              "radius": 25,
+              "region": "Madhya Pradesh",
+              "region_id": "1753"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1027633",
+              "name": "Jaipur",
+              "radius": 25,
+              "region": "Rajasthan",
+              "region_id": "1743"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1035131",
+              "name": "Meerut City",
+              "radius": 25,
+              "region": "Uttar Pradesh",
+              "region_id": "1754"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1035921",
+              "name": "Mumbai",
+              "radius": 10,
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1039952",
+              "name": "Pune",
+              "radius": 10,
+              "region": "Maharashtra",
+              "region_id": "1735"
+            },
+            {
+              "country": "IN",
+              "distance_unit": "mile",
+              "key": "1040740",
+              "name": "Ranchi",
+              "radius": 25,
+              "region": "Jharkhand",
+              "region_id": "1756"
+            }
+          ],
+          "location_types": [
+            "frequently_in",
+            "home",
+            "recent"
+          ],
+          "medium_geo_areas": [
+            {
+              "key": "2727942",
+              "country": "IN",
+              "name": "New Delhi",
+              "region": "Delhi",
+              "region_id": "1728"
+            }
+          ],
+          "subcities": [
+            {
+              "key": "2801737",
+              "country": "IN",
+              "name": "Eranakulam",
+              "region": "Kerala",
+              "region_id": "1733"
+            }
+          ]
+        },
+        "facebook_positions": [
+          "feed",
+          "instream_video",
+          "story",
+          "facebook_reels"
+        ],
+        "instagram_positions": [
+          "stream",
+          "story",
+          "reels"
+        ],
+        "device_platforms": [
+          "mobile",
+          "desktop"
+        ],
+        "excluded_geo_locations": {
+          "countries": [
+            "NP",
+            "BT",
+            "PK",
+            "BD",
+            "LK"
+          ],
+          "regions": [
+            {
+              "key": "1630",
+              "name": "Hajdú-Bihar County",
+              "country": "HU"
+            },
+            {
+              "key": "1725",
+              "name": "Assam",
+              "country": "IN"
+            },
+            {
+              "key": "1736",
+              "name": "Manipur",
+              "country": "IN"
+            },
+            {
+              "key": "1737",
+              "name": "Meghalaya",
+              "country": "IN"
+            },
+            {
+              "key": "1747",
+              "name": "Sikkim",
+              "country": "IN"
+            },
+            {
+              "key": "1748",
+              "name": "Arunachal Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "1752",
+              "name": "Bihar",
+              "country": "IN"
+            },
+            {
+              "key": "1754",
+              "name": "Uttar Pradesh",
+              "country": "IN"
+            },
+            {
+              "key": "3062",
+              "name": "Bihor County",
+              "country": "RO"
+            }
+          ],
+          "location_types": [
+            "home",
+            "recent"
+          ]
+        },
+        "flexible_spec": [
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          },
+          {
+            "interests": [
+              {
+                "id": "664130153728886",
+                "name": "Skin care"
+              }
+            ]
+          }
+        ],
+        "locales": [
+          6,
+          24,
+          46
+        ],
+        "targeting_optimization": "expansion_all",
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_STANDARD",
+          "AN_STANDARD"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 0,
+          "individual_setting": {
+            "age": 0,
+            "gender": 1,
+            "geo": 0
+          }
+        }
+      },
+      "extra": {
+        "promoted_object": {
+          "pixel_id": "1721498525601686",
+          "smart_pse_enabled": false
+        },
+        "attribution_spec": [
+          {
+            "event_type": "CLICK_THROUGH",
+            "window_days": 7
+          },
+          {
+            "event_type": "VIEW_THROUGH",
+            "window_days": 1
+          },
+          {
+            "event_type": "ENGAGED_VIDEO_VIEW",
+            "window_days": 1
+          }
+        ],
+        "is_dynamic_creative": false
+      }
     }
   ]
 }

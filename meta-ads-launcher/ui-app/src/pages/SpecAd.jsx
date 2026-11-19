@@ -61,7 +61,7 @@ export default function SpecAdCard({ ad, i, a, all, o, upd, remove, toggleSet, o
             <div className="row"><button type="button" className="btn small primary" onClick={apply}>Apply changes</button><span className="mini">Meta's own creative JSON. Page and Instagram ids are set for you; Meta checks it before anything is created.</span></div>
           </div>
         )}
-        <AdvancedAd extra={ad.extra} onChange={(v) => upd(i, 'extra', v)} />
+        <AdvancedAd ad={ad} set={(p) => upd(i, p)} o={o} />
         {err && <Banner tone="err">{err}</Banner>}
       </div>
     </div>

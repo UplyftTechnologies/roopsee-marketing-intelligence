@@ -9,7 +9,11 @@ from .meta_api import Meta
 def payload(c: dict, acc: dict) -> dict:
     p = {"name": c["key"], "objective": c["objective"], "status": "PAUSED", "special_ad_categories": c.get("special_ad_categories", [])}
     if c["budget_strategy"] == "CBO":
-        p["daily_budget"] = minor(c["daily_budget"], acc)
+        if c.get("lifetime_budget"):  # one total for the whole campaign, which then needs an end
+            p["lifetime_budget"] = minor(c["lifetime_budget"], acc)
+            p["stop_time"] = c["stop_time"]
+        else:
+            p["daily_budget"] = minor(c["daily_budget"], acc)
         p["bid_strategy"] = c.get("bid_strategy", "LOWEST_COST_WITHOUT_CAP")
     else:
         p["is_adset_budget_sharing_enabled"] = False  # budgets live on the ad sets

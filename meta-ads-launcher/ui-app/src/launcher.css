@@ -234,3 +234,8 @@ fieldset.set.plain { border: 0; padding: 0; background: none; margin: 0; }
 .lib-thumb { width: 52px; height: 52px; border-radius: 8px; object-fit: cover; background: var(--surface-2); flex: none; }
 .lib-thumb.none { display: grid; place-items: center; font-size: 9px; color: var(--text-muted); text-align: center; padding: 3px; }
 .srcline { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12.5px; color: var(--text-secondary); background: var(--surface-2); padding: 8px 10px; border-radius: 8px; }
+
+/* manage live campaigns */
+.mset { border: 1px solid var(--border); border-left: 4px solid var(--lv-set); border-radius: 12px; padding: 10px 12px; margin-top: 10px; background: var(--surface-1); }
+.mset .mad { border-bottom: 0; padding: 6px 0 6px 10px; margin-left: 6px; border-left: 3px solid color-mix(in srgb, var(--lv-ad) 60%, var(--border)); }
+.modal.wide { width: min(1000px, 100%); }

@@ -57,6 +57,11 @@ function Account({ acc }) {
         <Field label="Currency"><input className="field" value={a.currency || ''} onChange={(e) => setA({ ...a, currency: e.target.value })} /></Field>
         <Field label="Smallest units per 1 currency unit" hint="100 for rupees and paise"><input className="field" type="number" min="1" value={a.currency_offset ?? 100} onChange={(e) => setA({ ...a, currency_offset: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
       </div>
+      <div className="fgrid">
+        <Field label="Highest daily budget allowed (₹)" hint="A safety limit. The builder refuses a campaign above it. Leave empty for no limit"><input className="field" type="number" min="0" value={a.guardrails?.max_daily_budget ?? ''} onChange={(e) => setA({ ...a, guardrails: { ...(a.guardrails || {}), max_daily_budget: e.target.value === '' ? '' : Number(e.target.value) } })} /></Field>
+        <Field label="Campaign name pattern" hint="Tokens: {goal} {date} {year} {month} {day}. Empty: Roopsee | {goal} | {date}"><input className="field" value={a.naming?.campaign || ''} onChange={(e) => setA({ ...a, naming: { ...(a.naming || {}), campaign: e.target.value } })} placeholder="Roopsee | {goal} | {date}" /></Field>
+        <Field label="Ad set name pattern" hint="Tokens: {audience} {placement} {goal} {date}. Empty: {audience} | {placement} | {date}"><input className="field" value={a.naming?.adset || ''} onChange={(e) => setA({ ...a, naming: { ...(a.naming || {}), adset: e.target.value } })} placeholder="{audience} | {placement} | {date}" /></Field>
+      </div>
       <Field label="Tracking tags added to every link" hint="Meta fills {{campaign.id}}, {{ad.id}} and {{adset.id}}. The dashboard uses these to match visits to campaigns."><textarea className="field" value={a.url_tags || ''} onChange={(e) => setA({ ...a, url_tags: e.target.value })} /></Field>
       <div className="row"><button type="button" className="btn primary" onClick={async () => { try { setRes(await api('/api/config/account', { method: 'PUT', body: { ...a, currency_offset: Number(a.currency_offset) > 0 ? Number(a.currency_offset) : 100 } })) } catch (e) { setRes({ errors: [e.message], warnings: [] }) } }}>Save</button></div>
       <Result r={res} />

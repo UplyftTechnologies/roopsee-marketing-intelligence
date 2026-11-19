@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { dt, dur, inr, num, useApi, useFilters } from '../api'
+import { dt, dur, inr, num, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import { STAGE, STAGE_TONE } from '../shared'
 import BulkExclude from '../components/BulkExclude'
 import { Journey } from '../components/profile'
 
-const FLAGS = [['product', 'Viewed a product'], ['cart', 'Added to cart'], ['checkout', 'Reached checkout'], ['pay', 'Started payment'], ['order', 'Ordered'], ['login', 'Logged in'], ['quiz', 'Finished the quiz'], ['search', 'Searched']]
-const NOT_FLAGS = FLAGS.filter(([k]) => ['cart', 'checkout', 'order', 'login', 'pay'].includes(k))
+const FLAGS = [['product', 'Viewed a product'], ['cart', 'Added to cart'], ['checkout', 'Reached checkout'], ['pay', 'Started payment'], ['order', 'Ordered'], ['login', 'Logged in'], ['quiz', 'Finished the quiz'], ['search', 'Searched'], ['address', 'Gave an address']]
+const NOT_FLAGS = FLAGS.filter(([k]) => ['cart', 'checkout', 'order', 'login', 'pay', 'address'].includes(k))
 const PRESETS = [
   ['all', 'All sessions', [], [], 'any', null],
   ['cart_abandoners', 'Cart abandoners', ['cart'], ['order'], 'any', 'cart_abandoners'],
@@ -15,7 +15,7 @@ const PRESETS = [
   ['ordered', 'Ordered', ['order'], [], 'any', 'ordered'],
 ]
 const STAGE_SHORT = ['Browsed', 'Product', 'Cart', 'Checkout', 'Payment', 'Ordered']
-const TEXT_SORTS = ['name', 'email', 'channel', 'city', 'device', 'campaign']
+const TEXT_SORTS = ['name', 'email', 'channel', 'city', 'device', 'campaign', 'pincode']
 const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x))
 
 /** Multi-select chip group: click to add / remove a flag. */
@@ -40,22 +40,26 @@ function OrderValue({ r }) {
 export default function Sessions() {
   const f = useFilters()
   const pre = f.prefill || {}
-  const [search, setSearch] = useState(pre.search || '')
-  const [channel, setChannel] = useState(pre.channel || 'All')
-  const [has, setHas] = useState([])
-  const [lacks, setLacks] = useState([])
-  const [match, setMatch] = useState('any')
-  const [only, setOnly] = useState('counted')
-  const [sort, setSort] = useState({ key: 'started_at', dir: 'desc' })
+  // filters are remembered while you open a session / person and come back; a drill-down from another tab starts fresh
+  const fresh = Boolean(pre.search || pre.channel)
+  const [search, setSearch] = usePersisted('sessions.search', pre.search || '', fresh)
+  const [channel, setChannel] = usePersisted('sessions.channel', pre.channel || 'All', fresh)
+  const [has, setHas] = usePersisted('sessions.has', [], fresh)
+  const [lacks, setLacks] = usePersisted('sessions.lacks', [], fresh)
+  const [match, setMatch] = usePersisted('sessions.match', 'any', fresh)
+  const [only, setOnly] = usePersisted('sessions.only', 'counted', fresh)
+  const [pincode, setPincode] = usePersisted('sessions.pincode', '', fresh)
+  const [sort, setSort] = usePersisted('sessions.sort', { key: 'started_at', dir: 'desc' }, fresh)
+  const [limit, setLimit] = usePersisted('sessions.limit', 50)
   const [offset, setOffset] = useState(0)
   const [sel, setSel] = useState(new Set())
-  const limit = 50
+  const pins = pincode.split(/[\s,]+/).filter((x) => /^\d{6}$/.test(x)).join(',')
   const counts = useApi('/sessions/counts')
   const s = useApi('/sessions', {
     search, channel: channel === 'All' ? undefined : channel, has: has.join(',') || undefined, lacks: lacks.join(',') || undefined, match,
-    only_excluded: only === 'excluded' || undefined, sort: sort.key, direction: sort.dir, limit, offset,
+    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, sort: sort.key, direction: sort.dir, limit, offset,
   })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, sort])
+  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, sort, limit])
   const activePreset = PRESETS.find(([, , h, l, m]) => same(h, has) && same(l, lacks) && (h.length < 2 || m === match))?.[0]
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const toggleAll = (ids, on) => setSel((p) => { const n = new Set(p); ids.forEach((i) => (on ? n.add(i) : n.delete(i))); return n })
@@ -82,7 +86,12 @@ export default function Sessions() {
           </div>
         )}
         <div style={{ marginTop: 6 }}><FlagPicker label="Did not" options={NOT_FLAGS} value={lacks} onChange={setLacks} hint="Exclude sessions that did these things" /></div>
-        {(has.length > 0 || lacks.length > 0) && <div style={{ marginTop: 8 }}><button type="button" className="btn small" onClick={() => { setHas([]); setLacks([]); setMatch('any') }}>Clear filters</button></div>}
+        <div className="chip-row" style={{ marginTop: 6 }}>
+          <span className="muted" style={{ fontSize: 12, minWidth: 96 }} title="The pincode the visitor typed or picked as their delivery location">Event pincode</span>
+          <input className="field" value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="e.g. 400001, 560001" aria-label="Pincode" style={{ width: 200 }} />
+          {pincode && pins === '' && <span className="muted" style={{ fontSize: 12 }}>enter 6-digit pincodes, separated by commas</span>}
+        </div>
+        {(has.length > 0 || lacks.length > 0 || pincode) && <div style={{ marginTop: 8 }}><button type="button" className="btn small" onClick={() => { setHas([]); setLacks([]); setMatch('any'); setPincode('') }}>Clear filters</button></div>}
       </Card>
       <Chips value={channel} onChange={setChannel} options={['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']} />
       <Loading state={s}>
@@ -90,7 +99,7 @@ export default function Sessions() {
           const chosen = rows.filter((r) => sel.has(r.session_id))
           return (
             <Card title={`${num(total)} sessions`} sub="click a row for the full session · click a column title to sort · tick rows to exclude them in bulk"
-              right={<ExportBtn name="sessions" rows={rows} fields={[['Started', 'started_at'], ['Name', 'name'], ['Email', 'email'], ['Phone', 'phone10'], ['Journey', 'key_events'], ['Order value', 'order_value'], ['Channel', 'channel'], ['Campaign', 'campaign'], ['City', 'city'], ['Device', 'device'], ['Events', 'events'], ['Seconds', 'duration_s'], ['IP', 'ip'], ['Session id', 'session_id']]} />}>
+              right={<ExportBtn name="sessions" rows={rows} fields={[['Started', 'started_at'], ['Name', 'name'], ['Email', 'email'], ['Phone', 'phone10'], ['Journey', 'key_events'], ['Order value', 'order_value'], ['Channel', 'channel'], ['Campaign', 'campaign'], ['City', 'city'], ['Pincode', 'pincode'], ['Device', 'device'], ['Events', 'events'], ['Seconds', 'duration_s'], ['IP', 'ip'], ['Session id', 'session_id']]} />}>
               <BulkExclude rows={chosen} noun="sessions" onClear={() => setSel(new Set())} fields={[
                 { label: 'browser', kind: 'visitor_id', get: (r) => r.visitor_key }, { label: 'user account', kind: 'user_id', get: (r) => r.user_id },
                 { label: 'phone number', kind: 'phone', get: (r) => r.phone10 }, { label: 'IP address', kind: 'ip', get: (r) => r.ip }, { label: 'session', kind: 'session_id', get: (r) => r.session_id },
@@ -106,9 +115,10 @@ export default function Sessions() {
                   { label: 'Order value', num: true, sortBy: 'order_value', render: (r) => <OrderValue r={r} /> },
                   { label: 'Channel', cls: 'nw', sortBy: 'channel', render: (r) => <span title={`${r.source} / ${r.medium} / ${r.campaign}`}>{r.channel}</span> },
                   { label: 'Place · device', cls: 'nw', sortBy: 'city', render: (r) => `${r.city || r.region || '–'} · ${r.is_app ? 'App' : r.device || '–'}` },
+                  { label: 'Pincode', cls: 'mono nw', sortBy: 'pincode', render: (r) => r.pincode || <span className="muted">–</span> },
                   { label: 'Events', num: true, sortBy: 'events', render: (r) => r.events }, { label: 'Time', num: true, sortBy: 'duration_s', render: (r) => dur(r.duration_s) },
                 ]} rows={rows} empty="No sessions match these filters. Try clearing a filter or widening the date range." />
-              <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} />
+              <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
             </Card>
           )
         }}

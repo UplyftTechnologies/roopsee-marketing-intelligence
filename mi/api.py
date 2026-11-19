@@ -306,15 +306,15 @@ def retention(date_from: str | None = None, date_to: str | None = None, include_
 
 # ------------------------------------------------------------------ sessions / users / events
 # what a session "did" (used by the multi-select filters and the abandoner presets)
-FLAG_ORDER = "(s.f_order OR coalesce(o.n_orders, 0) > 0)"
+FLAG_ORDER = "(s.f_order OR coalesce(o.n_placed, 0) > 0)"  # a real order: payment-cancelled / pending ones do not count
 FLAG_LOGIN = "(s.f_login OR s.user_id IS NOT NULL)"
 SESSION_FLAGS = {"product": "s.f_product", "cart": "s.f_cart", "checkout": "s.f_checkout", "pay": "s.f_pay", "order": FLAG_ORDER,
-                 "login": FLAG_LOGIN, "quiz": "s.f_quiz_done", "search": "s.f_search"}
+                 "login": FLAG_LOGIN, "quiz": "s.f_quiz_done", "search": "s.f_search", "address": "s.f_address"}
 EMAIL = "coalesce(nullif(lower(u.email), ''), o.order_email)"
 SESSION_SORTS = {"started_at": "s.started_at", "events": "s.events", "duration_s": "s.duration_s", "order_value": "coalesce(o.order_value, 0)",
                  "channel": "s.channel", "campaign": "s.campaign", "city": "nullif(lower(s.city), '')", "name": "nullif(lower(u.name), '')", "email": EMAIL,
-                 "stage": "s.stage", "device": "s.device"}
-ORD_CTE = """WITH o AS (SELECT session_id, count(*) FILTER (WHERE NOT is_test) AS n_orders,
+                 "stage": "s.stage", "device": "s.device", "pincode": "s.pincode"}
+ORD_CTE = """WITH o AS (SELECT session_id, count(*) FILTER (WHERE NOT is_test) AS n_orders, count(*) FILTER (WHERE is_valid) AS n_placed,
     sum(total) FILTER (WHERE is_valid AND NOT is_test) AS order_value, sum(total) FILTER (WHERE NOT is_valid AND NOT is_test) AS other_value,
     string_agg(DISTINCT status, ', ') FILTER (WHERE NOT is_test) AS statuses, any_value(email_l) FILTER (WHERE email_l IS NOT NULL) AS order_email
     FROM orders_clean WHERE session_id IS NOT NULL GROUP BY 1)"""
@@ -325,7 +325,7 @@ def _csv(v: str | None) -> list[str]:
     return [x.strip() for x in (v or "").split(",") if x.strip()]
 
 
-def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any"):
+def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any", pincode=None):
     w, a = sess_where(d_from, d_to, include_excluded)
     if only_excluded:
         w += " AND s.is_excluded"
@@ -341,6 +341,10 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
     for k in _csv(lacks):
         if k in SESSION_FLAGS:
             w += f" AND NOT {SESSION_FLAGS[k]}"
+    pins = _csv(pincode)
+    if pins:
+        w += " AND s.pincode IN (" + ",".join("?" * len(pins)) + ")"
+        a += pins
     if search:
         like = f"%{search.lower()}%"
         w += f""" AND (lower(s.session_id) LIKE ? OR lower(s.visitor_key) LIKE ? OR lower(coalesce(s.user_id,'')) LIKE ? OR coalesce(s.ip,'') LIKE ?
@@ -353,16 +357,16 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
 @app.get("/api/sessions")
 def sessions(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
              min_stage: int = 0, channel: str | None = None, only_excluded: bool = False, has: str | None = None, lacks: str | None = None,
-             match: str = "any", sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
-    """has / lacks = comma lists of: product, cart, checkout, pay, order, login, quiz, search. match=any|all applies to `has`."""
-    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match)
+             match: str = "any", pincode: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
+    """has / lacks = comma lists of: product, cart, checkout, pay, order, login, quiz, search, address. pincode = comma list of 6-digit pincodes given in the session. match=any|all applies to `has`."""
+    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode)
     order = SESSION_SORTS.get(sort, SESSION_SORTS["started_at"])
     d = "ASC" if direction.lower() == "asc" else "DESC"
     total = one(f"{ORD_CTE} SELECT count(*) n {SESS_FROM} WHERE {w}", a)["n"]
     rows = q(f"""{ORD_CTE} SELECT s.session_id, s.started_at, s.duration_s, s.events, s.pageviews, s.channel, s.source, s.medium, s.campaign, s.landing_path,
-        s.city, s.region, s.country, s.device, s.platform, s.is_app, s.user_id, u.name, {EMAIL} AS email, s.phone10, s.ip, s.visitor_key, s.key_events, s.stage,
+        s.city, s.region, s.country, s.device, s.platform, s.is_app, s.user_id, u.name, {EMAIL} AS email, s.phone10, s.pincode, s.ip, s.visitor_key, s.key_events, s.stage,
         s.is_excluded, s.excl_reason, coalesce(o.n_orders, 0) AS order_count, o.order_value, o.other_value AS order_other_value, o.statuses AS order_statuses
-        {SESS_FROM} WHERE {w} ORDER BY {order} {d} NULLS LAST, s.started_at DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 500)), max(0, offset)])
+        {SESS_FROM} WHERE {w} ORDER BY {order} {d} NULLS LAST, s.started_at DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     return {"total": total, "rows": rows}
 
 
@@ -472,7 +476,7 @@ def users(date_from: str | None = None, date_to: str | None = None, include_excl
     total = one(f"SELECT count(*) n FROM users_360 WHERE {w}", a)["n"]
     rows = q(f"""SELECT person_key, user_id, name, phone10, email, is_registered, first_seen, last_seen, sessions, first_channel, first_campaign,
         city, state, device, uses_app, cart_sessions, checkout_sessions, orders, revenue, gender, skin_type, age_bucket, segment, is_excluded
-        FROM users_360 WHERE {w} ORDER BY {order} {d} NULLS LAST, last_seen DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 500)), max(0, offset)])
+        FROM users_360 WHERE {w} ORDER BY {order} {d} NULLS LAST, last_seen DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     segs = q(f"SELECT segment, count(*) n FROM users_360 WHERE {'TRUE' if include_excluded else 'NOT is_excluded'} GROUP BY 1 ORDER BY 2 DESC")
     return {"total": total, "rows": rows, "segments": segs}
 
@@ -1005,7 +1009,7 @@ def report(dimension: str = "channel", date_from: str | None = None, date_to: st
     sq, sa = "", []
     if search:
         sq, sa = f" AND ({expr}) ILIKE ?", [f"%{search}%"]
-    limit = max(1, min(int(limit), 200))
+    limit = max(1, min(int(limit), 5000))
     ms = max(1, int(min_sessions))
     rows = q(f"SELECT {expr} AS dim, {REPORT_METRICS} {base}{sq} GROUP BY 1 HAVING count(*) >= ? ORDER BY {order_by} {direction} NULLS LAST, dim LIMIT ? OFFSET ?", [*a, *sa, ms, limit, max(0, offset)])
     groups = one(f"SELECT count(*) AS n FROM (SELECT {expr} AS g {base}{sq} GROUP BY 1 HAVING count(*) >= ?)", [*a, *sa, ms])["n"]
@@ -1231,7 +1235,7 @@ def orders_list(date_from: str | None = None, date_to: str | None = None, includ
         o.total, o.products_total, o.coupon_code, o.coupon_discount, o.delivery_fee, o.wallet_amount_used, o.payment_method, o.payment_status, o.status,
         o.payment_failed_reason, o.nth_order, o.session_id, o.channel, o.campaign, o.device, o.rider_name, o.delivered_at, o.user_id,
         o.is_valid, o.is_test, o.is_staff_order, o.is_excluded
-        FROM orders_clean o WHERE {w} ORDER BY {order} {d} NULLS LAST, o.ts DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 500)), max(0, offset)])
+        FROM orders_clean o WHERE {w} ORDER BY {order} {d} NULLS LAST, o.ts DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     opts = {"statuses": [r["status"] for r in q("SELECT status, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC")],
             "payment_methods": [r["m"] for r in q("SELECT coalesce(payment_method, '(not recorded)') AS m, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC")],
             "coupons": [r["c"] for r in q("SELECT coalesce(split_part(coupon_code, ',', 1), '(no coupon)') AS c, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC LIMIT 30")]}

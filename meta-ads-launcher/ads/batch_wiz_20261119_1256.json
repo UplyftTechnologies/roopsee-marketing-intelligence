@@ -1,0 +1,79 @@
+{
+  "batch_id": "ROOPSEE_WIZ_20261119_1256",
+  "ads": [
+    {
+      "ad_key": "RS_COPY_012",
+      "adset_key": "Women places 18-55 | FB+IG | 19 Nov",
+      "creative_spec": {
+        "object_story_spec": {
+          "page_id": "1175723048967774",
+          "instagram_user_id": "17841433192662267",
+          "video_data": {
+            "video_id": "2254838718694515",
+            "call_to_action": {
+              "type": "SHOP_NOW",
+              "value": {
+                "link_caption": "https://roopsee.com",
+                "link": "https://roopsee.com/"
+              }
+            },
+            "image_hash": "688b6038157d498a2aa9a78d8d022b0c"
+          }
+        },
+        "asset_feed_spec": {
+          "bodies": [
+            {
+              "text": "Still checking Instagram for reviews, Reddit for opinions and multiple shopping apps for prices-only to wonder, “Will this actually suit my skin?”"
+            },
+            {
+              "text": "Take Roopsee’s quick Skin Match quiz. See your personalised product scores, compare prices, set price alerts and choose where to buy."
+            },
+            {
+              "text": "Start your Skin Match now."
+            },
+            {
+              "text": "Roopsee,  Your ultimate Guided Skncare Shop"
+            },
+            {
+              "text": "Hey, I love shopping from roopsee. Are you still not the Smart Shopper"
+            }
+          ],
+          "descriptions": [
+            {
+              "text": "Match first. Compare prices. Choose where to buy."
+            }
+          ],
+          "titles": [
+            {
+              "text": "Smart Skincare starts here."
+            },
+            {
+              "text": "Know What Suits Your Skin"
+            },
+            {
+              "text": "India's First Skin-Smart Shopping"
+            },
+            {
+              "text": "Match First. Compare Prices. Then Shop."
+            },
+            {
+              "text": "All in One Skincare Shop- Buy from Roopsee. It's different"
+            }
+          ],
+          "optimization_type": "DEGREES_OF_FREEDOM"
+        },
+        "degrees_of_freedom_spec": {
+          "creative_features_spec": {
+            "product_browsing": {
+              "enroll_status": "OPT_OUT"
+            },
+            "site_extensions": {
+              "enroll_status": "OPT_OUT"
+            }
+          }
+        }
+      },
+      "status": "READY"
+    }
+  ]
+}

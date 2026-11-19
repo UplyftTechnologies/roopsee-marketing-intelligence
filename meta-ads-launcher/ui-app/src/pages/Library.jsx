@@ -120,6 +120,7 @@ export default function Library({ ctx }) {
             <span className="grow"><b>{c.name}</b><br /><span className="muted">{nice(c.objective)} · {c.adsets} ad set(s) · {c.ads} ad(s){c.daily_budget ? ` · ${inr(c.daily_budget / 100)}/day` : ''} · saved {ago(c.synced_at)}</span></span>
             <Badge>{nice(c.status)}</Badge>
             <button type="button" className="btn small primary" onClick={() => ctx.go('new', { dup: c.id })}>Duplicate</button>
+            <button type="button" className="btn small" onClick={() => ctx.go('manage', { campaign: c.id })} title="Edit its ad sets, add or change creatives, pause or turn on">Manage</button>
             <button type="button" className="btn small" disabled={busy === c.id} onClick={() => refresh(c.id)} title="Read this one campaign again from Meta (3 calls)">{busy === c.id ? 'Refreshing…' : 'Refresh'}</button>
             <button type="button" className="btn small danger" onClick={() => drop(c.id)}>Remove</button>
           </div>

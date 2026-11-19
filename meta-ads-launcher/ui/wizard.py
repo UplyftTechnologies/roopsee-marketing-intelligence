@@ -18,6 +18,7 @@ from src.common import (BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, GOAL
 from src import library_store as store
 from src.ensure import no_lookups
 from src import forget
+from src.special import scrub_targeting
 from src.common import batch_files, jload
 from src.spec_clean import describe
 from src.meta_api import Meta, MetaError
@@ -90,7 +91,9 @@ def options():
             "saved_audiences": [{"id": k, "label": k} for k in audiences_cfg() if not k.startswith("WIZ_")],
             "recipes": RECIPES, "results": [{"value": k, "label": v} for k, v in RESULT_LABELS.items()], "bids": [{"value": k, "label": v} for k, v in BID_LABELS.items() if k],
             "billings": [{"value": k, "label": v} for k, v in BILLING_LABELS.items()], "destination_types": [{"value": k, "label": v} for k, v in DEST_LABELS.items()],
-            "ctas": [{"value": c, "label": CTA_LABELS.get(c, c)} for c in sorted(CTAS)], "destinations": _dests(), "categories": cats}
+            "ctas": [{"value": c, "label": CTA_LABELS.get(c, c)} for c in sorted(CTAS)], "destinations": _dests(), "categories": cats,
+            "page_id": s.page_id, "instagram_id": s.instagram_id, "currency_offset": int(account_cfg().get("currency_offset", 100)),
+            "guardrails": account_cfg().get("guardrails") or {}}
 
 
 # the ad account's own pixel, used when .env does not name one
@@ -165,8 +168,198 @@ def _stale(s: Settings, camp_name: str) -> bool:
     return val
 
 
+NAME_TOKENS_HELP = "{goal} {date} {audience} {placement} {year} {month} {day}"
+
+
+def _name_from(pattern: str, default: str, **tok) -> str:
+    """A name from the pattern saved on Links & tracking (or the default), with its {tokens} filled in. A pattern that fails falls back to the default."""
+    if not (pattern or "").strip():
+        return default
+    try:
+        out = pattern.format(**tok).strip()
+    except (KeyError, IndexError, ValueError):
+        return default
+    return out or default
+
+
+def _ad_opts(ad: dict) -> dict:
+    """Optional per-ad settings: which Instagram account, labels, and link tracking tags."""
+    out = {}
+    if (ad.get("instagram_id") or "").strip():
+        out["instagram_id"] = str(ad["instagram_id"]).strip()
+    labels = [x.strip() for x in (ad.get("labels") if isinstance(ad.get("labels"), list) else str(ad.get("labels") or "").split(",")) if str(x).strip()]
+    if labels:
+        out["labels"] = labels
+    if (ad.get("url_tags") or "").strip():
+        out["url_tags"] = str(ad["url_tags"]).strip()
+    return out
+
+
+def adset_rules(sets_out: list, per_set: bool, errs: list, warns: list) -> None:
+    """Settings that only work in certain combinations. Meta's own answer is hard to read, so they are explained here first."""
+    for i, x in enumerate(sets_out, 1):
+        ex, label = x.get("extra") or {}, f"Ad set {i}"
+        if ex.get("adset_schedule") and not x.get("lifetime_budget"):
+            errs.append(f"{label}: running only at certain times of day needs a lifetime budget for this ad set (and an end date). Use 'A separate budget for each ad set' and fill in 'Lifetime budget instead'.")
+        if ex.get("frequency_control_specs") and x.get("optimization_goal") != "REACH":
+            errs.append(f"{label}: a limit on how often one person sees the ad only works when the result is 'Reach'. Change the result under Bidding & schedule, or remove the limit.")
+        if (ex.get("daily_min_spend_target") or ex.get("daily_spend_cap")) and per_set:
+            errs.append(f"{label}: the smallest and highest daily spend can only be set when the whole campaign shares one budget.")
+        if ex.get("daily_min_spend_target") and ex.get("daily_spend_cap") and int(ex["daily_min_spend_target"]) > int(ex["daily_spend_cap"]):
+            errs.append(f"{label}: the smallest daily spend is higher than the highest daily spend.")
+
+
+def shared_budget_rule(camp: dict, sets_out: list, errs: list) -> None:
+    """Meta: with one shared campaign budget and plain 'Lowest cost' bidding, every ad set must use the same result."""
+    if camp.get("budget_strategy") != "CBO" or len(sets_out) < 2:
+        return
+    if (camp.get("bid_strategy") or "LOWEST_COST_WITHOUT_CAP") != "LOWEST_COST_WITHOUT_CAP":
+        return
+    goals = {x.get("optimization_goal") for x in sets_out}
+    if len(goals) > 1:
+        errs.append("With one budget for the whole campaign and 'Lowest cost' bidding, every ad set must use the same result (now: " + ", ".join(sorted(g for g in goals if g)) +
+                    "). Give them the same result under Bidding & schedule, or choose 'A separate budget for each ad set'.")
+
+
+def guardrail_check(account: dict, total_daily: float, errs: list, warns: list) -> None:
+    g = account.get("guardrails") or {}
+    try:
+        top = float(g.get("max_daily_budget") or 0)
+    except (TypeError, ValueError):
+        top = 0
+    if top and total_daily > top:
+        errs.append(f"The daily budget {total_daily:,.0f} is above your safety limit of {top:,.0f} per day. Lower it, or raise the limit on the Links & tracking page if this is on purpose.")
+
+
+def _build_ads(ads_in, s: Settings, sets_out: list, uid_index: dict, errs: list, warns: list, fixes: list):
+    """Turns the ads from the builder into the ads to create, one per chosen ad set. Used for a new campaign and for adding ads to ad sets that already exist."""
+    # an ad shown in several ad sets becomes one ad per ad set (the first keeps the plain ID, the others get _S2, _S3 ...)
+    ads, used = [], set()
+    per_set_count = [0] * len(sets_out)
+    # Ad IDs are internal and never reused, but an image can be used any number of times: a local image lends its file name as the
+    # ad's ID only while that ID is still free; otherwise the ad gets the next free ID for the same theme and keeps pointing at the image
+    raw_ads = [dict(x) for x in (ads_in or [])]
+    local = lambda x: bool((x.get("image") or "").strip()) and x.get("creative_spec") is None and not x.get("kind")
+    prior = taken_ad_keys()
+    claimed: set = set()
+    themes: dict = {}
+    for i, ad in enumerate(raw_ads, 1):
+        if local(ad):
+            k = Path(ad["image"].strip()).stem
+            m = re.fullmatch(r"RS_([A-Z0-9]+)_\d{3}", k)
+            themes[id(ad)] = m.group(1) if m else "IMAGE"
+            free = bool(m) and k not in prior and k not in claimed and not any(x.startswith(k + "_S") for x in prior)
+        else:
+            k = (ad.get("ad_key") or "").strip()
+            # a stored ID (from a draft, template or copy) that an earlier campaign already used is replaced by the next free one: nobody types IDs any more
+            free = bool(re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k)) and k not in claimed and k not in prior and not any(x.startswith(k + "_S") for x in prior)
+        ad["ad_key"] = k if free else ""
+        if free:
+            claimed.add(k)
+    for ad in raw_ads:
+        if not ad["ad_key"]:
+            theme = themes.get(id(ad)) or ad.get("kind") or ("COPY" if ad.get("creative_spec") is not None else "IMAGE")
+            ad["ad_key"] = next_ad_key(theme, claimed)
+            claimed.add(ad["ad_key"])
+    for i, ad in enumerate(raw_ads, 1):
+        tag = f"Ad {i}"
+        ad_patch: dict = {}
+        if ad.get("kind") in FORMAT_KINDS:  # built here from scratch: video, carousel, existing post, Advantage+, catalog
+            ad = {**ad, "_tag": tag}
+            cspec, ad_patch, e1, w1 = compile_ad(ad)
+            warns += w1
+            if not re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", (ad.get("ad_key") or "").strip()):
+                e1.append(f"{tag}: this ad needs an Ad ID like RS_SKINCARE_001 (letters and digits, then a 3-digit number).")
+            if e1:
+                errs += e1
+                continue
+            ad = {**ad, "creative_spec": cspec}
+        if ad.get("creative_spec") is not None:  # a whole creative (carousel, video, catalog, dynamic, existing post...) copied from Meta or imported
+            skey = (ad.get("ad_key") or "").strip()
+            cs = ad["creative_spec"]
+            if not re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", skey):
+                errs.append(f"{tag}: this ad needs an Ad ID like RS_SKINCARE_001 (letters and digits, then a 3-digit number).")
+            if not isinstance(cs, dict) or not (cs.get("object_story_spec") or cs.get("asset_feed_spec") or cs.get("object_story_id")):
+                errs.append(f"{tag}: the creative needs object_story_spec, asset_feed_spec or object_story_id.")
+                cs = {}
+            else:
+                from src.spec_clean import clean_creative
+                cs, notes = clean_creative(cs, s.page_id, s.instagram_id)
+                warns += [f"{tag}: {n}" for n in notes if n.startswith("this ad uses")]
+                fixes += [f"{tag}: {n[6:].strip()}" for n in notes if n.startswith("fixed:")]
+            targets = sorted({uid_index[u] for u in (ad.get("sets") or list(uid_index)) if u in uid_index})
+            if not targets:
+                errs.append(f"{tag}: choose at least one ad set for it to appear in.")
+            for pos, si in enumerate(targets):
+                k = skey if pos == 0 else f"{skey}_S{si + 1}"
+                if k in used:
+                    errs.append(f"{tag}: the same ad ID is used twice.")
+                used.add(k)
+                entry = {"ad_key": k, "adset_key": sets_out[si]["key"], "creative_spec": cs, "status": "READY", **_ad_opts(ad)}
+                if (ad.get("name") or "").strip():
+                    entry["name"] = ad["name"].strip() if pos == 0 else f"{ad['name'].strip()} - ad set {si + 1}"
+                if isinstance(ad.get("extra"), dict) and ad["extra"]:
+                    entry["extra"] = clean_extra(ad["extra"])[0]
+                ads.append(entry)
+                per_set_count[si] += 1
+                if ad_patch:
+                    sets_out[si]["extra"] = deep_merge(sets_out[si].get("extra") or {}, ad_patch)
+            continue
+        img, h = (ad.get("image") or "").strip(), (ad.get("image_hash") or "").strip()
+        key = (ad.get("ad_key") or "").strip()
+        if not img and not h:
+            errs.append(f"{tag}: add an image.")
+        if img and not (ROOT / img).is_file():
+            errs.append(f"{tag}: the image file was not found. Upload it again.")
+        if h and not re.fullmatch(r"[0-9a-f]{32}", h):
+            errs.append(f"{tag}: that image hash does not look right (it should be 32 letters and digits).")
+        if not key or not re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", key):
+            errs.append(f"{tag}: this ad needs an Ad ID like RS_SKINCARE_001 (letters and digits, then a 3-digit number). Go back to the Ads step and fill in the Ad ID.")
+        if not (ad.get("primary_text") or "").strip():
+            errs.append(f"{tag}: write the main text.")
+        if not (ad.get("headline") or "").strip():
+            errs.append(f"{tag}: write a headline.")
+        url = (ad.get("destination") or "").strip()
+        if not url.startswith("https://") or "." not in url:
+            errs.append(f"{tag}: the web page link must start with https://")
+        if ad.get("cta") not in CTAS:
+            errs.append(f"{tag}: choose a button.")
+        if len(ad.get("primary_text") or "") > 125:
+            warns.append(f"{tag}: the main text is long; Meta shows about 125 characters before 'See more'.")
+        if len(ad.get("headline") or "") > 40:
+            warns.append(f"{tag}: the headline is long and may be cut off.")
+        targets = sorted({uid_index[u] for u in (ad.get("sets") or list(uid_index)) if u in uid_index})
+        if not targets:
+            errs.append(f"{tag}: choose at least one ad set for it to appear in.")
+        for pos, si in enumerate(targets):
+            k = key if pos == 0 else f"{key}_S{si + 1}"
+            if k in used:
+                errs.append(f"{tag}: the same ad ID is used twice.")
+            used.add(k)
+            entry = {**_ad_opts(ad), "ad_key": k, "adset_key": sets_out[si]["key"], "primary_text": (ad.get("primary_text") or "").strip(), "headline": (ad.get("headline") or "").strip(),
+                     "cta": ad.get("cta"), "destination": url, "status": "READY"}
+            if (ad.get("name") or "").strip():
+                entry["name"] = ad["name"].strip() if pos == 0 else f"{ad['name'].strip()} - ad set {si + 1}"
+            if ad.get("description"):
+                entry["description"] = ad["description"].strip()
+            for xk in ("extra", "link_extra"):
+                if isinstance(ad.get(xk), dict) and ad[xk]:
+                    cl, dr = clean_extra(ad[xk])
+                    if dr:
+                        warns.append(f"{tag}: these extra settings are not allowed and were dropped: {', '.join(dr)}.")
+                    entry[xk] = cl
+            if h:
+                entry["image_hash"] = h
+            else:
+                entry["image"] = img
+            ads.append(entry)
+            per_set_count[si] += 1
+    return ads, per_set_count
+
+
+
 def build_plan(a: dict, s: Settings) -> dict:
-    errs, warns = [], []
+    errs, warns, fixes = [], [], []  # fixes: things the launcher corrected for you (settings Meta no longer accepts, repeated values ...)
     goal = GOALS.get(a.get("goal"))
     if not goal:
         errs.append("Choose what you want the campaign to do.")
@@ -178,7 +371,20 @@ def build_plan(a: dict, s: Settings) -> dict:
         errs.append("Please use 10 ad sets or fewer in one campaign.")
 
     daily = 0.0
-    if not per_set:
+    life_c = None  # one total budget for the whole campaign (instead of a daily one)
+    start, end = a.get("start_date") or None, a.get("end_date") or None
+    lc_raw = (a.get("campaign") or {}).get("lifetime_budget")
+    if not per_set and lc_raw not in (None, "", 0, "0"):
+        try:
+            life_c = float(lc_raw)
+            if life_c <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            errs.append("Enter the total campaign budget in rupees, for example 15000.")
+            life_c = None
+        if life_c and not end:
+            errs.append("A total (lifetime) campaign budget needs an end date. Set one under Campaign.")
+    elif not per_set:
         try:
             daily = float(a.get("daily_budget"))
             if daily <= 0:
@@ -187,13 +393,13 @@ def build_plan(a: dict, s: Settings) -> dict:
             errs.append("Enter a daily budget in rupees, for example 500.")
         if 0 < daily < 100:
             warns.append("Very small daily budgets can be rejected by Meta. If you see an error about the budget, try a higher amount.")
-    start, end = a.get("start_date") or None, a.get("end_date") or None
     if start and end and end < start:
         errs.append("The end date is before the start date.")
 
     now = datetime.now()
     stamp = now.strftime("%d %b")
-    base = f"Roopsee | {goal['short']} | {stamp}"
+    naming = account_cfg().get("naming") or {}
+    base = _name_from(naming.get("campaign"), f"Roopsee | {goal['short']} | {stamp}", goal=goal["short"], date=stamp, year=now.strftime("%Y"), month=now.strftime("%b"), day=now.strftime("%d"), audience="", placement="")
     existing = campaigns_cfg()
     release: set = set()
     name, n = base, 1
@@ -221,7 +427,8 @@ def build_plan(a: dict, s: Settings) -> dict:
         if not plc:
             errs.append(f"{label}: choose where the ads should appear.")
             plc = PLACEMENTS["instagram"]
-        nm0 = f"{aud['short']} | {plc['short']} | {stamp}" + (f" | {n}" if n > 1 else "")
+        nm0 = _name_from(naming.get("adset"), f"{aud['short']} | {plc['short']} | {stamp}", goal=goal["short"], date=stamp, year=now.strftime("%Y"), month=now.strftime("%b"),
+                         day=now.strftime("%d"), audience=aud["short"], placement=plc["short"]) + (f" | {n}" if n > 1 else "")
         nm, m = nm0, 1
         own_set = (sp.get("name") or "").strip()
         if own_set:  # the user chose this ad set's name
@@ -297,9 +504,9 @@ def build_plan(a: dict, s: Settings) -> dict:
             val = sp.get(key)
             if val in (None, "", {}):
                 continue
-            if key == "targeting_extra" and isinstance(val, dict) and "subscriber_universe" in val:  # a WhatsApp / Messenger customer audience: needs messaging permission, Meta answers "(#3) capability"
-                val = {k: v for k, v in val.items() if k != "subscriber_universe"}
-                warns.append(f"{label}: the WhatsApp customer audience (subscriber_universe) was left out, because the app has no messaging permission and Meta rejects the ad set with '(#3) Application does not have the capability'.")
+            if key == "targeting_extra" and isinstance(val, dict):  # old drafts, templates and copies may still carry settings Meta now rejects
+                val, gone = scrub_targeting(val)
+                fixes += [f"{label}: left out {what} ({why})" for _k, what, why in gone]
                 if not val:
                     continue
             if not isinstance(val, dict):
@@ -315,126 +522,7 @@ def build_plan(a: dict, s: Settings) -> dict:
     if not sets_out:
         errs.append("Add at least one ad set.")
 
-    # an ad shown in several ad sets becomes one ad per ad set (the first keeps the plain ID, the others get _S2, _S3 ...)
-    ads, used = [], set()
-    per_set_count = [0] * len(sets_out)
-    # Ad IDs are internal and never reused, but an image can be used any number of times: a local image lends its file name as the
-    # ad's ID only while that ID is still free; otherwise the ad gets the next free ID for the same theme and keeps pointing at the image
-    raw_ads = [dict(x) for x in (a.get("ads") or [])]
-    local = lambda x: bool((x.get("image") or "").strip()) and x.get("creative_spec") is None and not x.get("kind")
-    prior = taken_ad_keys()
-    claimed: set = set()
-    themes: dict = {}
-    for i, ad in enumerate(raw_ads, 1):
-        if local(ad):
-            k = Path(ad["image"].strip()).stem
-            m = re.fullmatch(r"RS_([A-Z0-9]+)_\d{3}", k)
-            themes[id(ad)] = m.group(1) if m else "IMAGE"
-            free = bool(m) and k not in prior and k not in claimed and not any(x.startswith(k + "_S") for x in prior)
-        else:
-            k = (ad.get("ad_key") or "").strip()
-            # a stored ID (from a draft, template or copy) that an earlier campaign already used is replaced by the next free one: nobody types IDs any more
-            free = bool(re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k)) and k not in claimed and k not in prior and not any(x.startswith(k + "_S") for x in prior)
-        ad["ad_key"] = k if free else ""
-        if free:
-            claimed.add(k)
-    for ad in raw_ads:
-        if not ad["ad_key"]:
-            theme = themes.get(id(ad)) or ad.get("kind") or ("COPY" if ad.get("creative_spec") is not None else "IMAGE")
-            ad["ad_key"] = next_ad_key(theme, claimed)
-            claimed.add(ad["ad_key"])
-    for i, ad in enumerate(raw_ads, 1):
-        tag = f"Ad {i}"
-        ad_patch: dict = {}
-        if ad.get("kind") in FORMAT_KINDS:  # built here from scratch: video, carousel, existing post, Advantage+, catalog
-            ad = {**ad, "_tag": tag}
-            cspec, ad_patch, e1, w1 = compile_ad(ad)
-            warns += w1
-            if not re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", (ad.get("ad_key") or "").strip()):
-                e1.append(f"{tag}: this ad needs an Ad ID like RS_SKINCARE_001 (letters and digits, then a 3-digit number).")
-            if e1:
-                errs += e1
-                continue
-            ad = {**ad, "creative_spec": cspec}
-        if ad.get("creative_spec") is not None:  # a whole creative (carousel, video, catalog, dynamic, existing post...) copied from Meta or imported
-            skey = (ad.get("ad_key") or "").strip()
-            cs = ad["creative_spec"]
-            if not re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", skey):
-                errs.append(f"{tag}: this ad needs an Ad ID like RS_SKINCARE_001 (letters and digits, then a 3-digit number).")
-            if not isinstance(cs, dict) or not (cs.get("object_story_spec") or cs.get("asset_feed_spec") or cs.get("object_story_id")):
-                errs.append(f"{tag}: the creative needs object_story_spec, asset_feed_spec or object_story_id.")
-                cs = {}
-            else:
-                from src.spec_clean import clean_creative
-                cs, notes = clean_creative(cs, s.page_id, s.instagram_id)
-                warns += [f"{tag}: {n}" for n in notes if n.startswith("this ad uses")]
-            targets = sorted({uid_index[u] for u in (ad.get("sets") or list(uid_index)) if u in uid_index})
-            if not targets:
-                errs.append(f"{tag}: choose at least one ad set for it to appear in.")
-            for pos, si in enumerate(targets):
-                k = skey if pos == 0 else f"{skey}_S{si + 1}"
-                if k in used:
-                    errs.append(f"{tag}: the same ad ID is used twice.")
-                used.add(k)
-                entry = {"ad_key": k, "adset_key": sets_out[si]["key"], "creative_spec": cs, "status": "READY"}
-                if (ad.get("name") or "").strip():
-                    entry["name"] = ad["name"].strip() if pos == 0 else f"{ad['name'].strip()} - ad set {si + 1}"
-                if isinstance(ad.get("extra"), dict) and ad["extra"]:
-                    entry["extra"] = clean_extra(ad["extra"])[0]
-                ads.append(entry)
-                per_set_count[si] += 1
-                if ad_patch:
-                    sets_out[si]["extra"] = deep_merge(sets_out[si].get("extra") or {}, ad_patch)
-            continue
-        img, h = (ad.get("image") or "").strip(), (ad.get("image_hash") or "").strip()
-        key = (ad.get("ad_key") or "").strip()
-        if not img and not h:
-            errs.append(f"{tag}: add an image.")
-        if img and not (ROOT / img).is_file():
-            errs.append(f"{tag}: the image file was not found. Upload it again.")
-        if h and not re.fullmatch(r"[0-9a-f]{32}", h):
-            errs.append(f"{tag}: that image hash does not look right (it should be 32 letters and digits).")
-        if not key or not re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", key):
-            errs.append(f"{tag}: this ad needs an Ad ID like RS_SKINCARE_001 (letters and digits, then a 3-digit number). Go back to the Ads step and fill in the Ad ID.")
-        if not (ad.get("primary_text") or "").strip():
-            errs.append(f"{tag}: write the main text.")
-        if not (ad.get("headline") or "").strip():
-            errs.append(f"{tag}: write a headline.")
-        url = (ad.get("destination") or "").strip()
-        if not url.startswith("https://") or "." not in url:
-            errs.append(f"{tag}: the web page link must start with https://")
-        if ad.get("cta") not in CTAS:
-            errs.append(f"{tag}: choose a button.")
-        if len(ad.get("primary_text") or "") > 125:
-            warns.append(f"{tag}: the main text is long; Meta shows about 125 characters before 'See more'.")
-        if len(ad.get("headline") or "") > 40:
-            warns.append(f"{tag}: the headline is long and may be cut off.")
-        targets = sorted({uid_index[u] for u in (ad.get("sets") or list(uid_index)) if u in uid_index})
-        if not targets:
-            errs.append(f"{tag}: choose at least one ad set for it to appear in.")
-        for pos, si in enumerate(targets):
-            k = key if pos == 0 else f"{key}_S{si + 1}"
-            if k in used:
-                errs.append(f"{tag}: the same ad ID is used twice.")
-            used.add(k)
-            entry = {"ad_key": k, "adset_key": sets_out[si]["key"], "primary_text": (ad.get("primary_text") or "").strip(), "headline": (ad.get("headline") or "").strip(),
-                     "cta": ad.get("cta"), "destination": url, "status": "READY"}
-            if (ad.get("name") or "").strip():
-                entry["name"] = ad["name"].strip() if pos == 0 else f"{ad['name'].strip()} - ad set {si + 1}"
-            if ad.get("description"):
-                entry["description"] = ad["description"].strip()
-            for xk in ("extra", "link_extra"):
-                if isinstance(ad.get(xk), dict) and ad[xk]:
-                    cl, dr = clean_extra(ad[xk])
-                    if dr:
-                        warns.append(f"{tag}: these extra settings are not allowed and were dropped: {', '.join(dr)}.")
-                    entry[xk] = cl
-            if h:
-                entry["image_hash"] = h
-            else:
-                entry["image"] = img
-            ads.append(entry)
-            per_set_count[si] += 1
+    ads, per_set_count = _build_ads(a.get("ads"), s, sets_out, uid_index, errs, warns, fixes)
     if not a.get("ads"):
         errs.append("Add at least one ad.")
     for si, c in enumerate(per_set_count):
@@ -442,7 +530,9 @@ def build_plan(a: dict, s: Settings) -> dict:
             warns.append(f"Ad set {si + 1} has no ads in it. It would be created empty, so either add an ad to it or remove it.")
 
     camp = {"key": name, "objective": goal["objective"], "budget_strategy": "ABO" if per_set else "CBO", "status": "PAUSED"}
-    if not per_set:
+    if not per_set and life_c:
+        camp["lifetime_budget"], camp["stop_time"] = life_c, f"{end}T23:59:00+0530"
+    elif not per_set:
         camp["daily_budget"] = daily
     co = a.get("campaign") or {}
     if not per_set:  # shared budget: Meta keeps the bid strategy on the campaign, so lift it off the ad sets
@@ -471,7 +561,8 @@ def build_plan(a: dict, s: Settings) -> dict:
     for j, (x, sp) in enumerate(zip(sets_out, set_specs)):
         if (x.get("bid_strategy") or eff) != "LOWEST_COST_WITH_MIN_ROAS":
             continue
-        r = sp.get("roas") or co.get("roas")
+        floor = ((sp.get("extra") or {}).get("bid_constraints") or {}).get("roas_average_floor")  # a copied ad set already carries its target (in Meta's x10000 units)
+        r = sp.get("roas") or co.get("roas") or (float(floor) / 10000 if floor else None)
         try:
             r = float(r)
             if r <= 0:
@@ -503,11 +594,16 @@ def build_plan(a: dict, s: Settings) -> dict:
         if dropped:
             warns.append("Campaign: these extra settings are not allowed and were dropped: " + ", ".join(dropped) + ".")
         camp["extra"] = {**camp.get("extra", {}), **clean}
+    adset_rules(sets_out, per_set, errs, warns)
+    shared_budget_rule(camp, sets_out, errs)
+    guardrail_check(account_cfg(), sum(x.get("daily_budget", 0) for x in sets_out) if per_set else daily, errs, warns)
+    pair = pair_warnings(ads, sets_out)
+    warns += [w["message"] for w in pair]
     batch = f"batch_wiz_{now.strftime('%Y%m%d_%H%M')}"
-    total = sum(x.get("daily_budget", 0) for x in sets_out) if per_set else daily
-    return {"errors": errs, "warnings": warns, "release": sorted(release), "campaign": camp, "adsets": sets_out, "audiences": audiences, "ads": ads, "batch": batch,
+    total = sum(x.get("daily_budget", 0) for x in sets_out) if per_set else (daily or 0)
+    return {"errors": errs, "warnings": warns, "fixes": fixes, "pair_warnings": pair, "release": sorted(release), "campaign": camp, "adsets": sets_out, "audiences": audiences, "ads": ads, "batch": batch,
             "batch_id": f"ROOPSEE_WIZ_{now.strftime('%Y%m%d_%H%M')}", "names": {"campaign": name, "adsets": [x["key"] for x in sets_out]},
-            "summary": {"goal": goal["label"], "budget_mode": "adset" if per_set else "campaign", "daily_budget": daily, "total_budget": total, "ads": len(ads), "start": start, "end": end, "campaign_name": name,
+            "summary": {"goal": goal["label"], "budget_mode": "adset" if per_set else "campaign", "daily_budget": daily, "total_budget": total, "lifetime_budget": life_c, "ads": len(ads), "start": start, "end": end, "campaign_name": name,
                         "ad_list": [{"name": x.get("name") or x["ad_key"], "id": x["ad_key"], "adset": x["adset_key"],
                                     "type": (describe(x["creative_spec"])["kind"] if x.get("creative_spec") else "Single image")} for x in ads],
                         "adsets": [{"name": x["key"], "audience": sp["_aud"]["label"], "placements": sp["_plc"]["label"], "budget": x.get("daily_budget") or x.get("lifetime_budget"),
@@ -524,6 +620,35 @@ def taken_ad_keys() -> set:
     for env in ("sandbox", "production"):
         used |= set(Registry(Settings(env), "ad_registry.json").d)
     return used
+
+
+WEBSITE_GOALS = {"OFFSITE_CONVERSIONS", "VALUE", "LINK_CLICKS", "LANDING_PAGE_VIEWS"}  # results that only work with people going to a website
+
+
+def pair_warnings(ads: list, sets_out: list) -> list:
+    """An ad and its ad set can each be fine and still not work together. Meta only accepts an existing post inside a Website ad set when the post itself
+    carries a website link and button; otherwise creating the ad fails with 'Non-Website Ad in Website Ad Set'. This cannot be tested without creating things,
+    so it is a warning, shown in the summary and in the Check results."""
+    by_key = {x["key"]: x for x in sets_out}
+    out, seen = [], set()
+    for ad in ads:
+        cs = ad.get("creative_spec") or {}
+        if not (cs.get("object_story_id") and not cs.get("object_story_spec")):
+            continue  # not an existing post
+        st = by_key.get(ad.get("adset_key")) or {}
+        if (st.get("destination_type") or "WEBSITE").upper() != "WEBSITE":
+            continue
+        k = (cs["object_story_id"], ad["adset_key"])
+        if k in seen:
+            continue
+        seen.add(k)
+        advice = ("Choose a post that carries your website link and a button (a link post), or use an image, video or carousel ad."
+                  if st.get("optimization_goal") in WEBSITE_GOALS else
+                  "Choose a post that carries your website link, or set \"Where people go\" for this ad set to \"On the post\".")
+        out.append({"ad": ad.get("name") or ad["ad_key"], "adset": ad["adset_key"], "post": cs["object_story_id"],
+                    "message": f"The existing post {cs['object_story_id']} is in the website ad set '{ad['adset_key']}'. Meta only accepts it there if the post itself has a website link and button; "
+                               f"otherwise creating the ad fails with 'Non-Website Ad in Website Ad Set'. {advice}"})
+    return out
 
 
 def next_ad_key(theme: str, taken=()) -> str:
@@ -628,10 +753,48 @@ async def retry(req: Request):
     if not BATCH_OK.match(batch) or not (ROOT / "ads" / f"{batch}.json").exists():
         raise HTTPException(400, "unknown batch")
     cp = bool(body.get("confirm_production"))
-    steps = [("Upload the images", lambda: execute("upload", batch, confirm_production=cp)),
+
+    def repair():  # a batch that failed because of a setting Meta no longer accepts is corrected before it is tried again
+        notes = repair_batch(s, batch)
+        print("Repaired: " + "; ".join(notes) if notes else "Nothing needed repair.")
+
+    steps = [("Check the saved setup for settings Meta rejects", repair),
+             ("Upload the images", lambda: execute("upload", batch, confirm_production=cp)),
              ("Create the campaign and ad sets (paused)", lambda: execute("setup", batch, confirm_production=cp)),
              ("Create the ads (paused)", lambda: execute("prepare", batch, confirm_production=cp))]
     return {"job": start_job(f"retry {batch}", steps)["id"]}
+
+
+def repair_batch(s: Settings, batch: str) -> list:
+    """Clean what a half-made batch still holds: creatives and ad sets that were saved before the launcher knew a setting was rejected. A finished (locked) batch is left alone."""
+    from src.spec_clean import clean_creative
+    path = ROOT / "ads" / f"{batch}.json"
+    if Registry(s, "batch_hashes.json").get(batch, {}).get("sha256"):
+        return []
+    notes, keys = [], set()
+    b = jload(path, {}) or {}
+    touched = False
+    for ad in b.get("ads", []):
+        keys.add(ad.get("adset_key"))
+        if isinstance(ad.get("creative_spec"), dict):
+            new, n = clean_creative(ad["creative_spec"], s.page_id, s.instagram_id)
+            if new != ad["creative_spec"]:
+                ad["creative_spec"], touched = new, True
+                notes += [f"{ad.get('ad_key')}: {x[6:].strip()}" for x in n if x.startswith("fixed:")]
+    if touched:
+        jsave(path, b)
+    cfg = ROOT / "config" / "adsets.json"
+    d = jload(cfg, {"adsets": []}) or {"adsets": []}
+    changed = False
+    for a in d.get("adsets", []):
+        if a.get("key") in keys and isinstance(a.get("targeting_extra"), dict):
+            te, gone = scrub_targeting(a["targeting_extra"])
+            if gone:
+                a["targeting_extra"], changed = te, True
+                notes += [f"{a['key']}: left out {what}" for _k, what, _w in gone]
+    if changed:
+        jsave(cfg, d)
+    return notes
 
 
 # ---- drafts + history -----------------------------------------------------------------------------------------------------
@@ -796,6 +959,7 @@ def meta_images(hashes: str | None = None, refresh: bool = False):
 # ---- "Check with Meta": would Meta accept this? Uses Meta's validate-only mode, so NOTHING is created ----------------------------
 _OK_AT: dict = {}
 OK_TTL = 15 * 60
+MAX_CREATIVE_CHECKS = 4  # distinct ads tested per Check (each is one call to Meta)
 
 
 def _sig(s: Settings, endpoint: str, payload: dict) -> str:
@@ -849,23 +1013,65 @@ def _library_parents(s: Settings):
              "effective_status": c.get("status"), "bid_strategy": c.get("bid_strategy")} for c in store.list_campaigns(s)]
 
 
-def _parent_campaign(meta: Meta, s: Settings, camp: dict, live: bool = False):
+BORROW_PROBLEM = re.compile(r"does not exist|Unsupported get|campaign_id|Archived|Must Be the Same|same optimization|Inconsistent adset budget type|Bid Amount Or Bid Constraints Required", re.I)  # signs that the BORROWED campaign, not your ad set, is the problem
+
+
+def _goals_of(s: Settings, campaign_id: str) -> set:
+    snap = store.get_campaign(s, campaign_id) or {}
+    return {a.get("optimization_goal") for a in snap.get("adsets", []) if a.get("optimization_goal")}
+
+
+def _parent_campaign(meta: Meta, s: Settings, camp: dict, live: bool = False, exclude=(), goals=()):
     """Meta can only check an ad set against an existing campaign, so borrow one with the same goal and budget type (nothing is changed on it)."""
     rows = None if live else _library_parents(s)
     from_library = rows is not None
     if rows is None:
         rows = _cached((s.env, s.account, "parents"), 300, lambda: meta.get(f"{s.account}/campaigns", fields="id,name,objective,daily_budget,lifetime_budget,effective_status,bid_strategy", limit=100).get("data", []))
     want_cbo = camp["budget_strategy"] == "CBO"
-    ok = [r for r in rows if r.get("objective") == camp["objective"] and r.get("effective_status") not in ("DELETED", "ARCHIVED")]
+    ok = [r for r in rows if r.get("objective") == camp["objective"] and r.get("effective_status") not in ("DELETED", "ARCHIVED") and r.get("id") not in exclude]
     capped = ("LOWEST_COST_WITH_BID_CAP", "COST_CAP", "LOWEST_COST_WITH_MIN_ROAS")
     want_bs = camp.get("bid_strategy")
-    ok.sort(key=lambda r: (bool(r.get("daily_budget") or r.get("lifetime_budget")) != want_cbo, (r.get("bid_strategy") != want_bs) if want_bs in capped else r.get("bid_strategy") in capped, r.get("effective_status") != "PAUSED"))
+    want_goals = set(goals or ())
+
+    def clash(r):  # a shared-budget campaign that already has ad sets with another result makes Meta refuse a new ad set with this one
+        if not want_goals or not (r.get("daily_budget") or r.get("lifetime_budget")) or r.get("bid_strategy") not in (None, "", "LOWEST_COST_WITHOUT_CAP"):
+            return False
+        have = _goals_of(s, r["id"])
+        return bool(have) and not want_goals <= have
+
+    ok.sort(key=lambda r: (clash(r), bool(r.get("daily_budget") or r.get("lifetime_budget")) != want_cbo, (r.get("bid_strategy") != want_bs) if want_bs in capped else r.get("bid_strategy") in capped, r.get("effective_status") != "PAUSED"))
     if not ok:
         return None
     r = dict(ok[0])
     r["_cbo"] = bool(r.get("daily_budget") or r.get("lifetime_budget"))
     r["_library"] = from_library
     return r
+
+
+_POSTS: dict = {}
+
+
+def post_link_state(s: Settings, meta: Meta, post_id: str):
+    """True: the post has a website link or button, so Meta accepts it in a website ad set. False: it has none, so Meta refuses it there. None: could not tell."""
+    key = (s.env, post_id)
+    hit = _POSTS.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    from ui.formats import _page_get
+    val = None
+    try:
+        d = _page_get(s, meta, post_id, fields="attachments{type,url,unshimmed_url,subattachments{url,unshimmed_url}}")  # (the old 'link' and 'call_to_action' fields make Meta refuse the whole request)
+        ext = lambda u: bool(u) and not re.search(r"(facebook|fb|instagram)\.com", str(u))
+        urls = []
+        for at in (d.get("attachments") or {}).get("data", []):
+            urls += [at.get("unshimmed_url"), at.get("url")]
+            for sub in (at.get("subattachments") or {}).get("data", []):
+                urls += [sub.get("unshimmed_url"), sub.get("url")]
+        val = any(ext(u) for u in urls)
+    except (MetaError, LauncherError, ValueError, KeyError):
+        val = None
+    _POSTS[key] = (time.time(), val)
+    return val
 
 
 @router.post("/api/wizard/check")
@@ -881,7 +1087,8 @@ async def check(req: Request):
     try:
         cp = create_campaigns.payload(plan["campaign"], acc)
         checks.append(_one("Campaign", plan["names"]["campaign"], lambda: meta.post(f"{s.account}/campaigns", cp, validate_only=True), s, cp, "campaigns"))
-        parent = _parent_campaign(meta, s, plan["campaign"])
+        want_goals = {x.get("optimization_goal") for x in plan["adsets"]}
+        parent = _parent_campaign(meta, s, plan["campaign"], goals=want_goals)
         saved = audiences_cfg()
 
         def adset_pass(parent):
@@ -906,14 +1113,24 @@ async def check(req: Request):
                         payload["daily_budget"] = 50000
                     note = " (checked with a stand-in budget)"
                 r_ = _one("Ad set", adset["key"], lambda p=payload: meta.post(f"{s.account}/adsets", p, validate_only=True), s, {**payload, "campaign_id": parent["id"]}, "adsets")
+                if r_["ok"] is False and "Bid Amount Or Bid Constraints Required" in r_.get("message", ""):  # the borrowed campaign needs a bid; your ad set will not (it gets its own campaign)
+                    p2 = {**payload, "bid_amount": 10000}
+                    r2 = _one("Ad set", adset["key"], lambda p=p2: meta.post(f"{s.account}/adsets", p, validate_only=True), s, {**p2, "campaign_id": parent["id"]}, "adsets")
+                    if r2["ok"]:
+                        r_, note = r2, note + " (checked with a stand-in bid, because the campaign borrowed for the test needs one)"
                 if r_["ok"]:
                     r_["message"] += note
                 found.append(r_)
             return found
 
         adset_checks = adset_pass(parent)
-        if parent and parent.get("_library") and any(c["ok"] is False and re.search(r"does not exist|Unsupported get|campaign_id", c.get("message", ""), re.I) for c in adset_checks):
-            parent = _parent_campaign(meta, s, plan["campaign"], live=True)  # the library copy was out of date: ask Meta once
+        tried: set = set()
+        for _round in range(3):  # the borrowed campaign may be gone, archived, or set up in a way that clashes with this ad set: borrow another (the list is read from Meta once)
+            bad = [c for c in adset_checks if c["ok"] is False and BORROW_PROBLEM.search(c.get("message", ""))]
+            if not (parent and bad):
+                break
+            tried.add(parent["id"])
+            parent = _parent_campaign(meta, s, plan["campaign"], live=True, exclude=tried, goals=want_goals)
             adset_checks = adset_pass(parent)
         checks += adset_checks
         # creatives: one check per distinct ad text (borrowing any image from the account when the real one is not uploaded yet)
@@ -923,7 +1140,7 @@ async def check(req: Request):
             if ad.get("creative_spec"):
                 import json as _json
                 sig = _json.dumps(ad["creative_spec"], sort_keys=True)
-                if sig in seen or len(seen) >= 4:
+                if sig in seen or len(seen) >= MAX_CREATIVE_CHECKS:
                     continue
                 seen.add(sig)
                 stand = None
@@ -942,7 +1159,7 @@ async def check(req: Request):
                 checks.append(_one("Ad", ad["ad_key"], lambda p=payload: meta.post(f"{s.account}/adcreatives", p, validate_only=True), s, payload, "adcreatives"))
                 continue
             sig = (ad["primary_text"], ad["headline"], ad["destination"], ad["cta"], ad.get("image_hash") or ad.get("image"))
-            if sig in seen or len(seen) >= 4:
+            if sig in seen or len(seen) >= MAX_CREATIVE_CHECKS:
                 continue
             seen.add(sig)
             h = ad.get("image_hash")
@@ -959,5 +1176,17 @@ async def check(req: Request):
         if "code 17" in str(e) or "too many calls" in str(e).lower():
             raise HTTPException(429, "Meta is limiting how often this ad account can be asked. Wait a few minutes and press Check again.")
         raise HTTPException(502, f"Meta said: {s.redact(e)[:300]}")
+    for w in plan.get("pair_warnings", []):  # no single check can test an ad together with its ad set, but the post itself can be looked at
+        try:
+            link = post_link_state(s, meta, w["post"])
+        except MetaError:
+            link = None
+        if link is True:
+            checks.append({"object": "Ad + ad set", "name": w["ad"], "ok": True, "message": "The post has a website link, so Meta accepts it in this website ad set."})
+        elif link is False:
+            checks.append({"object": "Ad + ad set", "name": w["ad"], "ok": False, "message": w["message"], "plain": "This post has no website link or button, so Meta will refuse it in a website ad set.",
+                           "hint": "Choose a post that carries your website link, or use an image, video or carousel ad."})
+        else:
+            checks.append({"object": "Ad + ad set", "name": w["ad"], "ok": None, "warn": True, "message": w["message"]})
     bad = [c for c in checks if c["ok"] is False]
     return {"ok": not bad and any(c["ok"] for c in checks), "plan_errors": [], "warnings": plan["warnings"], "checks": checks, "tested_against": parent["name"] if parent else None}

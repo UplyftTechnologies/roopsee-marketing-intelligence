@@ -28,7 +28,9 @@ BILLING_EVENTS = {"IMPRESSIONS", "LINK_CLICKS", "THRUPLAY", "POST_ENGAGEMENT", "
 DESTINATIONS = {"WEBSITE", "APP", "MESSENGER", "WHATSAPP", "INSTAGRAM_PROFILE", "PHONE_CALL", "ON_AD", "ON_POST", "ON_VIDEO", "FACEBOOK", "SHOP_AUTOMATIC"}
 # things a file can never set: ids, state, credentials. Status is always PAUSED here, by design.
 FORBIDDEN_EXTRA = {"id", "account_id", "campaign_id", "adset_id", "ad_id", "status", "effective_status", "configured_status", "created_time", "updated_time",
-                   "access_token", "appsecret_proof", "execution_options", "name", "issues_info", "recommendations", "bid_info", "learning_stage_info"}
+                   "access_token", "appsecret_proof", "execution_options", "name", "issues_info", "recommendations", "bid_info", "learning_stage_info",
+                   "targeting_optimization_types", "source_adset_id", "source_campaign_id", "source_ad_id", "campaign", "adset", "ads", "adsets", "insights", "creative",
+                   "last_budget_toggling_time", "budget_remaining", "adset_schedule_summary"}
 
 
 def clean_extra(d) -> tuple[dict, list[str]]:

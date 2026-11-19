@@ -254,6 +254,36 @@ def videos(refresh: bool = False):
     return {"videos": [{"id": r["id"], "title": r.get("title") or "", "thumb": r.get("picture") or "", "seconds": round(r.get("length") or 0)} for r in rows]}
 
 
+@router.get("/api/meta/pixels")
+def pixels():
+    s, m = _meta()
+    try:
+        rows = _cached((s.env, s.account, "pixels"), 300, lambda: m.get(f"{s.account}/adspixels", fields="id,name,last_fired_time", limit=50).get("data", []))
+    except MetaError as e:
+        raise _fail(s, e)
+    return {"pixels": [{"id": r["id"], "name": r.get("name") or r["id"], "last_fired": (r.get("last_fired_time") or "")[:10]} for r in rows]}
+
+
+@router.get("/api/meta/custom-conversions")
+def custom_conversions():
+    s, m = _meta()
+    try:
+        rows = _cached((s.env, s.account, "cconv"), 300, lambda: m.get(f"{s.account}/customconversions", fields="id,name,custom_event_type", limit=100).get("data", []))
+    except MetaError as e:
+        raise _fail(s, e)
+    return {"conversions": [{"id": r["id"], "name": r.get("name") or r["id"], "event": r.get("custom_event_type")} for r in rows]}
+
+
+@router.get("/api/meta/instagram-accounts")
+def instagram_accounts():
+    s, m = _meta()
+    try:
+        rows = _cached((s.env, s.account, "igacc"), 300, lambda: m.get(f"{s.account}/instagram_accounts", fields="id,username", limit=50).get("data", []))
+    except MetaError as e:
+        raise _fail(s, e)
+    return {"accounts": [{"id": r["id"], "username": r.get("username") or r["id"]} for r in rows], "default": s.instagram_id}
+
+
 def _page_get(s, m, path, **params):
     """Page content needs the Page's own access token, which the user token can ask for."""
     import hashlib as _h, hmac as _hm, requests
@@ -270,14 +300,26 @@ def _page_get(s, m, path, **params):
     return body
 
 
+def _website_of(post: dict) -> str:
+    """The first web address outside Facebook and Instagram that the post links to, or '' (a post without one is refused in a website ad set)."""
+    import re
+    urls = []
+    for at in (post.get("attachments") or {}).get("data", []):
+        urls += [at.get("unshimmed_url"), at.get("url")]
+        for sub in (at.get("subattachments") or {}).get("data", []):
+            urls += [sub.get("unshimmed_url"), sub.get("url")]
+    return next((u for u in urls if u and not re.search(r"(facebook|fb|instagram)\.com", str(u))), "")
+
+
 @router.get("/api/meta/posts")
 def posts():
     s, m = _meta()
     try:
-        rows = _cached((s.env, s.page_id, "posts"), 120, lambda: _page_get(s, m, f"{s.page_id}/published_posts", fields="id,message,created_time,full_picture,permalink_url", limit=25).get("data", []))
+        rows = _cached((s.env, s.page_id, "posts"), 120, lambda: _page_get(s, m, f"{s.page_id}/published_posts", fields="id,message,created_time,full_picture,permalink_url,attachments{type,url,unshimmed_url,subattachments{url,unshimmed_url}}", limit=25).get("data", []))
     except MetaError as e:
         raise _fail(s, e)
-    return {"posts": [{"id": r["id"], "text": (r.get("message") or "")[:140], "date": (r.get("created_time") or "")[:10], "picture": r.get("full_picture") or "", "link": r.get("permalink_url") or ""} for r in rows]}
+    return {"posts": [{"id": r["id"], "text": (r.get("message") or "")[:140], "date": (r.get("created_time") or "")[:10], "picture": r.get("full_picture") or "", "link": r.get("permalink_url") or "",
+                       "website": _website_of(r)} for r in rows]}
 
 
 @router.get("/api/meta/catalogs")

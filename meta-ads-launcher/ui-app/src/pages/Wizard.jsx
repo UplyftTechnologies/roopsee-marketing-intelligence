@@ -149,7 +149,7 @@ export function Step4({ o, a, setA, set, noPreview, saveTpl, renderKind }) {
                 <Field label="Button"><select className="field" value={ad.cta} onChange={(e) => upd(i, 'cta', e.target.value)}>{o.ctas.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}</select></Field>
               </div>
               <DestPick o={o} value={ad.destination} onChange={(v) => upd(i, 'destination', v)} />
-              <AdvancedAd extra={ad.extra} onChange={(v) => upd(i, 'extra', v)} />
+              <AdvancedAd ad={ad} set={(p) => upd(i, p)} o={o} isImage />
             </div>
           </div>
         ))}

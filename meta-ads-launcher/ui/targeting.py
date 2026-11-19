@@ -11,6 +11,7 @@ from src.meta_api import Meta, MetaError
 
 router = APIRouter()
 _CACHE: dict = {}
+CATEGORY_CLASSES = ("behaviors", "life_events", "industries", "income", "family_statuses")
 GEO_TYPES = ["country", "region", "city", "zip", "neighborhood", "subcity", "medium_geo_area", "geo_market"]
 
 
@@ -37,13 +38,15 @@ def _fail(s, e):
 
 
 @router.get("/api/targeting/search")
-def search(kind: str, q: str, country: str = ""):
-    """kind = geo | interest | locale. Returns a short, clean list."""
+def search(kind: str, q: str, country: str = "", cls: str = ""):
+    """kind = geo | interest | locale | category (cls = behaviors | life_events | industries | income | family_statuses). Returns a short, clean list."""
     q = q.strip()
-    if len(q) < 2:
+    if len(q) < 2 and kind != "category":
         return {"results": []}
-    if kind not in ("geo", "interest", "locale"):
-        raise HTTPException(400, "kind must be geo, interest or locale")
+    if kind not in ("geo", "interest", "locale", "category"):
+        raise HTTPException(400, "kind must be geo, interest, locale or category")
+    if kind == "category" and cls not in CATEGORY_CLASSES:
+        raise HTTPException(400, "cls must be one of " + ", ".join(CATEGORY_CLASSES))
     s, m = _meta()
 
     def go():
@@ -58,11 +61,15 @@ def search(kind: str, q: str, country: str = ""):
             rows = m.get("search", type="adinterest", q=q, limit=12).get("data", [])
             return [{"id": r.get("id"), "name": r.get("name"), "size": r.get("audience_size_upper_bound") or r.get("audience_size"), "path": " > ".join(r.get("path") or [])}
                     for r in rows if r.get("id")]
+        if kind == "category":
+            rows = m.get("search", type="adTargetingCategory", **{"class": cls}, q=q, limit=15).get("data", [])
+            return [{"id": r.get("id"), "name": r.get("name"), "size": r.get("audience_size_upper_bound") or r.get("audience_size"), "path": " > ".join(r.get("path") or [])}
+                    for r in rows if r.get("id")]
         rows = m.get("search", type="adlocale", q=q, limit=12).get("data", [])
         return [{"key": r.get("key"), "name": r.get("name")} for r in rows if r.get("key") is not None]
 
     try:
-        return {"results": _cached((s.env, kind, q.lower(), country), 600, go)}
+        return {"results": _cached((s.env, kind, cls, q.lower(), country), 600, go)}
     except MetaError as e:
         raise _fail(s, e)
 

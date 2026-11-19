@@ -31,7 +31,7 @@ const has = (o) => o && typeof o === 'object' && Object.keys(o).length > 0
 const LANG = { 6: 'English (US)', 24: 'English (UK)', 46: 'Hindi' }
 const list = (v) => (Array.isArray(v) ? v : [])
 
-function Search({ kind, placeholder, onPick, country, actions }) {
+function Search({ kind, placeholder, onPick, country, actions, cls }) {
   const [q, setQ] = useState('')
   const [rows, setRows] = useState([])
   const [err, setErr] = useState(null)
@@ -41,11 +41,11 @@ function Search({ kind, placeholder, onPick, country, actions }) {
     let live = true
     const t = setTimeout(async () => {
       setBusy(true)
-      try { const r = await api(`/api/targeting/search?kind=${kind}&q=${encodeURIComponent(q.trim())}${country ? '&country=' + country : ''}`); if (live) { setRows(r.results); setErr(null) } } catch (e) { if (live) setErr(e.message) }
+      try { const r = await api(`/api/targeting/search?kind=${kind}&q=${encodeURIComponent(q.trim())}${country ? '&country=' + country : ''}${cls ? '&cls=' + cls : ''}`); if (live) { setRows(r.results); setErr(null) } } catch (e) { if (live) setErr(e.message) }
       if (live) setBusy(false)
     }, 400)
     return () => { live = false; clearTimeout(t) }
-  }, [q, kind, country])
+  }, [q, kind, country, cls])
   return (
     <div>
       <input className="field" style={{ width: '100%' }} placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -75,7 +75,10 @@ function Chips({ items, onRemove, tone, max = 8 }) {
 }
 
 /** Detailed targeting for one ad set. It reads and writes Meta's own targeting JSON (targeting_extra), so the expert box and this editor always agree. */
-export default function TargetingEditor({ s, upd }) {
+const CATS = [['behaviors', 'Behaviours'], ['life_events', 'Life events'], ['industries', 'Industries'], ['income', 'Income'], ['family_statuses', 'Family status']]
+const SAFETY = [['', 'Meta default (standard)'], ['FACEBOOK_STRICT,AN_STRICT', 'Limited: avoid sensitive content'], ['FACEBOOK_STANDARD,AN_STANDARD', 'Standard'], ['FACEBOOK_RELAXED,AN_RELAXED', 'Expanded: allow more content']]
+
+export default function TargetingEditor({ s, upd, pageId }) {
   const te = s.targeting_extra || {}
   const locked = s.audience !== 'custom' && s.audience !== 'all' && s.audience !== 'women'
   const [auds, setAuds] = useState(null)
@@ -169,6 +172,41 @@ export default function TargetingEditor({ s, upd }) {
     ;(excluded ? setExInterests : setInterests)([...cur, { id: String(r.id), name: r.name }])
     done()
   }
+
+  // behaviours, life events, industries, income, family status (they live in the same box as interests)
+  const setCat = (cls, arr) => {
+    const g0 = { ...(groups[0] || {}), [cls]: arr }
+    if (!arr.length) delete g0[cls]
+    const rest = groups.slice(1)
+    const fs = has(g0) ? [g0, ...rest] : rest
+    const t = { ...te }
+    if (fs.length) t.flexible_spec = fs; else delete t.flexible_spec
+    commit(t)
+  }
+  const exCat = (cls) => list(te.exclusions?.[cls])
+  const setExCat = (cls, arr) => {
+    const t = { ...te, exclusions: { ...(te.exclusions || {}), [cls]: arr } }
+    if (!arr.length) { delete t.exclusions[cls]; if (!has(t.exclusions)) delete t.exclusions }
+    commit(t)
+  }
+  const addCat = (cls, r, excluded, done) => {
+    const cur = excluded ? exCat(cls) : list(groups[0]?.[cls])
+    if (cur.some((x) => String(x.id) === String(r.id))) { done(); return }
+    ;(excluded ? setExCat : setCat)(cls, [...cur, { id: String(r.id), name: r.name }])
+    done()
+  }
+  // people connected to your Page, mobile system, where ads may appear
+  const conn = list(te.connections).length ? 'in' : list(te.excluded_connections).length ? 'out' : list(te.friends_of_connections).length ? 'friends' : ''
+  const setConn = (v) => {
+    const t = { ...te }
+    delete t.connections; delete t.excluded_connections; delete t.friends_of_connections
+    if (v && pageId) t[v === 'in' ? 'connections' : v === 'out' ? 'excluded_connections' : 'friends_of_connections'] = [{ id: pageId }]
+    commit(t)
+  }
+  const os = list(te.user_os)[0] || ''
+  const setOs = (v) => { const t = { ...te }; if (v) t.user_os = [v]; else delete t.user_os; commit(t) }
+  const safety = list(te.brand_safety_content_filter_levels).join(',')
+  const setSafety = (v) => { const t = { ...te }; if (v) t.brand_safety_content_filter_levels = v.split(','); else delete t.brand_safety_content_filter_levels; commit(t) }
 
   // languages
   const locales = list(te.locales)
@@ -303,6 +341,35 @@ export default function TargetingEditor({ s, upd }) {
             </div>
           )}
         </div>
+
+        <details className="more" open={CATS.some(([c]) => list(groups[0]?.[c]).length || exCat(c).length) || !!conn || !!os || !!safety}>
+          <summary>More audience controls: behaviours, life events, connections, device, content</summary>
+          <div className="stack" style={{ marginTop: 10 }}>
+            {CATS.map(([cls, name]) => (
+              <div key={cls}>
+                <span className="lf-label">{name}</span>
+                <Chips items={list(groups[0]?.[cls]).map((x) => ({ k: x.id, label: x.name || x.id, id: x.id }))} onRemove={(x) => setCat(cls, list(groups[0]?.[cls]).filter((i) => String(i.id) !== String(x.id)))} />
+                <Search kind="category" cls={cls} placeholder={`Search ${name.toLowerCase()}…`} actions={(r, done) => <><button type="button" className="btn small" onClick={() => addCat(cls, r, false, done)}>Include</button><button type="button" className="btn small" onClick={() => addCat(cls, r, true, done)}>Exclude</button></>} />
+                {exCat(cls).length > 0 && <Chips tone="bad" items={exCat(cls).map((x) => ({ k: 'x' + x.id, label: 'Not: ' + (x.name || x.id), id: x.id }))} onRemove={(x) => setExCat(cls, exCat(cls).filter((i) => String(i.id) !== String(x.id)))} />}
+              </div>
+            ))}
+            <div className="fgrid">
+              <Field label="People connected to your Page" hint={pageId ? '' : 'Needs META_…_PAGE_ID in .env'}>
+                <select className="field" value={conn} disabled={!pageId} onChange={(e) => setConn(e.target.value)}>
+                  <option value="">Everyone</option><option value="in">Only people who like my Page</option><option value="out">Not people who like my Page</option><option value="friends">Friends of people who like my Page</option>
+                </select>
+              </Field>
+              <Field label="Mobile system">
+                <select className="field" value={os} onChange={(e) => setOs(e.target.value)}><option value="">Any</option><option value="Android">Android</option><option value="iOS">iOS</option></select>
+              </Field>
+              <Field label="Content the ads may appear next to" hint="Applies to Facebook, Instagram and Audience Network">
+                <select className="field" value={SAFETY.some(([v]) => v === safety) ? safety : 'other'} onChange={(e) => setSafety(e.target.value)}>
+                  {SAFETY.map(([v, l]) => <option key={v} value={v}>{l}</option>)}{!SAFETY.some(([v]) => v === safety) && <option value="other">Custom (set in the expert box)</option>}
+                </select>
+              </Field>
+            </div>
+          </div>
+        </details>
 
         <Field label="How conversions are counted (attribution)" hint="Leave on Meta's default unless you compare against another report">
           <select className="field" value={attr} onChange={(e) => setAttr(e.target.value)}>

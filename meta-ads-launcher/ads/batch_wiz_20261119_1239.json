@@ -1,0 +1,13 @@
+{
+  "batch_id": "ROOPSEE_WIZ_20261119_1239",
+  "ads": [
+    {
+      "ad_key": "RS_POST_002",
+      "adset_key": "RS_Test_ADSET_1",
+      "creative_spec": {
+        "object_story_id": "1175723048967774_122128058127430745"
+      },
+      "status": "READY"
+    }
+  ]
+}

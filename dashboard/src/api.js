@@ -18,6 +18,16 @@ export async function api(path, { method = 'GET', params, body } = {}) {
   return res.json()
 }
 
+/** useState that survives leaving the page and coming back (kept per browser tab in sessionStorage). `fresh` = ignore what was stored. */
+export function usePersisted(key, initial, fresh = false) {
+  const [v, setV] = useState(() => {
+    if (!fresh) { try { const s = sessionStorage.getItem(`mi:${key}`); if (s != null) return JSON.parse(s) } catch { /* ignore */ } }
+    return initial
+  })
+  useEffect(() => { try { sessionStorage.setItem(`mi:${key}`, JSON.stringify(v)) } catch { /* ignore */ } }, [key, v])
+  return [v, setV]
+}
+
 /** Global filters shared by every tab. `tick` bumps after a refresh/exclusion apply so views reload. */
 export const FilterCtx = createContext(null)
 export const useFilters = () => useContext(FilterCtx)

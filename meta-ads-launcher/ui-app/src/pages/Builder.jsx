@@ -5,6 +5,7 @@ import { Badge, Banner, Card, Field, Loading, useLoad } from '../ui'
 import { downloadJson, exportAdSets, exportAd, exportCampaign } from '../jsonio'
 import { FeedPreview, Progress, Step4, audLabel, placeLabel, uid } from './Wizard'
 import TargetingEditor from './Targeting'
+import DeliveryMore from './MoreDelivery'
 import FormatCard, { KIND_INFO, newFormatAd } from './Formats'
 
 const EVENTS = [['', 'Default for the goal'], ['PURCHASE', 'Purchase'], ['INITIATE_CHECKOUT', 'Started checkout'], ['ADD_TO_CART', 'Added to cart'], ['LEAD', 'Lead'], ['COMPLETE_REGISTRATION', 'Registration'], ['VIEW_CONTENT', 'Viewed content']]
@@ -13,7 +14,7 @@ const ROAS = 'LOWEST_COST_WITH_MIN_ROAS'
 const CAPPED = ['LOWEST_COST_WITH_BID_CAP', 'COST_CAP']
 const CONVERSION = ['OFFSITE_CONVERSIONS', 'VALUE']
 
-const newSet = (x = {}) => ({
+export const newSet = (x = {}) => ({
   uid: uid(), audience: 'all', custom: { countries: 'IN', age_min: 18, age_max: 45, gender: 'all' }, placements: 'instagram', daily_budget: 500, lifetime_budget: '', goal: '', event: '',
   bid_strategy: '', bid_amount: '', roas: '', billing_event: '', destination_type: '', start_date: '', end_date: '', targeting_extra: {}, extra: {}, label: '', ...x,
 })
@@ -128,7 +129,7 @@ const KIND = {
 }
 
 /** Import from a JSON file / pasted text, copy from your ad account, or use a saved template. Works for ad sets, whole campaigns and ads. */
-function ImportModal({ kind, onClose, onApply }) {
+export function ImportModal({ kind, onClose, onApply }) {
   const K = KIND[kind]
   const [tab, setTab] = useState('json')
   const [text, setText] = useState('')
@@ -236,10 +237,39 @@ function ImportModal({ kind, onClose, onApply }) {
   )
 }
 
-function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
+/** Make many ad sets at once: every chosen audience in every chosen place. */
+function BulkSets({ o, have, onClose, onMake }) {
+  const auds = [...o.audiences.map((x) => ({ id: x.id, label: x.label })), ...(o.saved_audiences || []).map((x) => ({ id: x.id, label: x.label }))]
+  const places = o.placements.filter((x) => x.id !== 'custom')
+  const [pa, setPa] = useState([])
+  const [pp, setPp] = useState([])
+  const tog = (arr, set, v) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v])
+  const n = pa.length * pp.length
+  const room = 10 - have
+  useEffect(() => { const on = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', on); return () => window.removeEventListener('keydown', on) }, [onClose])
+  return (
+    <div className="lb-bg" onClick={onClose} role="dialog" aria-modal="true" aria-label="Add several ad sets">
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="row"><h3 className="grow">Add several ad sets at once</h3><button type="button" className="btn small" onClick={onClose}>Close</button></div>
+        <div className="sub">Tick the audiences and the places. You get one ad set for every combination, and can change each one afterwards.</div>
+        <div className="lf-label" style={{ marginTop: 12 }}>Who sees it</div>
+        <div className="stack">{auds.map((x) => <label key={x.id} className="chk"><input type="checkbox" checked={pa.includes(x.id)} onChange={() => tog(pa, setPa, x.id)} />{x.label}</label>)}</div>
+        <div className="lf-label" style={{ marginTop: 12 }}>Where the ads appear</div>
+        <div className="stack">{places.map((x) => <label key={x.id} className="chk"><input type="checkbox" checked={pp.includes(x.id)} onChange={() => tog(pp, setPp, x.id)} />{x.label}</label>)}</div>
+        {n > room && <Banner tone="err">That is {n} ad sets, but a campaign can hold 10 and you already have {have}. Tick fewer.</Banner>}
+        <div className="row" style={{ marginTop: 14 }}>
+          <button type="button" className="btn primary" disabled={n === 0 || n > room} onClick={() => onMake(pa.flatMap((au) => pp.map((pl) => ({ audience: au, placements: pl }))))}>{n ? `Add ${n} ad set${n === 1 ? '' : 's'}` : 'Tick at least one of each'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function AdSetCard({ o, s, i, many, per, upd, dup, del, manage }) {  // manage: an ad set that already exists on Meta (some settings are locked)
   const [tab, setTab] = useState(() => (/[?&]tab=(\w+)/.exec(window.location.hash) || [])[1] || 'basics')
   const has = (v) => v && typeof v === 'object' && Object.keys(v).length > 0
-  const delivery = !!(s.goal || s.event || s.bid_strategy || s.bid_amount || s.billing_event || s.destination_type || s.start_date || s.end_date || s.lifetime_budget || s.roas)
+  const xe = s.extra || {}
+  const delivery = !!(s.goal || s.event || s.bid_strategy || s.bid_amount || s.billing_event || s.destination_type || s.start_date || s.end_date || s.lifetime_budget || s.roas || xe.adset_schedule || xe.frequency_control_specs || xe.daily_min_spend_target || xe.daily_spend_cap || xe.adlabels || xe.dsa_beneficiary || xe.dsa_payor || xe.promoted_object?.custom_conversion_id)
   const tabs = [['basics', 'Basics', false], ['targeting', 'Targeting', has(s.targeting_extra)], ['delivery', 'Bidding & schedule', delivery], ['expert', 'Expert', has(s.extra)]]
   const conv = CONVERSION.includes(s.goal)
   const places = o.placements.filter((x) => x.id !== 'custom' || s.placements === 'custom')
@@ -250,10 +280,10 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
         <div className="stabs" role="tablist">
           {tabs.map(([k, l, on]) => <button type="button" role="tab" aria-selected={tab === k} key={k} className={`stab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}{on && <i className="sdot" title="Has custom settings" />}</button>)}
         </div>
-        <span className="set-actions">
+        {!manage && <span className="set-actions">
           <button type="button" className="btn small" onClick={dup}>Duplicate</button>
           <button type="button" className="btn small danger" disabled={!many} onClick={del}>Remove</button>
-        </span>
+        </span>}
       </div>
       {tab === 'basics' && <>
       <div className="fgrid">
@@ -281,12 +311,12 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
       </>}
       {tab === 'targeting' && <div className="tabpane">
         <div className="sub" style={{ marginBottom: 6 }}>Optional. Narrow or widen who sees the ads by place, interest, language and audiences you already have.</div>
-        <TargetingEditor s={s} upd={upd} />
+        <TargetingEditor s={s} upd={upd} pageId={o.page_id} />
       </div>}
       {tab === 'delivery' && <div className="tabpane">
         <div className="fgrid">
-          <Field label="What Meta should aim for" hint="Leave as the default unless you want something specific">
-            <select className="field" value={s.goal} onChange={(e) => upd({ goal: e.target.value })}>{o.results.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
+          <Field label="What Meta should aim for" hint={manage ? 'Locked: Meta does not allow this to change once the ad set exists' : 'Leave as the default unless you want something specific'}>
+            <select className="field" disabled={manage} value={s.goal} onChange={(e) => upd({ goal: e.target.value })}>{o.results.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
           </Field>
           {conv && <Field label="Which action counts"><select className="field" value={s.event} onChange={(e) => upd({ event: e.target.value })}>{EVENTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>}
           <Field label="How Meta bids" hint={many && !per ? 'With one shared budget this applies to the whole campaign' : ''}>
@@ -294,12 +324,14 @@ function AdSetCard({ o, s, i, many, per, upd, dup, del }) {
           </Field>
           {s.bid_strategy === ROAS && <Field label="Minimum return on ad spend" hint="For example 2.5: every ₹1 spent should bring back ₹2.5"><input className="field" type="number" min="0.1" step="0.1" value={s.roas !== '' && s.roas != null ? s.roas : (s.extra?.bid_constraints?.roas_average_floor ? s.extra.bid_constraints.roas_average_floor / 10000 : '')} onChange={(e) => upd({ roas: e.target.value })} /></Field>}
           {CAPPED.includes(s.bid_strategy) && <Field label="Bid amount (₹)" hint="Your cap or target cost"><input className="field" type="number" min="1" value={s.bid_amount} onChange={(e) => upd({ bid_amount: e.target.value })} /></Field>}
-          <Field label="You pay for"><select className="field" value={s.billing_event} onChange={(e) => upd({ billing_event: e.target.value })}>{o.billings.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>
-          <Field label="Where people go"><select className="field" value={s.destination_type} onChange={(e) => upd({ destination_type: e.target.value })}>{o.destination_types.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>
+          <Field label="You pay for" hint={manage ? 'Locked' : ''}><select className="field" disabled={manage} value={s.billing_event} onChange={(e) => upd({ billing_event: e.target.value })}>{o.billings.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>
+          <Field label="Where people go" hint={manage ? 'Locked' : ''}><select className="field" disabled={manage} value={s.destination_type} onChange={(e) => upd({ destination_type: e.target.value })}>{o.destination_types.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>
           {per && <Field label="Lifetime budget instead (₹)" hint="Needs an end date. Leave empty to use the daily budget"><input className="field" type="number" min="1" value={s.lifetime_budget} onChange={(e) => upd({ lifetime_budget: e.target.value })} /></Field>}
           <Field label="Starts (this ad set only)"><input className="field" type="date" value={s.start_date} onChange={(e) => upd({ start_date: e.target.value })} /></Field>
           <Field label="Ends (this ad set only)"><input className="field" type="date" value={s.end_date} onChange={(e) => upd({ end_date: e.target.value })} /></Field>
         </div>
+        <div className="lf-label" style={{ margin: '14px 0 6px', fontWeight: 600 }}>More delivery controls</div>
+        <DeliveryMore s={s} upd={upd} o={o} per={per} conv={conv} />
       </div>}
       {tab === 'expert' && <div className="tabpane">
         <div className="sub" style={{ margin: '0 0 8px' }}><b>Anything else (expert).</b> Meta's own setting names, as JSON. Cities, interests, your custom audiences, exclusions, manual placements and more go here. Meta checks it before anything is created.</div>
@@ -334,6 +366,7 @@ function Flow({ o, ctx, params }) {
   const [draftId, setDraftId] = useState('new')
   const [toast, setToast] = useState(null)
   const [modal, setModal] = useState(params.modal === '1' ? 'adset' : false)
+  const [bulk, setBulk] = useState(false)
   const prod = o.env === 'production'
   const sig = JSON.stringify(toServer(a))
   const say = (t) => { setToast(t); setTimeout(() => setToast(null), 2500) }
@@ -447,6 +480,7 @@ function Flow({ o, ctx, params }) {
   }
 
   if (phase !== 'edit') return <Progress job={job} phase={phase} prod={prod} ctx={ctx} retry={retry} back={() => setPhase('edit')} again={reset} err={err} />
+  const bulkEl = bulk ? <BulkSets o={o} have={a.adsets.length} onClose={() => setBulk(false)} onMake={(combos) => { setA((x) => ({ ...x, adsets: [...x.adsets, ...combos.map((cb) => newSet(cb))] })); setBulk(false); setOpenSec('adsets'); say(`${combos.length} ad set(s) added. Review each one.`) }} /> : null
   const modalEl = modal ? <ImportModal kind={modal} onClose={() => setModal(false)} onApply={modal === 'campaign' ? applyCampaign : modal === 'ad' ? applyAds : applyImport} /> : null
   if (!started) return <><Start o={o} onImport={() => setModal('campaign')} onLibrary={() => ctx.go('library')} start={(recipe) => { setA(blank(o, recipe)); setStarted(true); setOpenSec('campaign') }} load={(x, id) => { setA(normalize(x, o)); setDraftId(id); setStarted(true) }}
     copy={(x) => { const n = normalize(x, o); const d = x.ads?.[0] || n.defaults; const map = {}; const sets = n.adsets.map((s) => { const u = uid(); map[s.uid] = u; return { ...s, uid: u, name: '' } }); const ads = (x.ads || []).map((ad) => { const m = ad.sets ? ad.sets.map((u) => map[u]).filter(Boolean) : null; return { ...ad, ad_key: '', sets: m && m.length ? m : null } }); setA({ ...n, campaign: { ...n.campaign, name: '' }, ads, adsets: sets, defaults: { ...n.defaults, primary_text: d.primary_text || '', headline: d.headline || '', cta: d.cta || 'LEARN_MORE', destination: d.destination || n.defaults.destination } }); setStarted(true) }} />{modalEl}</>
@@ -509,10 +543,12 @@ function Flow({ o, ctx, params }) {
             <Field label="End date (optional)"><input className="field" type="date" value={a.end_date} onChange={(e) => set('end_date', e.target.value)} /></Field>
           </div>
           {!per && <div className="chip-row" style={{ marginTop: 8 }}>{[300, 500, 1000, 2000].map((v) => <button type="button" key={v} className={`chip ${Number(a.daily_budget) === v ? 'on' : ''}`} onClick={() => set('daily_budget', v)}>{inr(v)}</button>)}</div>}
-          <details className="more" open={!!(a.campaign.spend_cap || a.campaign.bid_strategy || a.campaign.roas || a.campaign.special_ad_categories?.length || Object.keys(a.campaign.extra || {}).length)}>
+          <details className="more" open={!!(a.campaign.spend_cap || a.campaign.lifetime_budget || a.campaign.bid_strategy || a.campaign.roas || a.campaign.special_ad_categories?.length || a.campaign.extra?.adlabels?.length || Object.keys(a.campaign.extra || {}).length)}>
             <summary>More options</summary>
             <div className="fgrid" style={{ marginTop: 10 }}>
               <Field label="Spending limit for the whole campaign (₹)" hint="Meta stops delivering once this is reached"><input className="field" type="number" min="1" value={a.campaign.spend_cap} onChange={(e) => setCamp({ spend_cap: e.target.value })} /></Field>
+              {!per && <Field label="Total budget for the whole campaign (₹)" hint="Instead of a daily budget. Needs an end date. When filled in, the daily budget is ignored"><input className="field" type="number" min="1" value={a.campaign.lifetime_budget || ''} onChange={(e) => setCamp({ lifetime_budget: e.target.value })} /></Field>}
+              <Field label="Labels (optional)" hint="Comma separated. Ads Manager can filter by them"><input className="field" defaultValue={(a.campaign.extra?.adlabels || []).map((l) => l.name).join(', ')} key={'cl' + (a.campaign.rev || 0)} onChange={(e) => { const names = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); const x = { ...(a.campaign.extra || {}) }; if (names.length) x.adlabels = names.map((name) => ({ name })); else delete x.adlabels; setCamp({ extra: x }) }} /></Field>
               {!per && <Field label="How Meta bids (whole campaign)"><select className="field" value={a.campaign.bid_strategy} onChange={(e) => setCamp({ bid_strategy: e.target.value })}><option value="">Lowest cost (Meta decides)</option>{o.bids.filter((x) => x.value !== 'LOWEST_COST_WITHOUT_CAP').map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>}
               {!per && a.campaign.bid_strategy === ROAS && <Field label="Minimum return on ad spend" hint="For example 2.5. Applies to every ad set unless one sets its own"><input className="field" type="number" min="0.1" step="0.1" value={a.campaign.roas || ''} onChange={(e) => setCamp({ roas: e.target.value })} /></Field>}
             </div>
@@ -542,6 +578,7 @@ function Flow({ o, ctx, params }) {
           ))}
           <div className="row" style={{ marginTop: 12 }}>
             <button type="button" className="btn" onClick={() => setA((x) => ({ ...x, adsets: [...x.adsets, newSet({ audience: x.adsets.length % 2 ? 'all' : 'women', placements: x.adsets[0]?.placements === 'custom' ? 'instagram' : x.adsets[0]?.placements })] }))}><Icon name="plus" size={14} /> Add another ad set</button>
+            <button type="button" className="btn" onClick={() => setBulk(true)}>Add several at once…</button>
             <button type="button" className="btn primary" onClick={() => setOpenSec('ads')}>Next: ads</button>
           </div>
           {setErrs.length > 0 && <Banner tone="err">{setErrs.map((e, i) => <div key={i}>{e}</div>)}</Banner>}
@@ -574,7 +611,7 @@ function Flow({ o, ctx, params }) {
               <div className="tree" aria-label="Structure of the campaign">
                 <button type="button" className="tn camp" onClick={() => setOpenSec('campaign')}>
                   <span className="tlv">Campaign</span><b>{plan.summary.campaign_name}</b>
-                  <span className="tmeta">{plan.summary.goal} · {plan.summary.budget_mode === 'adset' ? `${inr(plan.summary.total_budget)}/day in total` : `${inr(plan.summary.daily_budget)}/day`}</span>
+                  <span className="tmeta">{plan.summary.goal} · {plan.summary.budget_mode === 'adset' ? `${inr(plan.summary.total_budget)}/day in total` : plan.summary.lifetime_budget ? `${inr(plan.summary.lifetime_budget)} in total` : `${inr(plan.summary.daily_budget)}/day`}</span>
                 </button>
                 <div className="tkids">
                   {plan.summary.adsets.map((x, i) => {
@@ -603,6 +640,7 @@ function Flow({ o, ctx, params }) {
             </>
           )}
           {errs.length > 0 && <Banner tone="err"><b>Fix these</b>{errs.map((e, i) => <div key={i} className="fixrow"><button type="button" className="linkish" onClick={() => setOpenSec(goSec(e))}>• {e}</button></div>)}</Banner>}
+          {plan?.fixes?.length > 0 && <Banner tone="ok"><b>Fixed for you</b>{plan.fixes.map((e, i) => <div key={i} style={{ marginTop: 3 }}>• {e}</div>)}</Banner>}
           {plan?.warnings?.length > 0 && <Banner><b>Worth knowing</b>{plan.warnings.map((e, i) => <div key={i} style={{ marginTop: 3 }}>• {e}</div>)}</Banner>}
         </Card>
 
@@ -614,7 +652,7 @@ function Flow({ o, ctx, params }) {
               {checkStale && <div className="mini">You changed something since this check. Check again.</div>}
               {check.data.checks.map((c, i) => (
                 <div key={i} style={{ alignItems: 'flex-start' }}>
-                  <Badge tone={c.ok ? 'good' : c.ok === false ? 'bad' : 'warn'}>{c.ok ? 'OK' : c.ok === false ? 'Fix' : 'Skipped'}</Badge>
+                  <Badge tone={c.ok ? 'good' : c.ok === false ? 'bad' : 'warn'}>{c.ok ? 'OK' : c.ok === false ? 'Fix' : c.warn ? 'Heads up' : 'Skipped'}</Badge>
                   <span><b>{c.object}</b> <span className="muted">{c.name.slice(0, 40)}</span><br /><span style={{ fontSize: 12.5 }}>{c.ok === false ? (c.plain || c.message) : c.message}</span>{c.hint && c.ok === false ? <><br /><span className="mini">{c.hint}</span></> : null}</span>
                 </div>
               ))}
@@ -634,6 +672,7 @@ function Flow({ o, ctx, params }) {
         {a.ads.some((x) => !x.creative_spec && !x.kind) && <div><div className="mini" style={{ marginBottom: 6 }}>How the first image ad will look</div><FeedPreview ad={a.ads.find((x) => !x.creative_spec && !x.kind)} /></div>}
       </aside>
       {modalEl}
+      {bulkEl}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )

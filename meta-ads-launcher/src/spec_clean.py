@@ -3,6 +3,7 @@ point it at this environment's Page / Instagram account, and describe what kind 
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 # top-level keys of a creative that Meta computes or that must not be copied
@@ -28,6 +29,30 @@ def _strip_label_ids(o: Any) -> Any:
     if isinstance(o, list):
         return [_strip_label_ids(x) for x in o]
     return o
+
+
+CATALOG_ONLY_FEATURES = {"image_background_gen"}  # enhancements Meta accepts only when the ad uses a catalog ("No catalog selected")
+LIST_KEYS = {"bodies": "text", "titles": "text", "descriptions": "text", "link_urls": "website_url", "images": "hash", "videos": "video_id", "call_to_action_types": None}
+
+
+def _dedupe_assets(afs: dict) -> list:
+    """Meta refuses a creative whose asset lists repeat a value ('All ad asset values should be unique'). Keeps the first of each."""
+    notes = []
+    for key, ident in LIST_KEYS.items():
+        items = afs.get(key)
+        if not isinstance(items, list):
+            continue
+        seen, keep = set(), []
+        for it in items:
+            sig = json.dumps(it.get(ident) if (ident and isinstance(it, dict)) else it, sort_keys=True, default=str)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            keep.append(it)
+        if len(keep) != len(items):
+            afs[key] = keep
+            notes.append(f"fixed: removed {len(items) - len(keep)} repeated value(s) from the ad's {key.replace('_', ' ')} (Meta needs every one to be different)")
+    return notes
 
 
 def _drop_urls(o: Any) -> Any:
@@ -65,6 +90,14 @@ def clean_creative(raw: dict, page_id: str | None = None, instagram_id: str | No
             dof.pop("creative_features_spec")
         if not dof:
             spec.pop("degrees_of_freedom_spec")
+    afs_all = spec.get("asset_feed_spec")
+    if isinstance(afs_all, dict):
+        notes += _dedupe_assets(afs_all)
+    has_catalog = bool(spec.get("product_set_id") or (afs_all or {}).get("product_set_id") or (spec.get("object_story_spec") or {}).get("template_data"))
+    feats_all = ((spec.get("degrees_of_freedom_spec") or {}).get("creative_features_spec") or {})
+    for k in [k for k in list(feats_all) if k in CATALOG_ONLY_FEATURES and not has_catalog]:
+        feats_all.pop(k)
+        notes.append(f"fixed: left out the enhancement '{k}', which Meta only accepts for catalog ads")
     afs0 = spec.get("asset_feed_spec")  # "message extensions" (a Messenger / WhatsApp chat button) need messaging permission the app does not have: Meta answers "(#3) capability"
     if isinstance(afs0, dict) and afs0.get("message_extensions"):
         afs0.pop("message_extensions")
@@ -73,6 +106,8 @@ def clean_creative(raw: dict, page_id: str | None = None, instagram_id: str | No
     if isinstance(oss, dict):
         if page_id:
             oss["page_id"] = page_id
+        if oss.pop("instagram_actor_id", None):
+            notes.append("fixed: replaced the old 'instagram_actor_id' with instagram_user_id")
         if instagram_id:
             oss["instagram_user_id"] = instagram_id
         else:
@@ -85,6 +120,14 @@ def clean_creative(raw: dict, page_id: str | None = None, instagram_id: str | No
         notes.append("this ad uses an existing post, so it is reused as is (its text and image cannot be edited)")
     if "object_story_id" in spec and "object_story_spec" in spec:
         spec.pop("object_story_id")
+    afs_now = spec.get("asset_feed_spec") if isinstance(spec.get("asset_feed_spec"), dict) else {}
+    story_now = spec.get("object_story_spec") if isinstance(spec.get("object_story_spec"), dict) else {}
+    thin = afs_now and not any(afs_now.get(k) for k in ("images", "videos", "link_urls", "titles")) and not any(story_now.get(k) for k in ("link_data", "video_data", "photo_data", "template_data"))
+    if thin and raw.get("effective_object_story_id") and not spec.get("product_set_id"):
+        # Meta does not return the media and link of this kind of ad (for example an Advantage+ catalog ad with offers), so it cannot be rebuilt from its settings. The post it shows can be reused.
+        spec = {k: v for k, v in spec.items() if k == "url_tags"}
+        spec["object_story_id"] = raw["effective_object_story_id"]
+        notes.append("fixed: this ad's pictures and link are not available from Meta, so it reuses the original post (its text and image cannot be changed here)")
     return spec, notes
 
 

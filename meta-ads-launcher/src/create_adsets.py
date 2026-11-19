@@ -41,7 +41,11 @@ def payload(a: dict, campaign_id: str, s: Settings, acc: dict, camp: dict, aud: 
     extra, _ = clean_extra(a.get("extra"))
     if "promoted_object" in extra and "promoted_object" in p:
         extra["promoted_object"] = deep_merge(p["promoted_object"], extra["promoted_object"])
-    return deep_merge(p, extra)
+    out = deep_merge(p, extra)
+    po = out.get("promoted_object")
+    if isinstance(po, dict) and po.get("custom_conversion_id"):  # checked with Meta: a custom conversion is accepted on its own, without the pixel or a standard event
+        out["promoted_object"] = {"custom_conversion_id": po["custom_conversion_id"]}
+    return out
 
 
 def run(s: Settings, meta: Meta, keys: list[str], validate_only=False) -> None:

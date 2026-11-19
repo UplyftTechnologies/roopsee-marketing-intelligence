@@ -27,6 +27,8 @@ def run(s: Settings, meta: Meta, batch: str, validate_only=False) -> None:
             continue
         shown = ad.get("name") or k  # the name people see in Ads Manager (the Ad ID is the default)
         payload = {"name": shown, "adset_id": aset, "creative": {"creative_id": creative}, "status": "PAUSED"}
+        if ad.get("labels"):  # labels are created by name; Ads Manager can filter by them
+            payload["adlabels"] = [{"name": str(x)} for x in ad["labels"] if str(x).strip()]
         existing = None if (validate_only or ad.get("name") or not ensure_mod.LOOKUPS) else meta.find_by_name("ads", k)
         if existing:
             ad_id = existing

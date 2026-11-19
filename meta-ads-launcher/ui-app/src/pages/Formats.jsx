@@ -88,6 +88,7 @@ function TextList({ label, items, onChange, max = 5, limit, placeholder, area })
 function PostPick({ value, onChange }) {
   const [posts, setPosts] = useState(null)
   const [err, setErr] = useState(null)
+  const [onlyLink, setOnlyLink] = useState(false)
   const load = async () => { setErr(null); try { setPosts((await api('/api/meta/posts')).posts) } catch (e) { setErr(e.message) } }
   return (
     <div className="stack">
@@ -95,10 +96,14 @@ function PostPick({ value, onChange }) {
       {!posts && <div><button type="button" className="btn small" onClick={load}>Show my Page's recent posts</button></div>}
       {err && <Banner tone="err">{err}</Banner>}
       {posts && (
-        <div className="pick-list" style={{ maxHeight: 300 }}>{posts.map((p) => (
+        <label className="chk"><input type="checkbox" checked={onlyLink} onChange={(e) => setOnlyLink(e.target.checked)} />Only posts with a website link <span className="muted">({posts.filter((p) => p.website).length} of {posts.length})</span></label>
+      )}
+      {posts && onlyLink && !posts.some((p) => p.website) && <Banner>None of your recent posts carries a website link, so Meta would refuse them in a website ad set. Share a post that contains your link on your Page, or use an image, video or carousel ad.</Banner>}
+      {posts && (
+        <div className="pick-list" style={{ maxHeight: 300 }}>{posts.filter((p) => !onlyLink || p.website).map((p) => (
           <div key={p.id} className="list-row">
             {p.picture ? <MetaImg src={p.picture} alt="" style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 6 }} /> : null}
-            <span className="grow"><b>{p.text || '(no text)'}</b><br /><span className="muted">{p.date}</span></span>
+            <span className="grow"><b>{p.text || '(no text)'}</b><br /><span className="muted">{p.date}</span> {p.website ? <Badge tone="good">Website link</Badge> : <Badge>No website link</Badge>}</span>
             <button type="button" className={`btn small ${value === p.id ? '' : 'primary'}`} onClick={() => onChange(p.id)}>{value === p.id ? 'Chosen' : 'Use this'}</button>
           </div>))}</div>
       )}
@@ -234,14 +239,13 @@ export default function FormatCard({ ad, i, a, o, all, upd, toggleSet, remove, o
           </>
         )}
 
-        <details className="more"><summary>More: tracking tags and preview</summary>
+        <details className="more"><summary>More: preview</summary>
           <div className="stack" style={{ marginTop: 8 }}>
-            <Field label="URL tags (optional)" hint="Leave empty to use the launcher's standard tags"><input className="field mono" value={ad.url_tags || ''} onChange={(e) => set({ url_tags: e.target.value })} placeholder="utm_source=facebook&utm_medium=paid_social&…" /></Field>
             <div><button type="button" className="btn small" onClick={() => setPrev(!prev)}>{prev ? 'Hide preview' : 'Show a Meta preview'}</button></div>
             {prev && <PreviewBtn ad={ad} />}
           </div>
         </details>
-        <AdvancedAd extra={ad.extra} onChange={(v) => set({ extra: v })} />
+        <AdvancedAd ad={ad} set={set} o={o} />
         <div className="row"><button type="button" className="btn small" onClick={onSave}>Save as template</button></div>
       </div>
     </div>

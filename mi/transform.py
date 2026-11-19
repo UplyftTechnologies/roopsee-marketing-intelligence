@@ -198,7 +198,9 @@ SELECT q.id, q.ts, timezone('Asia/Kolkata', q.ts) AS ts_ist, q.event_name, event
   coalesce(nullif({j('productName')},''), {j('items[0].item_name')}) AS product_name,
   coalesce(nullif({j('brand')},''), {j('items[0].item_brand')}) AS brand,
   {j('search_term')} AS search_term, {j('paymentMethod')} AS payment_method,
-  coalesce(try_cast({j('grand_total')} AS DOUBLE), try_cast({j('cartTotal')} AS DOUBLE)) AS amount
+  coalesce(try_cast({j('grand_total')} AS DOUBLE), try_cast({j('cartTotal')} AS DOUBLE)) AS amount,
+  CASE WHEN regexp_matches(trim(coalesce({jj('pincode')}, {jj('addressPincode')}, '')), '^[0-9]{{6}}$')
+       THEN trim(coalesce({jj('pincode')}, {jj('addressPincode')})) END AS pincode_ev
 FROM q LEFT JOIN raw_users u ON lower(u.id) = q.user_id_res;
 """
 
@@ -285,6 +287,8 @@ a AS (
     bool_or(event_key = 'order_placed') AS f_order, bool_or(event_key = 'quiz_started') AS f_quiz_start,
     bool_or(event_key = 'quiz_completed') AS f_quiz_done, bool_or(event_key = 'login') AS f_login,
     bool_or(event_key = 'search') AS f_search,
+    bool_or(event_key = 'address' OR pincode_ev IS NOT NULL) AS f_address,
+    last(pincode_ev ORDER BY ts) FILTER (WHERE pincode_ev IS NOT NULL) AS pincode,
     bool_or(event_name LIKE 'clicked\\_%' ESCAPE '\\' OR event_name IN ('ui_clicked','page_scrolled','scroll_depth','searchbar_typed','add_to_cart')
             OR event_key IN ('add_to_cart','view_cart','checkout_view','pay_started','order_placed','quiz_started','quiz_completed',
                              'login','search','wishlist','assistant','address')) AS f_interact

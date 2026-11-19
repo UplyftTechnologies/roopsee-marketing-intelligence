@@ -45,6 +45,24 @@
       "genders": [
         2
       ]
+    },
+    "WIZ__WOMEN_18_24": {
+      "countries": [],
+      "age_min": 18,
+      "age_max": 24,
+      "genders": [
+        2
+      ],
+      "geo_in_adset": true
+    },
+    "WIZ__WOMEN_18_55": {
+      "countries": [],
+      "age_min": 18,
+      "age_max": 55,
+      "genders": [
+        2
+      ],
+      "geo_in_adset": true
     }
   }
 }

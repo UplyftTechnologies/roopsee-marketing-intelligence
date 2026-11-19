@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { dt, inr, num, pct, useApi, useFilters } from '../api'
+import { dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, axis, chartTip, nextSort } from '../ui'
 import { Heatmap } from './Overview'
 import { METRICS } from '../metrics'
@@ -29,16 +29,16 @@ function MultiPick({ label, options, value, onChange }) {
 
 function OrdersTable() {
   const f = useFilters()
-  const [scope, setScope] = useState('sales')
-  const [status, setStatus] = useState([])
-  const [payment, setPayment] = useState([])
-  const [coupon, setCoupon] = useState('')
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState({ key: 'ts', dir: 'desc' })
+  const [scope, setScope] = usePersisted('orders.scope', 'sales')
+  const [status, setStatus] = usePersisted('orders.status', [])
+  const [payment, setPayment] = usePersisted('orders.payment', [])
+  const [coupon, setCoupon] = usePersisted('orders.coupon', '')
+  const [search, setSearch] = usePersisted('orders.search', '')
+  const [sort, setSort] = usePersisted('orders.sort', { key: 'ts', dir: 'desc' })
   const [offset, setOffset] = useState(0)
-  const limit = 25
+  const [limit, setLimit] = usePersisted('orders.limit', 25)
   const s = useApi('/orders', { scope, status: status.join(',') || undefined, payment: payment.join(',') || undefined, coupon: coupon || undefined, search, sort: sort.key, direction: sort.dir, limit, offset })
-  useEffect(() => setOffset(0), [scope, status, payment, coupon, search, sort])
+  useEffect(() => setOffset(0), [scope, status, payment, coupon, search, sort, limit])
   return (
     <>
       <div className="chip-row">
@@ -74,7 +74,7 @@ function OrdersTable() {
                   { label: 'Status', cls: 'nw', sortBy: 'status', render: (r) => <span title={r.payment_failed_reason || ''}><Badge tone={STATUS_TONE[r.status]}>{niceStatus(r.status)}</Badge></span> },
                   { label: '', render: (r) => (r.is_test ? <Badge>test</Badge> : r.is_staff_order ? <Badge tone="warn">staff</Badge> : r.is_excluded ? <Badge tone="bad">excluded</Badge> : null) },
                 ]} />
-              <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} />
+              <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
             </Card>
           </>
         )}
