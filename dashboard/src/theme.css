@@ -253,3 +253,5 @@ td.nw { white-space: nowrap; }
 .tl-all { margin: 6px 0 4px; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; font-size: 12px; display: grid; gap: 3px; }
 .tl-all div { display: grid; grid-template-columns: 150px 1fr; gap: 8px; }
 .tl-all dt { color: var(--text-muted); } .tl-all dd { margin: 0; word-break: break-word; }
+
+.health-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--grid); }

@@ -6,7 +6,7 @@ The API process owns the DuckDB file (single writer). All access goes through DB
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import csv
@@ -88,7 +88,8 @@ def meta():
     out["raw_events"] = one("SELECT count(*) AS n, min(created_at) AS first, max(created_at) AS last FROM raw_event_log")
     if has_tables():
         out["ready"] = True
-        out["counts"] = one("""SELECT (SELECT count(*) FROM events_clean) events, (SELECT count(*) FROM events_clean WHERE is_excluded) events_excluded,
+        out["counts"] = one("""SELECT (SELECT count(*) FROM events_clean WHERE NOT is_dup) events, (SELECT count(*) FROM events_clean WHERE is_excluded AND NOT is_dup) events_excluded,
+            (SELECT count(*) FROM events_clean WHERE is_dup) events_duplicate,
             (SELECT count(*) FROM sessions) sessions, (SELECT count(*) FROM sessions WHERE is_excluded) sessions_excluded,
             (SELECT count(*) FROM users_360) people, (SELECT count(*) FROM users_360 WHERE is_excluded) people_excluded,
             (SELECT count(*) FROM orders_clean WHERE is_valid) orders, (SELECT count(*) FROM orders_clean WHERE is_valid AND is_excluded) orders_excluded""")
@@ -226,7 +227,7 @@ def funnel(date_from: str | None = None, date_to: str | None = None, include_exc
         LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key)
         WHERE {cw} AND c.outcome IN ('payment_abandoned','checkout_abandoned') ORDER BY c.checkout_at DESC LIMIT 40""", ca)
     products = q(f"""SELECT product_name, brand, count(*) adds, count(DISTINCT session_id) sessions FROM events_clean e
-        WHERE event_key = 'add_to_cart' AND product_name IS NOT NULL AND product_name <> ''
+        WHERE event_key = 'add_to_cart' AND NOT is_dup AND product_name IS NOT NULL AND product_name <> ''
         AND (? OR NOT is_excluded) AND timezone('Asia/Kolkata', ts)::DATE BETWEEN ? AND ?
         GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15""", [include_excluded, *ca])
     actual = one("SELECT count(*) n FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND is_valid" + ("" if include_excluded else " AND NOT is_excluded"),
@@ -241,9 +242,9 @@ def campaigns(date_from: str | None = None, date_to: str | None = None, include_
     w = "date_ist BETWEEN ? AND ?" + ("" if include_excluded else " AND NOT is_excluded")
     rows = q(f"""SELECT channel, source, medium, campaign, sum(sessions) sessions, sum(visitors) visitors, sum(engaged_sessions) engaged,
         sum(quiz_done) quiz_done, sum(carts) carts, sum(checkouts) checkouts, sum(orders) orders, sum(revenue) revenue,
-        sum(ft_orders) ft_orders, sum(ft_revenue) ft_revenue,
+        sum(ft_orders) ft_orders, sum(ft_revenue) ft_revenue, sum(lnd_orders) lnd_orders, sum(lnd_revenue) lnd_revenue,
         min(date_ist) first_day, max(date_ist) last_day
-        FROM campaign_performance WHERE {w} GROUP BY 1,2,3,4 HAVING sum(sessions) >= ? ORDER BY greatest(sum(orders), sum(ft_orders)) DESC, carts DESC, sessions DESC""",
+        FROM campaign_performance WHERE {w} GROUP BY 1,2,3,4 HAVING sum(sessions) >= ? ORDER BY greatest(sum(orders), sum(ft_orders), sum(lnd_orders)) DESC, carts DESC, sessions DESC""",
              [date_from or "2000-01-01", date_to or "2999-12-31", min_sessions])
     tot_s = sum(r["sessions"] for r in rows); tot_c = sum(r["carts"] for r in rows)
     base_cart = ratio(tot_c, tot_s)
@@ -251,8 +252,8 @@ def campaigns(date_from: str | None = None, date_to: str | None = None, include_
         r.update(engaged_rate=ratio(r["engaged"], r["sessions"]), quiz_rate=ratio(r["quiz_done"], r["sessions"]),
                  cart_rate=ratio(r["carts"], r["sessions"]), checkout_rate=ratio(r["checkouts"], r["sessions"]),
                  order_cvr=ratio(r["orders"], r["sessions"]), rev_per_session=round(r["revenue"] / r["sessions"], 2) if r["sessions"] else 0)
-        r["best_orders"] = max(r["orders"], r["ft_orders"])
-        r["best_revenue"] = max(r["revenue"], r["ft_revenue"])
+        r["best_orders"] = max(r["orders"], r["ft_orders"], r["lnd_orders"])
+        r["best_revenue"] = max(r["revenue"], r["ft_revenue"], r["lnd_revenue"])
         if r["best_orders"] >= 2 and r["cart_rate"] >= base_cart:
             r["verdict"] = "Winning"
         elif r["best_orders"] > 0:
@@ -317,10 +318,7 @@ EMAIL = "coalesce(nullif(lower(u.email), ''), o.order_email)"
 SESSION_SORTS = {"started_at": "s.started_at", "events": "s.events", "duration_s": "s.duration_s", "order_value": "coalesce(o.order_value, 0)",
                  "channel": "s.channel", "campaign": "s.campaign", "city": "nullif(lower(s.city), '')", "name": "nullif(lower(u.name), '')", "email": EMAIL,
                  "stage": f"CASE WHEN {FLAG_ORDER} THEN 5 ELSE s.stage END", "device": "s.device", "pincode": "s.pincode"}
-ORD_CTE = """WITH o AS (SELECT session_id, count(*) FILTER (WHERE NOT is_test) AS n_orders, count(*) FILTER (WHERE is_valid) AS n_placed,
-    sum(total) FILTER (WHERE is_valid AND NOT is_test) AS order_value, sum(total) FILTER (WHERE NOT is_valid AND NOT is_test) AS other_value,
-    string_agg(DISTINCT status, ', ') FILTER (WHERE NOT is_test) AS statuses, any_value(email_l) FILTER (WHERE email_l IS NOT NULL) AS order_email
-    FROM orders_clean WHERE session_id IS NOT NULL GROUP BY 1)"""
+ORD_CTE = "WITH o AS (SELECT * FROM session_orders)"  # built once by the transform
 SESS_FROM = " FROM sessions s LEFT JOIN o ON o.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key)"
 
 
@@ -328,7 +326,7 @@ def _csv(v: str | None) -> list[str]:
     return [x.strip() for x in (v or "").split(",") if x.strip()]
 
 
-def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any", pincode=None):
+def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any", pincode=None, event=None):
     w, a = sess_where(d_from, d_to, include_excluded or only_excluded)  # "only hidden" must not be combined with "hide hidden"
     if only_excluded:
         w += " AND s.is_excluded"
@@ -348,22 +346,29 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
     if pins:
         w += " AND s.pincode IN (" + ",".join("?" * len(pins)) + ")"
         a += pins
+    evs = [e.lower().replace(" ", "_") for e in _csv(event)]
+    if evs:  # sessions that contain the event (name or part of a name); several names = any of them
+        w += " AND s.session_id IN (SELECT session_id FROM session_events WHERE " + " OR ".join(["event_name LIKE ?"] * len(evs)) + ")"
+        a += [f"%{e}%" for e in evs]
     if search:
         like = f"%{search.lower()}%"
+        ev_term = search.strip().lower().replace(" ", "_")
+        # something like add_to_cart or checked_delivery_pincode is an event name: also return the sessions that contain it
+        ev_or = " OR s.session_id IN (SELECT session_id FROM session_events WHERE event_name LIKE ?)" if "_" in ev_term else ""
         w += f""" AND (lower(s.session_id) LIKE ? OR lower(s.visitor_key) LIKE ? OR lower(coalesce(s.user_id,'')) LIKE ? OR coalesce(s.ip,'') LIKE ?
                  OR coalesce(s.phone10,'') LIKE ? OR lower(coalesce(s.city,'')) LIKE ? OR lower(coalesce(u.name,'')) LIKE ? OR lower(s.campaign) LIKE ?
                  OR lower(coalesce({EMAIL}, '')) LIKE ? OR coalesce(s.pincode, '') LIKE ?
-                 OR s.session_id IN (SELECT session_id FROM orders_clean WHERE session_id IS NOT NULL AND lower(order_id) LIKE ?))"""
-        a += [like] * 11
+                 OR s.session_id IN (SELECT session_id FROM orders_clean WHERE session_id IS NOT NULL AND lower(order_id) LIKE ?){ev_or})"""
+        a += [like] * 11 + ([f"%{ev_term}%"] if ev_or else [])
     return w, a
 
 
 @app.get("/api/sessions")
 def sessions(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
              min_stage: int = 0, channel: str | None = None, only_excluded: bool = False, has: str | None = None, lacks: str | None = None,
-             match: str = "any", pincode: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
+             match: str = "any", pincode: str | None = None, event: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
     """has / lacks = comma lists of: product, cart, checkout, pay, order, login (known user), login_now (logged in during the session), quiz, search, address (saved a proper address), location (only picked a pincode / location). pincode = comma list of 6-digit pincodes given in the session. match=any|all applies to `has`."""
-    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode)
+    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode, event)
     order = SESSION_SORTS.get(sort, SESSION_SORTS["started_at"])
     d = "ASC" if direction.lower() == "asc" else "DESC"
     total = one(f"{ORD_CTE} SELECT count(*) n {SESS_FROM} WHERE {w}", a)["n"]
@@ -451,14 +456,15 @@ def session_detail(session_id: str):
         raise HTTPException(404, "session not found")
     s = rows[0]
     events = q("""SELECT id, timezone('Asia/Kolkata', ts) AS at, event_name, event_key, page_type, path, product_name, brand, amount, search_term, city_n, ip
-                  FROM events_clean WHERE session_id = ? ORDER BY ts, id LIMIT 3000""", [session_id])
-    raw = {r["id"]: r for r in q("SELECT id, value, extra_data::VARCHAR AS x FROM raw_event_log WHERE id IN (SELECT id FROM events_clean WHERE session_id = ?)", [session_id])}
+                  FROM events_clean WHERE session_id = ? AND NOT is_dup ORDER BY ts, id LIMIT 3000""", [session_id])
+    hidden = one("SELECT count(*) FILTER (WHERE is_dup) AS n FROM events_clean WHERE session_id = ?", [session_id])["n"]
+    raw = {r["id"]: r for r in q("SELECT id, value, extra_data::VARCHAR AS x FROM raw_event_log WHERE id IN (SELECT id FROM events_clean WHERE session_id = ? AND NOT is_dup)", [session_id])}
     for e in events:
         r = raw.pop(e.pop("id"), None)
         e["details"] = _event_details(r["value"], r["x"], e.get("event_key") in ("add_to_cart", "view_cart", "checkout_view", "pay_started", "order_placed")) if r else []
     pages = q("""SELECT path, any_value(page_type) AS page_type, min(timezone('Asia/Kolkata', ts)) AS first_at, count(*) AS events,
-                 count(*) FILTER (WHERE is_pageview) AS views FROM events_clean WHERE session_id = ? GROUP BY path ORDER BY first_at""", [session_id])
-    types = q("""SELECT event_name, any_value(event_key) AS event_key, count(*) AS n FROM events_clean WHERE session_id = ?
+                 count(*) FILTER (WHERE is_pageview) AS views FROM events_clean WHERE session_id = ? AND NOT is_dup GROUP BY path ORDER BY first_at""", [session_id])
+    types = q("""SELECT event_name, any_value(event_key) AS event_key, count(*) AS n FROM events_clean WHERE session_id = ? AND NOT is_dup
                  GROUP BY event_name ORDER BY n DESC LIMIT 25""", [session_id])
     extra = one("""SELECT any_value(browser_n) AS browser,
                    first(utm_content ORDER BY ts) FILTER (WHERE utm_content IS NOT NULL) AS utm_content,
@@ -475,7 +481,7 @@ def session_detail(session_id: str):
     addresses = _addresses(s["user_id"], session_id)
     prev_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at < ? ORDER BY started_at DESC LIMIT 1", [pkey, s["started_at"]])
     next_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at > ? ORDER BY started_at ASC LIMIT 1", [pkey, s["started_at"]])
-    return {"session": s, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders, "addresses": addresses,
+    return {"session": s, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders, "addresses": addresses, "duplicates_hidden": hidden,
             "person": {**person, "person_key": pkey} if person else {"person_key": pkey}, "prev": prev_s or None, "next": next_s or None}
 
 
@@ -518,7 +524,8 @@ def person_profile(key: str):
 USER_SORTS = {"last_seen": "last_seen", "first_seen": "first_seen", "name": "nullif(lower(name), '')", "city": "nullif(lower(city), '')", "sessions": "sessions", "orders": "orders",
               "revenue": "revenue", "cart_sessions": "cart_sessions", "segment": "segment", "first_channel": "first_channel", "email": "nullif(lower(email), '')"}
 USER_PRESETS = {"cart_abandoners": "cart_sessions > 0 AND orders = 0", "checkout_abandoners": "checkout_sessions > 0 AND orders = 0",
-                "logged_in": "is_registered", "buyers": "orders > 0", "reachable": "nullif(phone10, '') IS NOT NULL"}
+                "logged_in": "is_registered", "buyers": "orders > 0", "reachable": "nullif(phone10, '') IS NOT NULL",
+                "has_pincode": "delivery_pincode IS NOT NULL", "saved_address": "has_saved_address"}
 
 
 def _users_where(d_from, d_to, include_excluded, search=None, segment=None, preset=None):
@@ -545,7 +552,8 @@ def users(date_from: str | None = None, date_to: str | None = None, include_excl
     d = "ASC" if direction.lower() == "asc" else "DESC"
     total = one(f"SELECT count(*) n FROM users_360 WHERE {w}", a)["n"]
     rows = q(f"""SELECT person_key, user_id, name, phone10, email, is_registered, first_seen, last_seen, sessions, first_channel, first_campaign,
-        city, state, device, uses_app, cart_sessions, checkout_sessions, orders, revenue, gender, skin_type, age_bucket, segment, is_excluded
+        city, state, device, uses_app, cart_sessions, checkout_sessions, orders, revenue, gender, skin_type, age_bucket, segment, is_excluded,
+        delivery_pincode, has_saved_address, ip_city
         FROM users_360 WHERE {w} ORDER BY {order} {d} NULLS LAST, last_seen DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     segs = q(f"SELECT segment, count(*) n FROM users_360 WHERE {'TRUE' if include_excluded else 'NOT is_excluded'} GROUP BY 1 ORDER BY 2 DESC")
     return {"total": total, "rows": rows, "segments": segs}
@@ -557,6 +565,75 @@ def user_counts(date_from: str | None = None, date_to: str | None = None, includ
     w, a = _users_where(date_from, date_to, include_excluded)
     cols = ", ".join(f"count(*) FILTER (WHERE {c}) AS {k}" for k, c in USER_PRESETS.items())
     return one(f"SELECT count(*) AS total, {cols} FROM users_360 WHERE {w}", a)
+
+
+@app.get("/api/health")
+def data_health():
+    """Is the data fresh and trustworthy? Each check is ok / warn / bad with a plain-language detail, plus the last pipeline runs."""
+    checks = []
+
+    def add(key, label, status, detail):
+        checks.append({"key": key, "label": label, "status": status, "detail": detail})
+
+    raw = one("SELECT max(created_at) AS last_event, count(*) AS n FROM raw_event_log")
+    if raw.get("last_event"):
+        lag = (datetime.now(timezone.utc) - raw["last_event"].astimezone(timezone.utc)).total_seconds() / 3600
+        add("fresh", "Newest event", "ok" if lag <= 6 else "warn" if lag <= 24 else "bad",
+            f"{lag:.0f} hours old (latest {raw['last_event'].astimezone(timezone(timedelta(hours=5, minutes=30))):%d %b %H:%M} IST). Press Refresh data to pull newer events.")
+    else:
+        add("fresh", "Newest event", "bad", "No events loaded yet")
+    if not has_tables():
+        return {"status": "bad", "checks": checks, "runs": []}
+    last_t = one("SELECT v FROM etl_meta WHERE k='last_transform'").get("v")
+    add("transform", "Analytics tables", "ok" if last_t else "bad", f"Rebuilt {last_t}" if last_t else "Never built")
+    runs = q("SELECT step, finished_at, rows, note FROM etl_runs ORDER BY finished_at DESC LIMIT 12")
+    ev = q("SELECT rows FROM etl_runs WHERE step = 'extract:event_log' ORDER BY finished_at DESC LIMIT 2")
+    if len(ev) == 2 and ev[0]["rows"] is not None and ev[1]["rows"] is not None and ev[0]["rows"] < ev[1]["rows"]:
+        add("rows", "Event count", "bad", f"Stored events went down ({ev[1]['rows']:,} to {ev[0]['rows']:,}). Something removed data.")
+    skipped = [r for r in runs if (r["note"] or "").startswith("skipped")]
+    if skipped:
+        add("skipped", "Table pulls", "bad", f"{skipped[0]['step'].replace('extract:raw_', '')} was not updated: {skipped[0]['note']}")
+    t = one("""SELECT (SELECT count(*) FROM events_clean) AS ev, (SELECT count(*) FROM events_clean WHERE is_dup) AS dup,
+               (SELECT count(*) FROM events_clean WHERE visitor_id IS NULL) AS no_vis,
+               (SELECT count(*) FROM orders_clean WHERE is_valid) AS orders, (SELECT count(*) FROM orders_clean WHERE is_valid AND session_id IS NULL) AS orders_nosess,
+               (SELECT count(*) FROM orders_clean WHERE is_valid AND payment_state IN ('unconfirmed', 'conflicting')) AS risk,
+               (SELECT coalesce(sum(total), 0) FROM orders_clean WHERE is_valid AND payment_state IN ('unconfirmed', 'conflicting')) AS risk_v,
+               (SELECT count(*) FROM sessions) AS sess, (SELECT count(*) FROM sessions WHERE city IS NULL) AS sess_nocity,
+               (SELECT count(*) FROM sessions WHERE is_excluded) AS sess_ex""")
+    pc = lambda a, b: (100.0 * a / b) if b else 0.0
+    d = pc(t["dup"], t["ev"])
+    add("dups", "Repeated events", "ok" if d <= 50 else "warn", f"{d:.0f}% of tracked events are repeats of the same action (hidden from counts, kept in the raw data).")
+    v = pc(t["no_vis"], t["ev"])
+    add("visitor", "Events without a browser id", "ok" if v <= 20 else "warn", f"{v:.0f}% of events carry no browser id, so they are grouped by session only.")
+    o = pc(t["orders_nosess"], t["orders"])
+    add("order_session", "Orders linked to a visit", "ok" if o <= 10 else "warn" if o <= 25 else "bad",
+        f"{t['orders'] - t['orders_nosess']} of {t['orders']} sales are linked to the visit that produced them; the rest cannot be credited to a channel.")
+    add("payment", "Payment confirmed", "ok" if not t["risk"] else "warn",
+        "Every counted sale has a confirmed or expected payment." if not t["risk"] else f"{t['risk']} counted sale(s) worth ₹{t['risk_v']:,.0f} have no confirmed payment.")
+    c = pc(t["sess_nocity"], t["sess"])
+    add("geo", "Sessions with a place", "ok" if c <= 20 else "warn", f"{100 - c:.0f}% of sessions have a city (from the visitor's IP address).")
+    add("excluded", "Hidden internal and bot traffic", "ok", f"{pc(t['sess_ex'], t['sess']):.0f}% of sessions are hidden by the exclusion rules.")
+    order = {"ok": 0, "warn": 1, "bad": 2}
+    return {"status": max((x["status"] for x in checks), key=order.get, default="ok"), "checks": checks, "runs": runs}
+
+
+@app.get("/api/performance")
+def performance(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    """Page load speed from the tracker's own load samples."""
+    w = "date_ist BETWEEN ? AND ?" + ("" if include_excluded else " AND NOT is_excluded")
+    a = [date_from or "2000-01-01", date_to or "2999-12-31"]
+    agg = "count(*) AS samples, quantile_cont(load_ms, 0.5) AS p50, quantile_cont(load_ms, 0.9) AS p90, count(*) FILTER (WHERE load_ms > 3000)::DOUBLE / count(*) AS slow_share"
+    overall = one(f"SELECT {agg} FROM perf_samples WHERE {w}", a)
+    return {"overall": overall,
+            "by_page": q(f"SELECT coalesce(page_type, 'other') AS page, {agg} FROM perf_samples WHERE {w} GROUP BY 1 HAVING count(*) >= 10 ORDER BY samples DESC LIMIT 12", a),
+            "by_device": q(f"SELECT device, {agg} FROM perf_samples WHERE {w} GROUP BY 1 HAVING count(*) >= 10 ORDER BY samples DESC", a),
+            "daily": q(f"SELECT date_ist AS d, {agg} FROM perf_samples WHERE {w} GROUP BY 1 ORDER BY 1", a)}
+
+
+@app.get("/api/events/names")
+def event_names():
+    """Every event name with the number of sessions that contain it (for the Sessions event filter)."""
+    return q("SELECT event_name, count(*) AS sessions FROM session_events GROUP BY 1 ORDER BY 2 DESC")
 
 
 @app.get("/api/events/catalogue")
@@ -1050,6 +1127,10 @@ REPORT_DIMS = {
     "state": "coalesce(s.region, 'Unknown')",
     "city": "coalesce(s.city, 'Unknown')",
     "country": "coalesce(s.country, 'Unknown')",
+    "channel_split": "s.channel_split",
+    "delivery_state": "coalesce(s.delivery_state, 'No address given')",
+    "delivery_city": "coalesce(s.delivery_city, 'No address given')",
+    "pincode": "coalesce(s.pincode, 'No pincode given')",
 }
 REPORT_SORTS = {"dim": "dim", "sessions": "sessions", "people": "people", "carts": "carts", "checkouts": "checkouts", "orders": "orders",
                 "revenue": "revenue", "avg_duration": "avg_duration", "cart_rate": "carts::DOUBLE / sessions", "bounce_rate": "bounced::DOUBLE / sessions"}
@@ -1304,7 +1385,7 @@ def orders_list(date_from: str | None = None, date_to: str | None = None, includ
     rows = q(f"""SELECT o.order_id, o.ts, o.customer_name, o.phone10, o.email_l AS email, o.city, o.state, o.pincode, o.items_count, {ORDER_ITEMS} AS items,
         o.total, o.products_total, o.coupon_code, o.coupon_discount, o.delivery_fee, o.wallet_amount_used, o.payment_method, o.payment_status, o.status,
         o.payment_failed_reason, o.nth_order, o.session_id, o.channel, o.campaign, o.device, o.rider_name, o.delivered_at, o.user_id,
-        o.is_valid, o.is_test, o.is_staff_order, o.is_excluded
+        o.is_valid, o.is_test, o.is_staff_order, o.is_excluded, o.payment_state, o.credit_channel
         FROM orders_clean o WHERE {w} ORDER BY {order} {d} NULLS LAST, o.ts DESC LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     opts = {"statuses": [r["status"] for r in q("SELECT status, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC")],
             "payment_methods": [r["m"] for r in q("SELECT coalesce(payment_method, '(not recorded)') AS m, count(*) n FROM orders_clean WHERE NOT is_test GROUP BY 1 ORDER BY 2 DESC")],
@@ -1322,7 +1403,11 @@ def _order_kpis(d_from, d_to, include_excluded) -> dict:
         coalesce(sum(o.delivery_fee) FILTER (WHERE o.is_valid), 0) AS delivery_fees, coalesce(sum(o.wallet_amount_used) FILTER (WHERE o.is_valid), 0) AS wallet_used,
         count(*) FILTER (WHERE o.is_valid AND o.nth_order = 1) AS first_orders, count(*) FILTER (WHERE o.is_valid AND o.nth_order > 1) AS repeat_orders,
         count(*) FILTER (WHERE o.is_valid AND o.delivered_at IS NOT NULL) AS delivered,
-        median(date_diff('minute', o.ts, o.delivered_at)) FILTER (WHERE o.is_valid AND o.delivered_at IS NOT NULL) / 60.0 AS median_delivery_h
+        median(date_diff('minute', o.ts, o.delivered_at)) FILTER (WHERE o.is_valid AND o.delivered_at IS NOT NULL) / 60.0 AS median_delivery_h,
+        count(*) FILTER (WHERE o.is_valid AND o.payment_state IN ('unconfirmed', 'conflicting')) AS at_risk_orders,
+        coalesce(sum(o.total) FILTER (WHERE o.is_valid AND o.payment_state IN ('unconfirmed', 'conflicting')), 0) AS at_risk_value,
+        count(*) FILTER (WHERE o.is_valid AND o.payment_state = 'cod_pending') AS cod_pending_orders,
+        coalesce(sum(o.total) FILTER (WHERE o.is_valid AND o.payment_state = 'cod_pending'), 0) AS cod_pending_value
         FROM orders_clean o WHERE o.date_ist BETWEEN ? AND ? AND NOT o.is_test{ex}""", [d_from or "2000-01-01", d_to or "2999-12-31"])
     k["aov"] = ratio(k["gmv"], k["orders"]) if False else (round(k["gmv"] / k["orders"], 2) if k["orders"] else 0)
     k["cancel_rate"] = ratio(k["cancelled"], k["attempts"])
@@ -1377,6 +1462,7 @@ def orders_analytics(date_from: str | None = None, date_to: str | None = None, i
     customers = q(f"""SELECT CASE WHEN o.nth_order = 1 THEN 'First order' ELSE 'Repeat order' END AS kind, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov
         FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY 1""", a)
     channels = q(f"SELECT coalesce(o.channel, 'Unattributed') AS channel, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC", a)
+    credited = q(f"SELECT coalesce(o.credit_channel, 'Unattributed') AS channel, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC", a)
     buckets = q(f"""SELECT CASE WHEN o.total < 300 THEN '1. under 300' WHEN o.total < 500 THEN '2. 300-499' WHEN o.total < 800 THEN '3. 500-799' WHEN o.total < 1200 THEN '4. 800-1199'
         ELSE '5. 1200+' END AS band, count(*) AS orders FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY 1""", a)
     delivery = one(f"""SELECT count(*) FILTER (WHERE o.delivered_at IS NOT NULL) AS delivered,
@@ -1390,7 +1476,7 @@ def orders_analytics(date_from: str | None = None, date_to: str | None = None, i
         FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC LIMIT 8""", a)
     return {"kpis": kpis, "prev": prev, "prev_range": pr, "dates": cur["dates"], "current": cur["m"], "prev_dates": pser["dates"] if pser else None, "previous": pser["m"] if pser else None,
             "status": status, "payment": payment, "failures": failures, "coupons": coupons, "cities": cities, "pincodes": pins, "hours": hours,
-            "customers": customers, "channels": channels, "buckets": buckets, "delivery": delivery, "riders": riders}
+            "customers": customers, "channels": channels, "credited_channels": credited, "buckets": buckets, "delivery": delivery, "riders": riders}
 
 
 @app.get("/api/orders/{order_id}")

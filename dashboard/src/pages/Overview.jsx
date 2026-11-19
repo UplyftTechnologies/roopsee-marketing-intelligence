@@ -5,6 +5,7 @@ import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/MetricChart'
 import ReportTable from '../components/ReportTable'
+import PageSpeed from '../components/PageSpeed'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const RAMP = ['var(--seq-100)', 'var(--seq-200)', 'var(--seq-300)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
@@ -63,6 +64,7 @@ export default function Overview() {
           </Card>
           <ReportTable title="Where traffic comes from" sub="Group by channel, campaign, device, place… Click a row to see its sessions." />
           <Card title="When people visit"><Heatmap hours={hours} /></Card>
+          <PageSpeed />
           <div className="muted" style={{ fontSize: 12 }}>
             Scorecards and the chart use the order date; the table credits an order to the session it was placed in, so the two can differ slightly.
           </div>

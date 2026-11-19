@@ -12,12 +12,13 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from .db import DB_LOCK, RAW_SCHEMAS, connect
+from .db import DB_LOCK, RAW_SCHEMAS, connect, log_run
 from .supa import ReadOnlySupabase
 
 IST_TZ = timezone(timedelta(hours=5, minutes=30))
 PAGE = 1000
 WORKERS = 6
+OVERLAP_H = 24
 
 SMALL_TABLES = {  # raw table -> (supabase table, columns to select)
     "raw_users": ("users", None),
@@ -82,6 +83,7 @@ def _fetch_window(start: datetime, end: datetime) -> list[dict]:
 
 
 def extract_events(con) -> int:
+    t_start = datetime.now()
     sb = ReadOnlySupabase()
     mx = con.execute("SELECT max(created_at) FROM raw_event_log").fetchall()[0][0]
     if mx is None:
@@ -89,7 +91,7 @@ def extract_events(con) -> int:
         start = datetime.fromisoformat(first[0]["created_at"]).astimezone(IST_TZ)
         _log(f"event_log backfill from {start:%Y-%m-%d}")
     else:
-        start = mx.astimezone(IST_TZ) - timedelta(hours=1)
+        start = mx.astimezone(IST_TZ) - timedelta(hours=OVERLAP_H)  # re-read the last day: inserts are idempotent, so late-arriving rows are caught
         _log(f"event_log incremental from {start:%Y-%m-%d %H:%M}")
     now = datetime.now(IST_TZ) + timedelta(hours=1)
     day0 = start.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -111,6 +113,7 @@ def extract_events(con) -> int:
                 _log(f"  windows {done}/{len(windows)}  rows fetched {total:,}")
     n = con.execute("SELECT count(*) FROM raw_event_log").fetchall()[0][0]
     _log(f"raw_event_log now {n:,} rows")
+    log_run(con, "extract:event_log", t_start, n, f"{total:,} rows fetched")
     return n
 
 
@@ -128,9 +131,22 @@ def extract_small(con) -> None:
             if len(page) < PAGE:
                 break
             off += PAGE
-        con.execute(f"DELETE FROM {raw}").fetchall()
-        _insert(con, raw, _frame(rows, schema), ignore=False)
+        t_start = datetime.now()
+        prev = con.execute(f"SELECT count(*) FROM {raw}").fetchall()[0][0]
+        if prev >= 20 and len(rows) < prev * 0.5:  # a pull that suddenly returns far fewer rows is a failed pull, not a real change
+            _log(f"{raw}: SKIPPED, source returned {len(rows):,} rows but {prev:,} are stored")
+            log_run(con, f"extract:{raw}", t_start, prev, f"skipped: source returned {len(rows)} rows, {prev} stored")
+            continue
+        con.execute("BEGIN TRANSACTION")  # replace atomically: a failure half-way can never leave the table empty
+        try:
+            con.execute(f"DELETE FROM {raw}").fetchall()
+            _insert(con, raw, _frame(rows, schema), ignore=False)
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
         _log(f"{raw}: {len(rows):,} rows")
+        log_run(con, f"extract:{raw}", t_start, len(rows))
 
 
 def run(con=None, small_only: bool = False) -> None:

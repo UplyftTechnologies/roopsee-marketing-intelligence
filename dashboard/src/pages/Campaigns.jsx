@@ -36,6 +36,7 @@ export default function Campaigns() {
                   { label: 'Checkout', sortBy: 'checkout_rate', num: true, render: (r) => pct(r.checkout_rate, 1) },
                   { label: 'Orders (same session)', sortBy: 'orders', num: true, render: (r) => num(r.orders) },
                   { label: 'Orders (first touch)', sortBy: 'ft_orders', num: true, render: (r) => num(r.ft_orders) },
+                  { label: 'Orders (last campaign, 7 days)', sortBy: 'lnd_orders', num: true, render: (r) => num(r.lnd_orders) },
                   { label: 'Revenue', sortBy: 'best_revenue', num: true, render: (r) => inr(r.best_revenue) },
                   { label: 'Verdict', sortBy: 'verdict', render: (r) => <Badge tone={verdictTone[r.verdict]}>{r.verdict}</Badge> },
                 ]}

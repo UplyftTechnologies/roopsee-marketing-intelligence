@@ -4,7 +4,7 @@ import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort 
 import BulkExclude from '../components/BulkExclude'
 
 const TONE = { 'Repeat buyer': 'good', Buyer: 'good', 'Abandoned checkout': 'serious', 'Cart, no checkout': 'warn', 'Quiz done, no cart': 'warn' }
-const PRESETS = [['', 'Everyone'], ['cart_abandoners', 'Cart abandoners'], ['checkout_abandoners', 'Checkout abandoners'], ['logged_in', 'Logged in'], ['buyers', 'Buyers'], ['reachable', 'Reachable by phone']]
+const PRESETS = [['', 'Everyone'], ['cart_abandoners', 'Cart abandoners'], ['checkout_abandoners', 'Checkout abandoners'], ['logged_in', 'Logged in'], ['buyers', 'Buyers'], ['reachable', 'Reachable by phone'], ['has_pincode', 'Has a delivery pincode'], ['saved_address', 'Saved an address']]
 const TEXT_SORTS = ['name', 'email', 'city', 'segment', 'first_channel']
 
 export default function Users() {
@@ -54,7 +54,8 @@ export default function Users() {
                     { label: 'Email', sortBy: 'email', render: (r) => (r.email ? <span className="trunc" style={{ display: 'block', maxWidth: 190 }} title={r.email}>{r.email}</span> : <span className="muted">–</span>) },
                     { label: 'Segment', sortBy: 'segment', render: (r) => <Badge tone={TONE[r.segment]}>{r.segment}</Badge> },
                     { label: 'First source', sortBy: 'first_channel', render: (r) => <span title={r.first_campaign}>{r.first_channel}</span> },
-                    { label: 'Location', sortBy: 'city', render: (r) => [r.city, r.state].filter(Boolean).join(', ') || '–' },
+                    { label: 'Location', sortBy: 'city', render: (r) => <span title={r.ip_city && r.ip_city !== r.city ? `Visitor IP says ${r.ip_city}` : ''}>{[r.city, r.state].filter(Boolean).join(', ') || '–'}</span> },
+                    { label: 'Pincode', cls: 'mono', sortBy: 'delivery_pincode', render: (r) => (r.delivery_pincode ? <>{r.delivery_pincode}{r.has_saved_address ? <span title="Saved an address"> ✓</span> : null}</> : <span className="muted">–</span>) },
                     { label: 'Sessions', num: true, sortBy: 'sessions', render: (r) => r.sessions },
                     { label: 'Carts', num: true, sortBy: 'cart_sessions', render: (r) => r.cart_sessions }, { label: 'Orders', num: true, sortBy: 'orders', render: (r) => r.orders },
                     { label: 'Revenue', num: true, sortBy: 'revenue', render: (r) => (r.revenue ? inr(r.revenue) : '–') },

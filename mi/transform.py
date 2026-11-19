@@ -10,7 +10,7 @@ and exclusions can be edited and re-applied at any time.
 import time
 from datetime import datetime
 
-from .db import DB_LOCK
+from .db import DB_LOCK, log_run
 
 # ---------------------------------------------------------------- exclusions (editable user data)
 EXCLUSION_KINDS = {
@@ -31,13 +31,14 @@ EXCLUSION_KINDS = {
     "campaign": "Campaign name",
     "channel": "Channel (e.g. Paid Google)",
     "any_text": "Anything - matches name, ids, ip, phone, email, page URL, referrer, city",
-    "rule": "Built-in rule: staff_roles, admin_pages, dev_hosts, non_india",
+    "rule": "Built-in rule: staff_roles, admin_pages, dev_hosts, non_india, crawler_ua",
 }
 DEFAULT_RULES = [
     ("rule", "staff_roles", "Accounts with role admin / rider / doctor, and everything their browsers did"),
     ("rule", "admin_pages", "Any visitor who opened a /admin page is internal staff"),
     ("rule", "dev_hosts", "Vercel preview builds and localhost:<port> dev servers"),
     ("rule", "non_india", "Traffic geolocated outside India (mostly datacenter bots: Mountain View, Ashburn...)"),
+    ("rule", "crawler_ua", "Crawlers, headless browsers and link-preview bots (user agent says bot / crawler / headless / externalads ...)"),
     ("rule", "staff_orders", "Orders placed from admin/rider/doctor accounts (team-placed or test orders). Disable if these are real customer orders"),
     ("email", "@roopsee.com", "Company email domain"),
     ("email", "@joinuplyft.com", "Agency / team email domain"),
@@ -111,6 +112,9 @@ CREATE OR REPLACE MACRO event_key(e) AS CASE
   WHEN e IN ('clicked_pay_now','payment_started','payment_success') THEN 'pay_started'
   WHEN e IN ('page_viewed_checkout','page_view_checkout','clicked_checkout','clicked_checkout_cart_drawer','clicked_my_cart_login_to_checkout') THEN 'checkout_view'
   WHEN e IN ('address_field_filled','clicked_save_address','delivery_location_set') THEN 'address'
+  WHEN e = 'address_saved' THEN 'address_saved'
+  WHEN e IN ('payment_cancelled','payment_failed') THEN 'payment_failed'
+  WHEN e = 'login_prompt_shown' THEN 'login_prompt'
   WHEN e = 'add_to_cart' OR e LIKE 'clicked\_add\_to\_cart%' ESCAPE '\' OR e IN ('clicked_buy_now_product_detail','clicked_buy_bundle') THEN 'add_to_cart'
   WHEN e IN ('view_cart','clicked_open_cart','clicked_open_cart_navbar','clicked_view_cart') THEN 'view_cart'
   WHEN e = 'added_to_wishlist' THEN 'wishlist'
@@ -130,13 +134,14 @@ CREATE OR REPLACE TABLE identity_map AS
 WITH ev AS (
   SELECT coalesce(nullif(visitor_id,''), {jj('visitorId')}) AS visitor_id,
          coalesce(CASE WHEN regexp_matches(user_id, '{UUID_RE}') THEN lower(user_id) END,
-                  CASE WHEN regexp_matches({jj('userId')}, '{UUID_RE}') THEN lower({jj('userId')}) END) AS user_id
+                  CASE WHEN regexp_matches({jj('userId')}, '{UUID_RE}') THEN lower({jj('userId')}) END) AS user_id,
+         created_at AS ts
   FROM raw_event_log),
 c AS (
-  SELECT visitor_id, user_id, count(*) n FROM ev WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL GROUP BY 1,2
+  SELECT visitor_id, user_id, count(*) n, max(ts) AS last_ts FROM ev WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL GROUP BY 1,2
   UNION ALL
-  SELECT visitor_id, lower(user_id), 0 FROM raw_visitor_links WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL),
-r AS (SELECT visitor_id, user_id, row_number() OVER (PARTITION BY visitor_id ORDER BY n DESC) rn FROM c)
+  SELECT visitor_id, lower(user_id), 0, linked_at FROM raw_visitor_links WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL),
+r AS (SELECT visitor_id, user_id, row_number() OVER (PARTITION BY visitor_id ORDER BY n DESC, last_ts DESC NULLS LAST) rn FROM c)
 SELECT visitor_id AS visitor_key, user_id FROM r WHERE rn = 1;
 """
 
@@ -160,7 +165,8 @@ WITH p AS (
     nullif(nullif(e.platform,''), 'Unknown Platform') AS platform_n,
     CASE WHEN e.browser LIKE 'Mozilla/%' THEN CASE WHEN e.browser LIKE '%; wv)%' THEN 'Android WebView' WHEN e.browser LIKE '%Chrome%' THEN 'Chrome' ELSE 'Other' END
          WHEN e.browser = 'Unknown Browser' THEN NULL ELSE nullif(e.browser,'') END AS browser_n,
-    coalesce(nullif(e.referrer,''), {jj('referrer')}) AS referrer_raw
+    coalesce(nullif(e.referrer,''), {jj('referrer')}) AS referrer_raw,
+    regexp_matches(lower(coalesce(e.browser, '')), '\\bbot\\b|bot/|crawler|spider|headless|externalads|facebookexternalhit|lighthouse|pagespeed|pingdom') AS is_bot_ua
   FROM raw_event_log e),
 q AS (
   SELECT p.*,
@@ -171,6 +177,8 @@ q AS (
     CASE WHEN p.page_link LIKE 'Android app:%' THEN coalesce(nullif(regexp_replace(trim(substr(p.page_link, 13)), '[?#].*$', ''), ''), '/')
          ELSE coalesce(nullif(regexp_extract(p.page_link, '^https?://[^/?#]+(/[^?#]*)?', 1), ''), '/') END AS path
   FROM p LEFT JOIN identity_map m ON m.visitor_key = p.visitor_id)
+,
+b0 AS (
 SELECT q.id, q.ts, timezone('Asia/Kolkata', q.ts) AS ts_ist, q.event_name, event_key(q.event_name) AS event_key,
   (q.event_name IN ('page_viewed','page_view') OR q.event_name LIKE 'page\\_view\\_%' ESCAPE '\\') AS is_pageview,
   q.session_id, q.visitor_id, q.visitor_key, q.user_id_res AS user_id,
@@ -200,8 +208,22 @@ SELECT q.id, q.ts, timezone('Asia/Kolkata', q.ts) AS ts_ist, q.event_name, event
   {j('search_term')} AS search_term, {j('paymentMethod')} AS payment_method,
   coalesce(try_cast({j('grand_total')} AS DOUBLE), try_cast({j('cartTotal')} AS DOUBLE)) AS amount,
   CASE WHEN regexp_matches(trim(coalesce({jj('pincode')}, {jj('addressPincode')}, '')), '^[0-9]{{6}}$')
-       THEN trim(coalesce({jj('pincode')}, {jj('addressPincode')})) END AS pincode_ev
-FROM q LEFT JOIN raw_users u ON lower(u.id) = q.user_id_res;
+       THEN trim(coalesce({jj('pincode')}, {jj('addressPincode')})) END AS pincode_ev,
+  nullif(trim(coalesce({jj('addressCity')}, {jj('cityName')})), '') AS addr_city_ev,
+  nullif(trim(coalesce({jj('addressState')}, {jj('stateName')})), '') AS addr_state_ev,
+  try_cast(coalesce({jj('load_ms')}, {jj('loadMs')}) AS DOUBLE) AS load_ms,
+  try_cast({jj('dom_ready_ms')} AS DOUBLE) AS dom_ready_ms,
+  q.is_bot_ua
+FROM q LEFT JOIN raw_users u ON lower(u.id) = q.user_id_res)
+-- the tracker often fires one action several times (and one action under several event names): flag every repeat of the
+-- same thing in the same session within 2 seconds (1 second for untracked events such as clicks and scrolls). Nothing is deleted; counts use NOT is_dup.
+SELECT * EXCLUDE (prev_ts, ev_id),
+  (prev_ts IS NOT NULL AND ts - prev_ts <= CASE WHEN event_key IS NOT NULL OR is_pageview THEN INTERVAL 2 SECOND ELSE INTERVAL 1 SECOND END) AS is_dup
+FROM (SELECT b0.*, b0.id AS ev_id,
+        lag(b0.ts) OVER (PARTITION BY b0.session_id, CASE WHEN b0.is_pageview THEN 'pageview' ELSE coalesce(b0.event_key, b0.event_name) END,
+                                      coalesce(b0.product_name, ''), coalesce(b0.order_id, ''), coalesce(b0.path, '')
+                         ORDER BY b0.ts, b0.id) AS prev_ts
+      FROM b0);
 """
 
 # (kind, join condition on e = events_base row / x = exclusion row, propagate to the whole visitor?)
@@ -227,6 +249,7 @@ RULE_SQL = [
     ("admin_pages", "e.page_type = 'admin'", True),
     ("dev_hosts", "e.is_dev", False),
     ("non_india", "e.country_n IS NOT NULL AND e.country_n <> 'India'", False),
+    ("crawler_ua", "e.is_bot_ua", False),
 ]
 
 
@@ -257,14 +280,26 @@ def step_hits(con) -> None:
 
 
 STEP_SESSIONS = """
+-- pincode -> place, learned from saved addresses and orders
+CREATE OR REPLACE TABLE dim_pincode AS
+SELECT pincode, mode(initcap(lower(trim(city)))) AS city, mode(initcap(lower(trim(state)))) AS state FROM (
+  SELECT pincode, city, state FROM raw_customer_address WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$')
+  UNION ALL SELECT pincode, city, state FROM raw_orders WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$'))
+GROUP BY 1;
+
 CREATE OR REPLACE TABLE sessions_pre AS
 WITH k AS (
   SELECT session_id, event_key, ts, row_number() OVER (PARTITION BY session_id, event_key ORDER BY ts) rn
   FROM events_base WHERE event_key IS NOT NULL),
 keys AS (SELECT session_id, string_agg(event_key, ' > ' ORDER BY ts) AS key_events FROM k WHERE rn = 1 GROUP BY 1),
+-- time actually spent: gaps between consecutive events, ignoring idle gaps over 30 minutes (a session id can live for weeks)
+gp AS (
+  SELECT session_id, coalesce(sum(CASE WHEN g <= 1800 THEN g ELSE 0 END), 0) AS active_s FROM (
+    SELECT session_id, epoch(ts) - epoch(lag(ts) OVER (PARTITION BY session_id ORDER BY ts, id)) AS g FROM events_base WHERE NOT is_dup)
+  GROUP BY 1),
 a AS (
-  SELECT session_id, min(ts) AS started_at, max(ts) AS ended_at, count(*) AS events,
-    count(*) FILTER (WHERE is_pageview) AS pageviews,
+  SELECT session_id, min(ts) AS started_at, max(ts) AS ended_at, count(*) FILTER (WHERE NOT is_dup) AS events, count(*) AS events_raw,
+    count(*) FILTER (WHERE is_pageview AND NOT is_dup) AS pageviews,
     arg_min(visitor_key, ts) AS visitor_key, max(user_id) AS user_id,
     arg_min(path, ts) AS landing_path, arg_min(page_type, ts) AS landing_type,
     first(utm_source ORDER BY ts) FILTER (WHERE utm_source IS NOT NULL) AS utm_source,
@@ -293,19 +328,21 @@ a AS (
     coalesce(bool_or(pincode_ev IS NOT NULL OR event_name IN ('delivery_location_set', 'location_search_selected', 'location_search_suggestion_picked',
                                                               'checked_delivery_pincode', 'clicked_use_current_location', 'selected_saved_address')), false) AS f_location,
     last(pincode_ev ORDER BY ts) FILTER (WHERE pincode_ev IS NOT NULL) AS pincode,
+    last(addr_city_ev ORDER BY ts) FILTER (WHERE addr_city_ev IS NOT NULL) AS addr_city,
+    last(addr_state_ev ORDER BY ts) FILTER (WHERE addr_state_ev IS NOT NULL) AS addr_state,
     bool_or(event_name LIKE 'clicked\\_%' ESCAPE '\\' OR event_name IN ('ui_clicked','page_scrolled','scroll_depth','searchbar_typed','add_to_cart')
             OR event_key IN ('add_to_cart','view_cart','checkout_view','pay_started','order_placed','quiz_started','quiz_completed',
                              'login','search','wishlist','assistant','address')) AS f_interact
   FROM events_base GROUP BY 1),
 b AS (
-  SELECT a.*, keys.key_events,
+  SELECT a.*, keys.key_events, coalesce(gp.active_s, 0) AS active_s,
     CASE lower(utm_source) WHEN 'ig' THEN 'instagram' WHEN 'fb' THEN 'facebook' WHEN 'wa' THEN 'whatsapp'
          WHEN 'th' THEN 'threads' ELSE lower(utm_source) END AS src_utm,
     CASE WHEN referrer_host LIKE '%instagram.com' THEN 'instagram' WHEN referrer_host LIKE '%facebook.com' THEN 'facebook'
          WHEN referrer_host LIKE '%google.%' OR referrer_host LIKE '%googlequicksearchbox%'
               OR referrer_host LIKE '%doubleclick%' OR referrer_host LIKE '%googlesyndication%' THEN 'google'
          WHEN referrer_host LIKE '%youtube.com' THEN 'youtube' ELSE referrer_host END AS src_ref
-  FROM a LEFT JOIN keys USING (session_id)),
+  FROM a LEFT JOIN keys USING (session_id) LEFT JOIN gp USING (session_id)),
 c AS (
   SELECT b.*,
     coalesce(src_utm, CASE WHEN has_gclid THEN 'google' WHEN has_fbclid THEN 'facebook' END, src_ref, 'direct') AS source,
@@ -315,7 +352,11 @@ c AS (
                               ELSE 'none' END) AS medium,
     coalesce(utm_campaign, 'gads_' || gad_campaign, '(not set)') AS campaign
   FROM b)
-SELECT c.*, timezone('Asia/Kolkata', started_at)::DATE AS date_ist,
+SELECT x.*, CASE WHEN x.channel = 'Direct' THEN CASE WHEN x.is_returning THEN 'Direct (returning)' ELSE 'Direct (new)' END ELSE x.channel END AS channel_split
+FROM (
+SELECT c.*, min(c.started_at) OVER (PARTITION BY c.visitor_key) < c.started_at AS is_returning,
+  coalesce(pc.city, initcap(lower(c.addr_city))) AS delivery_city, coalesce(pc.state, initcap(lower(c.addr_state))) AS delivery_state,
+  timezone('Asia/Kolkata', started_at)::DATE AS date_ist,
   CASE WHEN source = 'mygate' THEN 'MyGate Partner'
        WHEN source = 'google' AND (has_gclid OR medium IN ('cpc','ppc','paid')) THEN 'Paid Google'
        WHEN source IN ('instagram','facebook') AND (has_fbclid OR medium LIKE 'paid%' OR medium = 'cpc') THEN 'Paid Meta'
@@ -324,10 +365,10 @@ SELECT c.*, timezone('Asia/Kolkata', started_at)::DATE AS date_ist,
        WHEN source = 'google' THEN 'Organic Search'
        WHEN source = 'direct' THEN 'Direct'
        ELSE 'Referral' END AS channel,
-  epoch(ended_at) - epoch(started_at) AS duration_s,
+  active_s AS duration_s, epoch(ended_at) - epoch(started_at) AS span_s,
   (pageviews <= 1 AND NOT f_interact) AS is_bounce,
   CASE WHEN f_order THEN 5 WHEN f_pay THEN 4 WHEN f_checkout THEN 3 WHEN f_cart THEN 2 WHEN f_product THEN 1 ELSE 0 END AS stage
-FROM c;
+FROM c LEFT JOIN dim_pincode pc ON pc.pincode = c.pincode) x;
 
 -- source / campaign / channel exclusions are matched on session attribution
 INSERT INTO excluded_sessions
@@ -383,6 +424,14 @@ o AS (
     o.rider_id, o.courier_partner, o.tracking_id
   FROM raw_orders o LEFT JOIN om ON om.order_id = lower(o.id))
 SELECT o.*, (o.is_placed AND NOT o.is_test) AS is_valid,
+  CASE WHEN NOT o.is_placed THEN 'not_placed'
+       WHEN o.payment_status = 'success' OR o.paid_at IS NOT NULL OR o.cod_collected_at IS NOT NULL THEN 'confirmed'
+       WHEN upper(coalesce(o.payment_method, '')) = 'COD' AND o.payment_status = 'pending' THEN 'cod_pending'
+       WHEN o.payment_status = 'cancelled' THEN 'conflicting'
+       ELSE 'unconfirmed' END AS payment_state,
+  CASE WHEN coalesce(s.channel, 'Direct') = 'Direct' AND nd.started_at >= o.ts - INTERVAL 7 DAY THEN nd.session_id ELSE o.session_id END AS credit_session_id,
+  CASE WHEN coalesce(s.channel, 'Direct') = 'Direct' AND nd.started_at >= o.ts - INTERVAL 7 DAY THEN nd.channel ELSE s.channel END AS credit_channel,
+  CASE WHEN coalesce(s.channel, 'Direct') = 'Direct' AND nd.started_at >= o.ts - INTERVAL 7 DAY THEN nd.campaign ELSE s.campaign END AS credit_campaign,
   CASE WHEN o.is_placed AND NOT o.is_test THEN o.total ELSE 0 END AS revenue,
   s.channel, s.source, s.medium, s.campaign, s.device, s.is_app, rd.name AS rider_name,
   CASE WHEN o.is_placed AND NOT o.is_test
@@ -395,7 +444,26 @@ SELECT o.*, (o.is_placed AND NOT o.is_test) AS is_valid,
    OR o.phone10 IN (SELECT right(regexp_replace(v, '[^0-9]', '', 'g'), 10) FROM excl WHERE kind = 'phone')
    OR EXISTS (SELECT 1 FROM excl x WHERE x.kind = 'email' AND (o.email_l = x.v OR (x.v LIKE '@%' AND o.email_l LIKE '%' || x.v))),
    FALSE) AS is_excluded
-FROM o LEFT JOIN sessions s ON s.session_id = o.session_id LEFT JOIN raw_users rd ON lower(rd.id) = lower(o.rider_id);
+FROM o LEFT JOIN sessions s ON s.session_id = o.session_id LEFT JOIN raw_users rd ON lower(rd.id) = lower(o.rider_id)
+ASOF LEFT JOIN (SELECT coalesce(user_id, visitor_key) AS person_key, started_at, session_id, channel, campaign FROM sessions
+                WHERE channel <> 'Direct' AND NOT is_excluded) nd
+  ON nd.person_key = coalesce(o.user_id, s.visitor_key) AND o.ts >= nd.started_at;
+
+-- per-session order totals, computed once here instead of on every Sessions request
+CREATE OR REPLACE TABLE session_orders AS
+SELECT session_id, count(*) FILTER (WHERE NOT is_test) AS n_orders, count(*) FILTER (WHERE is_valid) AS n_placed,
+  sum(total) FILTER (WHERE is_valid AND NOT is_test) AS order_value, sum(total) FILTER (WHERE NOT is_valid AND NOT is_test) AS other_value,
+  string_agg(DISTINCT status, ', ') FILTER (WHERE NOT is_test) AS statuses, any_value(email_l) FILTER (WHERE email_l IS NOT NULL) AS order_email
+FROM orders_clean WHERE session_id IS NOT NULL GROUP BY 1;
+
+-- which event names each session contains (powers the "had event" filter and event-name search on Sessions)
+CREATE OR REPLACE TABLE session_events AS SELECT DISTINCT session_id, event_name FROM events_base;
+
+-- page speed samples (the tracker reports load time on each page load)
+CREATE OR REPLACE TABLE perf_samples AS
+SELECT timezone('Asia/Kolkata', ts)::DATE AS date_ist, page_type, CASE WHEN is_app THEN 'Android app' ELSE coalesce(device_n, 'Unknown') END AS device,
+       load_ms, dom_ready_ms, is_excluded
+FROM events_clean WHERE event_name = 'page_load_sample' AND load_ms IS NOT NULL AND load_ms >= 0 AND load_ms < 120000;
 """
 
 STEP_PRODUCTS = """
@@ -478,7 +546,18 @@ LEFT JOIN orders_clean o ON o.order_id = lower(e.order_id) OR o.session_id = s.s
 
 STEP_USERS = """
 CREATE OR REPLACE TABLE users_360 AS
+SELECT u0.*, CASE WHEN u0.phone10 IS NOT NULL THEN min(u0.person_key) OVER (PARTITION BY u0.phone10) END AS phone_group FROM (
 WITH sp AS (SELECT *, coalesce(user_id, visitor_key) AS person_key FROM sessions),
+dl AS (  -- where they want delivery: saved address first, else the latest order, else a pincode typed in a session
+  SELECT p.person_key, coalesce(sa.pincode, lo.pincode, ls.pincode) AS pincode, (sa.pincode IS NOT NULL) AS has_saved_address,
+         coalesce(sa.city, lo.city, ls.city) AS city, coalesce(sa.state, lo.state, ls.state) AS state
+  FROM (SELECT DISTINCT person_key, user_id FROM sp) p
+  LEFT JOIN (SELECT lower(user_id) AS user_id, pincode, city, state, row_number() OVER (PARTITION BY lower(user_id) ORDER BY is_default DESC NULLS LAST, created_at DESC) rn
+             FROM raw_customer_address WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$')) sa ON sa.user_id = p.user_id AND sa.rn = 1
+  LEFT JOIN (SELECT user_id, pincode, city, state, row_number() OVER (PARTITION BY user_id ORDER BY ts DESC) rn FROM orders_clean
+             WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$')) lo ON lo.user_id = p.user_id AND lo.rn = 1
+  LEFT JOIN (SELECT person_key, pincode, delivery_city AS city, delivery_state AS state, row_number() OVER (PARTITION BY person_key ORDER BY started_at DESC) rn
+             FROM sp WHERE pincode IS NOT NULL) ls ON ls.person_key = p.person_key AND ls.rn = 1),
 agg AS (
   SELECT person_key, any_value(user_id) AS user_id, min(started_at) AS first_seen, max(ended_at) AS last_seen,
     count(*) AS sessions, sum(events) AS events, sum(pageviews) AS pageviews,
@@ -510,7 +589,8 @@ SELECT a.person_key, a.user_id, u.name, nullif(coalesce(a.phone10, right(regexp_
   u.email, u.role, u.created_at AS signed_up_at, (a.user_id IS NOT NULL) AS is_registered,
   a.first_seen, a.last_seen, a.sessions, a.events, a.pageviews,
   a.first_channel, a.first_campaign, a.first_source, a.first_medium, a.first_date, a.first_landing,
-  coalesce(a.city, od.order_city) AS city, coalesce(a.state, od.order_state) AS state, a.country, a.device, a.platform, a.uses_app,
+  coalesce(initcap(lower(dl.city)), a.city, od.order_city) AS city, coalesce(initcap(lower(dl.state)), a.state, od.order_state) AS state, a.city AS ip_city, a.country,
+  dl.pincode AS delivery_pincode, coalesce(dl.has_saved_address, FALSE) AS has_saved_address, a.device, a.platform, a.uses_app,
   a.product_sessions, a.cart_sessions, a.checkout_sessions, a.quiz_sessions,
   coalesce(od.orders, 0) AS orders, coalesce(od.revenue, 0) AS revenue, od.last_order_at,
   CASE WHEN coalesce(od.orders, 0) > 0 THEN od.revenue / od.orders END AS aov,
@@ -526,7 +606,8 @@ SELECT a.person_key, a.user_id, u.name, nullif(coalesce(a.phone10, right(regexp_
 FROM agg a
 LEFT JOIN raw_users u ON lower(u.id) = a.user_id
 LEFT JOIN ord od ON od.person_key = a.person_key
-LEFT JOIN q ON q.person_key = a.person_key;
+LEFT JOIN q ON q.person_key = a.person_key
+LEFT JOIN dl ON dl.person_key = a.person_key) u0;
 
 CREATE OR REPLACE TABLE person_weeks AS
 SELECT DISTINCT coalesce(user_id, visitor_key) AS person_key, date_trunc('week', timezone('Asia/Kolkata', started_at))::DATE AS week
@@ -542,16 +623,23 @@ ft AS (  -- orders credited to the buyer's FIRST session (first touch): who actu
          u.first_campaign AS campaign, count(*) AS orders, sum(oc.revenue) AS revenue
   FROM orders_clean oc JOIN users_360 u ON u.user_id = oc.user_id
   WHERE oc.is_valid AND NOT oc.is_excluded GROUP BY ALL)
+,
+lnd AS (  -- orders credited to the last non-Direct visit in the 7 days before the order
+  SELECT cs.date_ist, cs.channel, cs.source, cs.medium, cs.campaign, count(*) AS orders, sum(oc.revenue) AS revenue
+  FROM orders_clean oc JOIN sessions cs ON cs.session_id = oc.credit_session_id
+  WHERE oc.is_valid AND NOT oc.is_excluded GROUP BY ALL)
 SELECT s.date_ist, s.channel, s.source, s.medium, s.campaign, s.is_excluded,
   count(*) AS sessions, count(DISTINCT s.visitor_key) AS visitors,
   count(*) FILTER (WHERE s.events >= 5 OR s.f_product) AS engaged_sessions,
   count(*) FILTER (WHERE s.f_quiz_done) AS quiz_done, count(*) FILTER (WHERE s.f_cart) AS carts,
   count(*) FILTER (WHERE s.f_checkout) AS checkouts,
   coalesce(max(so.orders), 0) AS orders, coalesce(max(so.revenue), 0) AS revenue,
-  coalesce(max(ft.orders), 0) AS ft_orders, coalesce(max(ft.revenue), 0) AS ft_revenue
+  coalesce(max(ft.orders), 0) AS ft_orders, coalesce(max(ft.revenue), 0) AS ft_revenue,
+  coalesce(max(lnd.orders), 0) AS lnd_orders, coalesce(max(lnd.revenue), 0) AS lnd_revenue
 FROM sessions s
 LEFT JOIN so ON so.date_ist = s.date_ist AND so.channel = s.channel AND so.source = s.source AND so.medium = s.medium AND so.campaign = s.campaign
 LEFT JOIN ft ON ft.date_ist = s.date_ist AND ft.channel = s.channel AND ft.source = s.source AND ft.medium = s.medium AND ft.campaign = s.campaign
+LEFT JOIN lnd ON lnd.date_ist = s.date_ist AND lnd.channel = s.channel AND lnd.source = s.source AND lnd.medium = s.medium AND lnd.campaign = s.campaign
 GROUP BY ALL;
 """
 
@@ -590,4 +678,5 @@ def run(con, flags_only: bool = False) -> dict:
         }
         con.execute("INSERT OR REPLACE INTO etl_meta VALUES ('last_transform', ?)", [datetime.now().isoformat(timespec="seconds")])
         _log(f"transform done {stats}")
+        log_run(con, "transform", datetime.fromtimestamp(t0), stats["events"], f"{stats['sessions']} sessions, {stats['people']} people, {stats['seconds']}s")
         return stats

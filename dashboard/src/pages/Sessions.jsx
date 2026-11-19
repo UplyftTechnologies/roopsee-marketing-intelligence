@@ -56,6 +56,8 @@ export default function Sessions() {
   const [match, setMatch] = usePersisted('sessions.match2', 'all', fresh)
   const [only, setOnly] = usePersisted('sessions.only', 'counted', fresh)
   const [pincode, setPincode] = usePersisted('sessions.pincode', '', fresh)
+  const [event, setEvent] = usePersisted('sessions.event', '', fresh)
+  const evNames = useApi('/events/names', {}, { scoped: false })
   const [sort, setSort] = usePersisted('sessions.sort', { key: 'started_at', dir: 'desc' }, fresh)
   const [limit, setLimit] = usePersisted('sessions.limit', 50)
   const [panel, setPanel] = usePersisted('sessions.panel', false)
@@ -65,19 +67,20 @@ export default function Sessions() {
   const counts = useApi('/sessions/counts')
   const s = useApi('/sessions', {
     search, channel: channel === 'All' ? undefined : channel, has: has.join(',') || undefined, lacks: lacks.join(',') || undefined, match,
-    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, sort: sort.key, direction: sort.dir, limit, offset,
+    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, sort: sort.key, direction: sort.dir, limit, offset,
   })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, sort, limit])
+  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, sort, limit])
   const activePreset = PRESETS.find(([, , h, l, m]) => same(h, has) && same(l, lacks) && (h.length < 2 || m === match))?.[0]
   const stateOf = (k) => (has.includes(k) ? 'did' : lacks.includes(k) ? 'not' : 'any')
   const setFlag = (k, st) => {
     setHas((h) => (st === 'did' ? [...h.filter((x) => x !== k), k] : h.filter((x) => x !== k)))
     setLacks((l) => (st === 'not' ? [...l.filter((x) => x !== k), k] : l.filter((x) => x !== k)))
   }
-  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setChannel('All'); setSearch(''); setOnly('counted') }
+  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setEvent(''); setChannel('All'); setSearch(''); setOnly('counted') }
   const activeChips = [
     ...has.map((k) => ({ id: `d-${k}`, text: `Did: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
     ...lacks.map((k) => ({ id: `n-${k}`, text: `Did not: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
+    ...(event.trim() ? [{ id: 'ev', text: `Had event: ${event.trim()}`, off: () => setEvent('') }] : []),
     ...(pins ? [{ id: 'pin', text: `Pincode: ${pins.split(',').join(', ')}`, off: () => setPincode('') }] : []),
     ...(channel !== 'All' ? [{ id: 'ch', text: `Channel: ${channel}`, off: () => setChannel('All') }] : []),
     ...(only === 'excluded' ? [{ id: 'ex', text: 'Only hidden sessions', off: () => setOnly('counted') }] : []),
@@ -89,7 +92,7 @@ export default function Sessions() {
   return (
     <>
       <div className="chip-row">
-        <Search value={search} onChange={setSearch} placeholder="Search session id, IP, phone, name, email, city, campaign, pincode…" />
+        <Search value={search} onChange={setSearch} placeholder="Search session id, IP, phone, name, email, city, campaign, pincode, or an event name (add_to_cart)…" />
         <Chips value={only} onChange={setOnly} options={[{ value: 'counted', label: 'Normal view' }, { value: 'excluded', label: 'Only hidden (excluded)' }]} />
         <button type="button" className={`btn ${nFilters ? 'primary' : ''}`} aria-expanded={panel} onClick={() => setPanel(!panel)}>
           Filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
@@ -125,6 +128,10 @@ export default function Sessions() {
                 <select className="field" value={channel} onChange={(e) => setChannel(e.target.value)} aria-label="Channel">
                   {['All', ...(counts.data?.channels || [])].map((c) => <option key={c}>{c}</option>)}
                 </select>
+              </label>
+              <label className="flag-row" title="Sessions that contain this event. Pick from the list or type part of a name; separate several with commas (any of them)"><span className="flag-name">Had event</span>
+                <input className="field" list="event-names" value={event} onChange={(e) => setEvent(e.target.value)} placeholder="checked_delivery_pincode" aria-label="Had event" style={{ width: 200 }} />
+                <datalist id="event-names">{(evNames.data || []).map((e) => <option key={e.event_name} value={e.event_name}>{`${e.sessions} sessions`}</option>)}</datalist>
               </label>
               <label className="flag-row" title="The pincode the visitor typed or picked as their delivery location"><span className="flag-name">Pincode</span>
                 <input className="field" value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="400001, 560001" aria-label="Pincode" style={{ width: 150 }} />

@@ -3,8 +3,8 @@ import { dur, inr, num, pct, useApi, useFilters } from '../api'
 import { Card, ExportBtn, GLOSSARY, Search } from '../ui'
 import Icon from './Icon'
 
-const DIMENSIONS = [['channel', 'Channel'], ['source_medium', 'Source / medium'], ['campaign', 'Campaign'], ['device', 'Device'],
-  ['landing', 'Landing page'], ['state', 'State'], ['city', 'City']]
+const DIMENSIONS = [['channel', 'Channel'], ['channel_split', 'Channel (Direct split new / returning)'], ['source_medium', 'Source / medium'], ['campaign', 'Campaign'], ['device', 'Device'],
+  ['landing', 'Landing page'], ['state', 'State (visitor IP)'], ['city', 'City (visitor IP)'], ['delivery_state', 'Delivery state (address given)'], ['delivery_city', 'Delivery city (address given)'], ['pincode', 'Pincode']]
 // Clicking a row opens the Sessions tab filtered to it (only where Sessions can filter on that dimension)
 const DRILL = { channel: (v) => ({ channel: v }), campaign: (v) => ({ search: v === '(not set)' ? '' : v }), city: (v) => ({ search: v }), state: (v) => ({ search: v }) }
 

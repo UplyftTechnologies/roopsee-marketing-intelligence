@@ -87,5 +87,15 @@ def init_raw(con) -> None:
     con.execute(META_DDL)
 
 
+def log_run(con, step: str, started, rows: int | None = None, note: str = "") -> None:
+    """One row per pipeline step in etl_runs (what ran, when, how many rows, any warning). Never lets logging break a run."""
+    import time
+    from datetime import datetime
+    try:
+        con.execute("INSERT INTO etl_runs VALUES (?, ?, ?, ?, ?, ?)", [int(time.time() * 1000), step, started, datetime.now(), rows, note or None])
+    except Exception:
+        pass
+
+
 import threading
 DB_LOCK = threading.RLock()  # serialises writers (extract inserts, transform) against API reads

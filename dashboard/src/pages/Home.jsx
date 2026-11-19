@@ -4,6 +4,7 @@ import { Card, Loading } from '../ui'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/MetricChart'
+import DataHealth from '../components/DataHealth'
 
 const GROUPS = [
   { key: 'attention', title: 'Needs attention', tones: ['bad', 'warn'], blurb: 'Things that are costing you customers or money' },
@@ -97,6 +98,7 @@ export default function Home() {
             <MiniList title="Top products · revenue" state={prod} fmt={inr}
               rows={(prod.data?.products || []).slice(0, 6).map((p) => ({ name: p.product_name, value: p.revenue }))} onRow={() => f.go('basket')} />
           </div>
+          <DataHealth />
         </>
       )}
     </Loading>

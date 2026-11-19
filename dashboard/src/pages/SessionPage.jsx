@@ -12,7 +12,7 @@ export default function SessionPage() {
   const s = useApi(`/sessions/${encodeURIComponent(id || '')}`, {}, { scoped: false })
   if (s.error) return <div className="banner err">Could not load this session: {s.error} <button className="btn small" onClick={() => f.go('sessions')}>Back to Sessions</button></div>
   if (!s.data) return <div className="skeleton" style={{ height: 320 }} />
-  const { session: x, events, pages, event_types: types, extra, orders, addresses, person, prev, next } = s.data
+  const { session: x, events, pages, event_types: types, extra, orders, addresses, duplicates_hidden: hiddenDups, person, prev, next } = s.data
   const who = person.name || (person.is_registered ? 'Registered user' : 'Anonymous browser')
   const maxType = Math.max(1, ...types.map((t) => t.n))
   const t0 = events.length ? new Date(events[0].at).getTime() : 0
@@ -41,8 +41,8 @@ export default function SessionPage() {
       </div>
 
       <div className="scorecards">
-        <div className="sc static"><span className="sc-label">Duration</span><span className="sc-value">{dur(x.duration_s)}</span><span className="sc-note">first to last event</span></div>
-        <div className="sc static"><span className="sc-label">Events</span><span className="sc-value">{num(x.events)}</span><span className="sc-note">{num(types.length)} kinds</span></div>
+        <div className="sc static"><span className="sc-label">Duration</span><span className="sc-value">{dur(x.duration_s)}</span><span className="sc-note">time active (idle gaps over 30 min ignored)</span></div>
+        <div className="sc static"><span className="sc-label">Events</span><span className="sc-value">{num(x.events)}</span><span className="sc-note">{num(types.length)} kinds{hiddenDups > 0 ? ` · ${num(hiddenDups)} repeats hidden` : ''}</span></div>
         <div className="sc static"><span className="sc-label">Page views</span><span className="sc-value">{num(x.pageviews)}</span><span className="sc-note">{num(pages.length)} different pages</span></div>
         <div className="sc static"><span className="sc-label">Reached</span><span className="sc-value" style={{ fontSize: 18 }}>{STAGE[x.stage]}</span><span className="sc-note"><Journey keyEvents={x.key_events} /></span></div>
         <div className="sc static"><span className="sc-label">Orders placed</span><span className="sc-value">{num(orders.length)}</span><span className="sc-note">{orders.length ? inr(orders.reduce((a, o) => a + (o.total || 0), 0)) : 'none'}</span></div>

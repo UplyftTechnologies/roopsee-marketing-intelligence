@@ -79,4 +79,5 @@ export const KEY_LABEL = {
   product_view: 'Product view', add_to_cart: 'Add to cart', view_cart: 'View cart', checkout_view: 'Checkout',
   address: 'Address', pay_started: 'Pay started', order_placed: 'Order placed', quiz_started: 'Quiz started',
   quiz_completed: 'Quiz done', login: 'Login', search: 'Search', wishlist: 'Wishlist', assistant: 'Assistant', app_open: 'App open',
+  address_saved: 'Address saved', payment_failed: 'Payment failed', login_prompt: 'Login prompt',
 }

@@ -71,7 +71,7 @@ function OrdersTable() {
                   { label: 'Order value', num: true, sortBy: 'total', render: (r) => <b>{inr(r.total)}</b> },
                   { label: 'Coupon', cls: 'nw', sortBy: 'coupon_code', render: (r) => (r.coupon_code ? <span title={r.coupon_discount ? `${inr(r.coupon_discount)} off` : ''}>{r.coupon_code.split(',')[0]}</span> : <span className="muted">–</span>) },
                   { label: 'Payment', cls: 'nw', sortBy: 'payment_method', render: (r) => r.payment_method || <span className="muted">–</span> },
-                  { label: 'Status', cls: 'nw', sortBy: 'status', render: (r) => <span title={r.payment_failed_reason || ''}><Badge tone={STATUS_TONE[r.status]}>{niceStatus(r.status)}</Badge></span> },
+                  { label: 'Status', cls: 'nw', sortBy: 'status', render: (r) => <span title={r.payment_failed_reason || ''}><Badge tone={STATUS_TONE[r.status]}>{niceStatus(r.status)}</Badge>{r.is_valid && (r.payment_state === 'unconfirmed' || r.payment_state === 'conflicting') ? <> <Badge tone="warn">{r.payment_state === 'conflicting' ? 'payment conflict' : 'payment unconfirmed'}</Badge></> : null}</span> },
                   { label: '', render: (r) => (r.is_test ? <Badge>test</Badge> : r.is_staff_order ? <Badge tone="warn">staff</Badge> : r.is_excluded ? <Badge tone="bad">excluded</Badge> : null) },
                 ]} />
               <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
@@ -106,6 +106,15 @@ function Analytics() {
             <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
               <MetricChart ts={ts} metric={metric} compare={f.compare} height={240} ranges={{ cur: f.rangeText, prev: f.prevText }} />
             </Card>
+
+            {(k.at_risk_orders > 0 || k.cod_pending_orders > 0) && (
+              <div className="banner">
+                <div>
+                  {k.at_risk_orders > 0 && <><b>{num(k.at_risk_orders)} counted sale{k.at_risk_orders === 1 ? '' : 's'} ({inr(k.at_risk_value)}) {k.at_risk_orders === 1 ? 'has' : 'have'} no confirmed payment.</b> They are included in the numbers above; check them before relying on revenue. </>}
+                  {k.cod_pending_orders > 0 && <span className="muted">{num(k.cod_pending_orders)} cash-on-delivery order{k.cod_pending_orders === 1 ? '' : 's'} ({inr(k.cod_pending_value)}) {k.cod_pending_orders === 1 ? 'is' : 'are'} waiting for cash collection, which is normal.</span>}
+                </div>
+              </div>
+            )}
 
             {onlineAttempts >= 5 && onlineOrders / onlineAttempts < 0.6 && (
               <div className="banner">
@@ -168,8 +177,8 @@ function Analytics() {
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
-              <Card title="Where orders come from" sub="acquisition channel of the order's session">
-                <Table rows={a.channels} cols={[{ label: 'Channel', key: 'channel' }, { label: 'Orders', num: true, sortBy: 'orders', render: (r) => num(r.orders) }, { label: 'Order value', num: true, sortBy: 'gmv', render: (r) => inr(r.gmv) }, { label: 'Avg order', num: true, sortBy: 'aov', render: (r) => inr(r.aov) }]} />
+              <Card title="Where orders come from" sub="channel of the order's own session. A Direct order is credited to the last campaign visit in the 7 days before it, when there was one.">
+                <Table rows={a.credited_channels || a.channels} cols={[{ label: 'Channel', key: 'channel' }, { label: 'Orders', num: true, sortBy: 'orders', render: (r) => num(r.orders) }, { label: 'Order value', num: true, sortBy: 'gmv', render: (r) => inr(r.gmv) }, { label: 'Avg order', num: true, sortBy: 'aov', render: (r) => inr(r.aov) }]} />
               </Card>
             </div>
             <Card title="When people order"><Heatmap hours={a.hours.map((h) => ({ ...h, sessions: h.orders }))} unit="orders" /></Card>
