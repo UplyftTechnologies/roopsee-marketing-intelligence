@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 
+from src import library_store as store
 from src.common import BID_STRATEGIES, FORBIDDEN_EXTRA, ROOT, Registry, Settings, account_cfg, batch_files, jload, jsave
 from src.meta_api import Meta, MetaError
 from src.spec_clean import clean_creative, describe
@@ -283,7 +284,11 @@ def bundle_from_meta(camp: dict, adsets: list, ads: list, s: Settings, offset: i
 
 
 @router.get("/api/campaigns/from-meta")
-def list_campaigns(refresh: bool = False):
+def list_campaigns(refresh: bool = False, live: bool = False):
+    s = Settings()
+    if not live and not s.missing() and store.have(s):  # from the local library: no call to Meta
+        return {"campaigns": [{"id": c["id"], "name": c["name"], "objective": c.get("objective"), "status": c.get("status"), "budget": c.get("daily_budget")} for c in store.list_campaigns(s)],
+                "account": s.account, "env": s.env, "source": "library", "synced_at": store.synced_at(s)}
     s, m = _meta()
     try:
         rows = m.pages(f"{s.account}/campaigns", fields="id,name,objective,effective_status,daily_budget", limit=100)
@@ -291,13 +296,19 @@ def list_campaigns(refresh: bool = False):
         raise _meta_err(s, e)
     rows = [r for r in rows if r.get("effective_status") not in ("DELETED", "ARCHIVED")]
     return {"campaigns": [{"id": r["id"], "name": r["name"], "objective": r.get("objective"), "status": r.get("effective_status"), "budget": r.get("daily_budget")} for r in rows],
-            "account": s.account, "env": s.env}
+            "account": s.account, "env": s.env, "source": "meta"}
 
 
 @router.get("/api/campaigns/from-meta/{cid}")
-def copy_campaign(cid: str):
+def copy_campaign(cid: str, live: bool = False):
     if not cid.isdigit():
         raise HTTPException(400, "bad campaign id")
+    s0 = Settings()
+    snap = None if live or s0.missing() else store.get_campaign(s0, cid)
+    if snap:  # from the local library: no call to Meta
+        out = bundle_from_meta(snap["campaign"], snap["adsets"], snap["ads"], s0, int(account_cfg().get("currency_offset", 100)))
+        out["report"]["source"], out["report"]["synced_at"] = "library", snap.get("synced_at")
+        return out
     s, m = _meta()
     try:
         camp = m.get(cid, fields=CAMP_FIELDS)
@@ -390,7 +401,11 @@ async def import_ad(req: Request):
 
 
 @router.get("/api/ads/from-meta")
-def list_ads(refresh: bool = False):
+def list_ads(refresh: bool = False, live: bool = False):
+    s = Settings()
+    if not live and not s.missing() and store.have(s):  # from the local library: no call to Meta
+        return {"ads": [{"id": a["id"], "name": a["name"], "campaign": a.get("campaign", ""), "status": a.get("status")} for a in store.list_ads(s)],
+                "account": s.account, "env": s.env, "source": "library", "synced_at": store.synced_at(s)}
     s, m = _meta()
     try:
         camps = {c["id"]: c["name"] for c in m.pages(f"{s.account}/campaigns", fields="id,name", limit=100)}
@@ -398,20 +413,27 @@ def list_ads(refresh: bool = False):
     except MetaError as e:
         raise _meta_err(s, e)
     rows = [r for r in rows if r.get("effective_status") not in ("DELETED", "ARCHIVED")]
-    return {"ads": [{"id": r["id"], "name": r["name"], "campaign": camps.get(r.get("campaign_id"), ""), "status": r.get("effective_status")} for r in rows], "account": s.account, "env": s.env}
+    return {"ads": [{"id": r["id"], "name": r["name"], "campaign": camps.get(r.get("campaign_id"), ""), "status": r.get("effective_status")} for r in rows], "account": s.account, "env": s.env, "source": "meta"}
 
 
 @router.get("/api/ads/from-meta/{aid}")
-def copy_ad(aid: str):
+def copy_ad(aid: str, live: bool = False):
     if not aid.isdigit():
         raise HTTPException(400, "bad ad id")
-    s, m = _meta()
-    try:
-        raw = m.get(aid, fields=AD_FIELDS)
-    except MetaError as e:
-        raise _meta_err(s, e)
+    s0 = Settings()
+    raw = None if live or s0.missing() else store.find_ad(s0, aid)
+    from_lib = raw is not None
+    if raw is None:
+        s, m = _meta()
+        try:
+            raw = m.get(aid, fields=AD_FIELDS)
+        except MetaError as e:
+            raise _meta_err(s, e)
+    s = Settings()
     rep = _rep()
     rep["format"] = "meta (copied from your ad account)"
+    if from_lib:
+        rep["source"] = "library"
     f = ad_form(raw, s, rep, key=_next_keys("COPY", _used_keys())())
     rep["count"] = 1 if f else 0
     return {"ads": [f] if f else [], "report": rep}

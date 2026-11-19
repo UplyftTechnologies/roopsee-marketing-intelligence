@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from src.common import BID_STRATEGIES, BILLING_EVENTS, DESTINATIONS, FORBIDDEN_EXTRA, GOALS, Settings, account_cfg, audiences_cfg
+from src import library_store as store
 from src.meta_api import Meta, MetaError
 from src.special import adset_findings
 
@@ -373,10 +374,13 @@ _LIST: dict = {}
 
 
 @router.get("/api/adsets/from-meta")
-def list_meta_adsets(refresh: bool = False):
+def list_meta_adsets(refresh: bool = False, live: bool = False):
     s = Settings()
     if s.missing():
         raise HTTPException(400, "Missing in .env: " + ", ".join(s.missing()))
+    if not live and store.have(s):  # from the local library: no call to Meta
+        return {"adsets": [{"id": a["id"], "name": a["name"], "campaign": a.get("campaign", ""), "status": a.get("status"), "goal": a.get("goal")} for a in store.list_adsets(s)],
+                "account": s.account, "env": s.env, "source": "library", "synced_at": store.synced_at(s)}
     hit = _LIST.get((s.env, s.account))
     if hit and not refresh and time.time() - hit["t"] < 60:
         return hit["data"]
@@ -387,16 +391,22 @@ def list_meta_adsets(refresh: bool = False):
     except MetaError as e:
         raise HTTPException(502, f"Meta said: {s.redact(e)[:300]}")
     data = {"adsets": [{"id": r["id"], "name": r["name"], "campaign": camps.get(r.get("campaign_id"), ""), "status": r.get("effective_status"), "goal": r.get("optimization_goal")} for r in rows],
-            "account": s.account, "env": s.env}
+            "account": s.account, "env": s.env, "source": "meta"}
     _LIST[(s.env, s.account)] = {"t": time.time(), "data": data}
     return data
 
 
 @router.get("/api/adsets/from-meta/{adset_id}")
-def copy_meta_adset(adset_id: str):
+def copy_meta_adset(adset_id: str, live: bool = False):
     if not adset_id.isdigit():
         raise HTTPException(400, "bad ad set id")
     s = Settings()
+    local = None if live else store.find_adset(s, adset_id)
+    if local:  # from the local library: no call to Meta
+        out = convert(local, int(account_cfg().get("currency_offset", 100)))
+        out["report"]["format"] = "meta (copied from your library)"
+        out["report"]["source"] = "library"
+        return out
     fields = ("name,optimization_goal,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,start_time,end_time,targeting,promoted_object,destination_type,"
               "attribution_spec,pacing_type,adset_schedule,frequency_control_specs,bid_constraints,status")
     try:

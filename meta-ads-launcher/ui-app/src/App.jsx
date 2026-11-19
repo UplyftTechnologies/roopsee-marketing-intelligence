@@ -9,12 +9,14 @@ import Campaigns from './pages/Campaigns'
 import Setup from './pages/Setup'
 import Run from './pages/Run'
 import Health from './pages/Health'
+import Library from './pages/Library'
 
 // key, label, icon, description, page, group
 const NAV = [
   ['new', 'New campaign', 'plus', 'Create a campaign step by step', Builder, 'Create'],
   ['overview', 'Overview', 'overview', 'Everything on Meta, live', Overview, 'Manage'],
   ['campaigns', 'Campaigns & ad sets', 'setup', 'Set up campaigns, ad sets and audiences', Campaigns, 'Manage'],
+  ['library', 'Past campaigns', 'overview', 'Your saved copy of past campaigns, ad sets, ads and media', Library, 'Library'],
   ['creatives', 'Creatives', 'image', 'Your images', Creatives, 'Library'],
   ['setup', 'Links & tracking', 'setup', 'Web page links and tracking tags', Setup, 'Advanced'],
   ['run', 'Run', 'run', 'Run steps by hand, go live', Run, 'Advanced'],
@@ -26,6 +28,8 @@ function parseHash() {
   return { tab: NAV.some((n) => n[0] === a) ? a : 'overview', params: Object.fromEntries(new URLSearchParams(qs || '')) }
 }
 
+const callsTip = (u) => ['Calls this launcher has made to Meta since it started', ...Object.entries(u.by || {}).map(([k, v]) => `${v} × ${k}`)].join('\n')
+
 export default function App() {
   const [{ tab, params }, setRoute] = useState(parseHash)
   const [env, setEnv] = useState(null)
@@ -33,6 +37,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('rail') === '1')
   const [menu, setMenu] = useState(false)
   const [navKey, setNavKey] = useState(0)
+  const [usage, setUsage] = useState(null)
 
   const go = (key, p = {}) => {
     const qs = new URLSearchParams(p).toString()
@@ -52,6 +57,10 @@ export default function App() {
   }, [theme])
   useEffect(() => { try { localStorage.setItem('rail', collapsed ? '1' : '0') } catch { /* ignore */ } }, [collapsed])
   useEffect(() => { api('/api/state').then(setEnv).catch(() => {}) }, [navKey])
+  useEffect(() => { // how many calls this session made to Meta (a local read, not a call to Meta)
+    const load = () => api('/api/usage').then(setUsage).catch(() => {})
+    load(); const t = setInterval(load, 15000); return () => clearInterval(t)
+  }, [navKey])
 
   const cur = NAV.find((n) => n[0] === tab) || NAV[1]
   const Page = cur[4]
@@ -79,6 +88,7 @@ export default function App() {
         </nav>
         <div className="rail-foot">
           <div className="muted hide-collapsed">{env ? `${env.env === 'production' ? 'Production' : 'Sandbox'} · ${env.account || 'no account set'}` : 'connecting…'}</div>
+          {usage && <div className="muted hide-collapsed" style={{ fontSize: 12 }} title={callsTip(usage)}>Meta calls this session: <b>{usage.calls}</b>{usage.usage_pct ? ` · limit ${usage.usage_pct}% used` : ''}</div>}
           <label className="muted hide-collapsed" style={{ fontSize: 12 }}>Theme{' '}
             <select className="field" value={theme} onChange={(e) => setTheme(e.target.value)}>
               <option value="light">Light</option><option value="dark">Dark</option><option value="auto">Match system</option>
@@ -101,6 +111,7 @@ export default function App() {
         {env && (prod
           ? <div className="notice prod" role="note"><Icon name="info" size={18} />PRODUCTION: this is your real ad account. Everything is created paused, and nothing is turned on without your typed confirmation.</div>
           : <div className="notice" role="note"><Icon name="info" size={18} />Sandbox: nothing is delivered and no money is spent. Sandbox ads cannot be seen in Ads Manager; use the Overview page.</div>)}
+        {usage?.blocked_seconds > 0 && <div className="notice prod" role="alert"><Icon name="info" size={18} />Meta is limiting calls for this ad account. {usage.blocked_why} Try again in about {Math.ceil(usage.blocked_seconds / 60)} min. Nothing is sent to Meta until then.</div>}
         <main className="page" key={navKey}>
           <Page ctx={ctx} params={params} />
         </main>

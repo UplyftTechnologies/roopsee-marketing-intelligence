@@ -19,6 +19,7 @@ from ui.importer import router as importer_router
 from ui.library import router as library_router
 from ui.targeting import router as targeting_router
 from ui.formats import router as formats_router
+from ui.libsync import router as libsync_router
 from ui.wizard import router as wizard_router
 
 DIST = Path(__file__).parent / "dist"
@@ -33,6 +34,7 @@ app.include_router(importer_router)
 app.include_router(library_router)
 app.include_router(targeting_router)
 app.include_router(formats_router)
+app.include_router(libsync_router)
 
 
 # ---- protection: local only, and no cross-site writes ---------------------------------------------------------------------

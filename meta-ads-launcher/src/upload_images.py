@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+from . import library_store as store
 from .common import LauncherError, Registry, Settings, image_path, ready_ads, sha256
 from .meta_api import Meta
 
@@ -27,8 +28,23 @@ def run(s: Settings, meta: Meta, batch: str) -> None:
         if ad.get("image_hash"):  # an image already on Meta: nothing to upload, just record (and verify) its hash
             h = ad["image_hash"]
             if not meta.dry and reg.get(key, {}).get("meta_image_hash") != h:
+                fresh = (store.age_hours(s) or 1e9) < 24  # a library synced within a day is trusted; an older one is double-checked with Meta
+                if store.has_image(s, h) and fresh:  # the local library already saw this image in the account: no call needed
+                    reg.update(key, folder="(meta)", filename=(store.images(s).get(h) or {}).get("name", ""), sha256="", meta_image_hash=h, uploaded=True, source="library")
+                    print(f"  {key}: using existing Meta image hash {h} (known from your library)")
+                    continue
                 found = meta.get(f"{s.account}/adimages", hashes=json.dumps([h]), fields="hash,name").get("data", [])
                 if not found:
+                    kept = store.image_file(s, h)  # deleted on Meta, but a copy is stored here: upload it again (Meta's hash is the same for the same file)
+                    if kept:
+                        with open(kept, "rb") as f:
+                            res = meta.post(f"{s.account}/adimages", {}, files={kept.name: (kept.name, f.read())})
+                        new = next(iter(res["images"].values()))["hash"]
+                        reg.update(key, folder="(library)", filename=kept.name, sha256="", meta_image_hash=new, uploaded=True, source="library re-upload")
+                        print(f"  {key}: the image was gone from Meta, so it was uploaded again from your library ({new})")
+                        if new != h:
+                            raise LauncherError(f"{key}: the re-uploaded image got a different hash ({new}); remove and add the image again")
+                        continue
                     raise LauncherError(f"{key}: image_hash {h} does not exist in ad account {s.account} (list yours: python run.py images)")
                 reg.update(key, folder="(meta)", filename=found[0].get("name", ""), sha256="", meta_image_hash=h, uploaded=True, source="image_hash")
             print(f"  {key}: using existing Meta image hash {h}")

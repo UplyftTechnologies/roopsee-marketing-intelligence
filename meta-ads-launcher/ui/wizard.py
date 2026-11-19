@@ -1,6 +1,7 @@
 """Backend for the guided 'New campaign' flow, drafts, history and the live overview."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -14,6 +15,8 @@ from fastapi import APIRouter, HTTPException, Request
 from src import doctor, validate as validate_mod
 from src.common import (BID_STRATEGIES, BILLING_EVENTS, CTAS, DESTINATIONS, GOALS as GOALS_ALL, ROOT, LauncherError, Registry, Settings, account_cfg, adsets_cfg,
                         audiences_cfg, campaigns_cfg, clean_extra, deep_merge, jload, jsave)
+from src import library_store as store
+from src.ensure import no_lookups
 from src.common import batch_files, jload
 from src.spec_clean import describe
 from src.meta_api import Meta, MetaError
@@ -302,9 +305,8 @@ def build_plan(a: dict, s: Settings) -> dict:
             free = bool(m) and k not in prior and k not in claimed and not any(x.startswith(k + "_S") for x in prior)
         else:
             k = (ad.get("ad_key") or "").strip()
-            free = bool(re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k)) and k not in claimed
-            if free and k in prior:
-                errs.append(f"Ad {i}: the Ad ID {k} is already used by an earlier campaign. Clear it (a free one is then chosen for you) or type a new one.")
+            # a stored ID (from a draft, template or copy) that an earlier campaign already used is replaced by the next free one: nobody types IDs any more
+            free = bool(re.fullmatch(r"RS_[A-Z0-9]+_\d{3}", k)) and k not in claimed and k not in prior and not any(x.startswith(k + "_S") for x in prior)
         ad["ad_key"] = k if free else ""
         if free:
             claimed.add(k)
@@ -550,7 +552,7 @@ async def create(req: Request):
         bpath.unlink(missing_ok=True)
         msg = str(e)
         if "never reused" in msg or "already used" in msg:
-            msg = "One of the Ad IDs typed on an ad card is already used by another campaign. Clear that Ad ID (a free one is then chosen for you) or type a new one."
+            msg = "An Ad ID in this campaign was already used by another campaign. Open the page again so a free ID is chosen, then press Create once more."
         raise HTTPException(400, {"errors": [f"Could not prepare this campaign. {msg}"]})
 
     batch = plan["batch"]
@@ -561,6 +563,8 @@ async def create(req: Request):
     def result(ok):
         ent, ads = Registry(s, "entity_registry.json").d, Registry(s, "ad_registry.json").d
         cid = ent.get(f"campaign:{plan['names']['campaign']}", {}).get("id")
+        if cid:  # so the Library can show this campaign next to the synced ones
+            Registry(s, "wizard_history.json").update(batch, campaign_id=cid)
         url = None
         if cid and s.env == "production":
             url = f"https://adsmanager.facebook.com/adsmanager/manage/campaigns?act={s.account.replace('act_', '')}&selected_campaign_ids={cid}"
@@ -569,9 +573,15 @@ async def create(req: Request):
                 "ads": [{"key": x["ad_key"], "adset": x["adset_key"], "id": ads.get(x["ad_key"], {}).get("meta_ad_id"), "status": ads.get(x["ad_key"], {}).get("status")} for x in plan["ads"]],
                 "ads_manager_url": url}
 
-    steps = [("Upload the images", lambda: execute("upload", batch, confirm_production=cp)),
-             ("Create the campaign and ad sets (paused)", lambda: execute("setup", batch, confirm_production=cp)),
-             ("Create the ads (paused)", lambda: execute("prepare", batch, confirm_production=cp))]
+    def fresh(cmd):  # a brand-new batch: nothing can exist on Meta yet, so skip the look-up-by-name call before each create
+        def go():
+            with no_lookups():
+                return execute(cmd, batch, confirm_production=cp)
+        return go
+
+    steps = [("Upload the images", fresh("upload")),
+             ("Create the campaign and ad sets (paused)", fresh("setup")),
+             ("Create the ads (paused)", fresh("prepare"))]
     job = start_job(f"new campaign {plan['names']['campaign']}", steps, result)
     return {"job": job["id"], "batch": batch}
 
@@ -701,12 +711,35 @@ def _img(r: dict) -> dict:
             "thumb": r.get("url_128") or r.get("url"), "full": r.get("url") or r.get("url_128"), "link": r.get("permalink_url")}
 
 
+def _local_img(s: Settings, h: str, v: dict) -> dict:
+    thumb = f"/lib-media/thumb/{h}" if store.image_file(s, h, thumb=True) else None
+    full = f"/lib-media/img/{h}" if store.image_file(s, h) else thumb
+    return {"hash": h, "name": v.get("name"), "width": v.get("width"), "height": v.get("height"), "created": v.get("created") or "", "thumb": thumb, "full": full, "link": None}
+
+
+def _local_images(s: Settings, hashes: str | None):
+    """The image list from the local library, or None when the library has nothing (or not every asked-for hash)."""
+    imgs = store.images(s)
+    if not imgs:
+        return None
+    if hashes:
+        want = [h for h in hashes.split(",") if HEX32.match(h)][:20]
+        if not want or any(h not in imgs for h in want):
+            return None
+        return {"images": [_local_img(s, h, imgs[h]) for h in want], "source": "library"}
+    rows = sorted((_local_img(s, h, v) for h, v in imgs.items()), key=lambda x: x["created"] or "", reverse=True)
+    return {"images": rows, "env": s.env, "account": s.account, "source": "library"}
+
+
 @router.get("/api/meta-images")
 def meta_images(hashes: str | None = None, refresh: bool = False):
     """Images in the ad account with a thumbnail and the full-size image link. Meta's image links need no token."""
     s = Settings()
     if s.missing():
         raise HTTPException(400, "Missing in .env: " + ", ".join(s.missing()))
+    local = None if refresh else _local_images(s, hashes)
+    if local is not None:  # from the local library: no call to Meta
+        return local
     meta = Meta(s)
     fields = "hash,name,width,height,created_time,url,url_128,permalink_url"
     try:
@@ -728,9 +761,24 @@ def meta_images(hashes: str | None = None, refresh: bool = False):
 
 
 # ---- "Check with Meta": would Meta accept this? Uses Meta's validate-only mode, so NOTHING is created ----------------------------
-def _one(kind: str, name: str, fn, s: Settings) -> dict:
+_OK_AT: dict = {}
+OK_TTL = 15 * 60
+
+
+def _sig(s: Settings, endpoint: str, payload: dict) -> str:
+    """A fingerprint of what would be sent. The tracking tag carries the batch time, which changes every minute, so it is left out."""
+    body = {k: v for k, v in (payload or {}).items() if k != "url_tags"}
+    return hashlib.sha1(json.dumps([s.env, s.account, endpoint, body], sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _one(kind: str, name: str, fn, s: Settings, payload: dict | None = None, endpoint: str = "") -> dict:
+    sig = _sig(s, endpoint, payload) if payload is not None else None
+    if sig and time.time() - _OK_AT.get(sig, 0) < OK_TTL:  # unchanged since Meta accepted it a moment ago: no call
+        return {"object": kind, "name": name, "ok": True, "message": "Meta accepts this (unchanged since the last check).", "cached": True}
     try:
         fn()
+        if sig:
+            _OK_AT[sig] = time.time()
         return {"object": kind, "name": name, "ok": True, "message": "Meta accepts this."}
     except (MetaError, LauncherError) as e:
         msg = s.redact(e)
@@ -751,9 +799,29 @@ def _cached(key, ttl, fn):
     return val
 
 
-def _parent_campaign(meta: Meta, s: Settings, camp: dict):
+def _any_image(meta: Meta, s: Settings) -> str:
+    """One image hash from the ad account to test with: from the local library if it has any, otherwise one call."""
+    for h in store.images(s):
+        return h
+    rows = _cached((s.env, s.account, "image"), 300, lambda: meta.get(f"{s.account}/adimages", fields="hash", limit=1).get("data", []))
+    return rows[0]["hash"] if rows else ""
+
+
+def _library_parents(s: Settings):
+    """Campaigns from the local library (no call), or None when there is no library or it is more than a day old."""
+    age = store.age_hours(s)
+    if age is None or age > 24:
+        return None
+    return [{"id": c["id"], "name": c["name"], "objective": c.get("objective"), "daily_budget": c.get("daily_budget"), "lifetime_budget": c.get("lifetime_budget"),
+             "effective_status": c.get("status"), "bid_strategy": c.get("bid_strategy")} for c in store.list_campaigns(s)]
+
+
+def _parent_campaign(meta: Meta, s: Settings, camp: dict, live: bool = False):
     """Meta can only check an ad set against an existing campaign, so borrow one with the same goal and budget type (nothing is changed on it)."""
-    rows = _cached((s.env, s.account, "parents"), 300, lambda: meta.get(f"{s.account}/campaigns", fields="id,name,objective,daily_budget,lifetime_budget,effective_status,bid_strategy", limit=100).get("data", []))
+    rows = None if live else _library_parents(s)
+    from_library = rows is not None
+    if rows is None:
+        rows = _cached((s.env, s.account, "parents"), 300, lambda: meta.get(f"{s.account}/campaigns", fields="id,name,objective,daily_budget,lifetime_budget,effective_status,bid_strategy", limit=100).get("data", []))
     want_cbo = camp["budget_strategy"] == "CBO"
     ok = [r for r in rows if r.get("objective") == camp["objective"] and r.get("effective_status") not in ("DELETED", "ARCHIVED")]
     capped = ("LOWEST_COST_WITH_BID_CAP", "COST_CAP", "LOWEST_COST_WITH_MIN_ROAS")
@@ -761,8 +829,9 @@ def _parent_campaign(meta: Meta, s: Settings, camp: dict):
     ok.sort(key=lambda r: (bool(r.get("daily_budget") or r.get("lifetime_budget")) != want_cbo, (r.get("bid_strategy") != want_bs) if want_bs in capped else r.get("bid_strategy") in capped, r.get("effective_status") != "PAUSED"))
     if not ok:
         return None
-    r = ok[0]
+    r = dict(ok[0])
     r["_cbo"] = bool(r.get("daily_budget") or r.get("lifetime_budget"))
+    r["_library"] = from_library
     return r
 
 
@@ -778,32 +847,42 @@ async def check(req: Request):
     meta, acc, checks = Meta(s), account_cfg(), []
     try:
         cp = create_campaigns.payload(plan["campaign"], acc)
-        checks.append(_one("Campaign", plan["names"]["campaign"], lambda: meta.post(f"{s.account}/campaigns", cp, validate_only=True), s))
+        checks.append(_one("Campaign", plan["names"]["campaign"], lambda: meta.post(f"{s.account}/campaigns", cp, validate_only=True), s, cp, "campaigns"))
         parent = _parent_campaign(meta, s, plan["campaign"])
         saved = audiences_cfg()
-        for adset in plan["adsets"]:
-            if not parent:
-                checks.append({"object": "Ad set", "name": adset["key"], "ok": None,
-                               "message": "Not pre-checked: your account has no campaign with the same goal and budget type to test against. It will be checked when it is created."})
-                continue
-            aud = plan["audiences"].get(adset["audience"]) or saved.get(adset["audience"]) or {"countries": ["IN"]}
-            try:
-                payload = create_adsets.payload(adset, parent["id"], s, acc, plan["campaign"], aud)
-            except LauncherError as e:
-                checks.append({"object": "Ad set", "name": adset["key"], "ok": False, "message": s.redact(e)})
-                continue
-            note = ""
-            if (plan["campaign"]["budget_strategy"] == "CBO") != parent["_cbo"]:  # the borrowed campaign budgets differently, so test with a matching stand-in budget
-                if parent["_cbo"]:
-                    for k in ("daily_budget", "lifetime_budget", "bid_strategy", "bid_amount"):
-                        payload.pop(k, None)
-                else:
-                    payload["daily_budget"] = 50000
-                note = " (checked with a stand-in budget)"
-            r_ = _one("Ad set", adset["key"], lambda p=payload: meta.post(f"{s.account}/adsets", p, validate_only=True), s)
-            if r_["ok"]:
-                r_["message"] += note
-            checks.append(r_)
+
+        def adset_pass(parent):
+            found = []
+            for adset in plan["adsets"]:
+                if not parent:
+                    found.append({"object": "Ad set", "name": adset["key"], "ok": None,
+                                   "message": "Not pre-checked: your account has no campaign with the same goal and budget type to test against. It will be checked when it is created."})
+                    continue
+                aud = plan["audiences"].get(adset["audience"]) or saved.get(adset["audience"]) or {"countries": ["IN"]}
+                try:
+                    payload = create_adsets.payload(adset, parent["id"], s, acc, plan["campaign"], aud)
+                except LauncherError as e:
+                    found.append({"object": "Ad set", "name": adset["key"], "ok": False, "message": s.redact(e)})
+                    continue
+                note = ""
+                if (plan["campaign"]["budget_strategy"] == "CBO") != parent["_cbo"]:  # the borrowed campaign budgets differently, so test with a matching stand-in budget
+                    if parent["_cbo"]:
+                        for k in ("daily_budget", "lifetime_budget", "bid_strategy", "bid_amount"):
+                            payload.pop(k, None)
+                    else:
+                        payload["daily_budget"] = 50000
+                    note = " (checked with a stand-in budget)"
+                r_ = _one("Ad set", adset["key"], lambda p=payload: meta.post(f"{s.account}/adsets", p, validate_only=True), s, {**payload, "campaign_id": parent["id"]}, "adsets")
+                if r_["ok"]:
+                    r_["message"] += note
+                found.append(r_)
+            return found
+
+        adset_checks = adset_pass(parent)
+        if parent and parent.get("_library") and any(c["ok"] is False and re.search(r"does not exist|Unsupported get|campaign_id", c.get("message", ""), re.I) for c in adset_checks):
+            parent = _parent_campaign(meta, s, plan["campaign"], live=True)  # the library copy was out of date: ask Meta once
+            adset_checks = adset_pass(parent)
+        checks += adset_checks
         # creatives: one check per distinct ad text (borrowing any image from the account when the real one is not uploaded yet)
         stand_in = None
         seen = set()
@@ -819,8 +898,7 @@ async def check(req: Request):
                 if refs:  # files are uploaded at create time, so test with stand-ins taken from the account
                     stand = {"image_hash": "", "video_id": "", "thumb": ""}
                     if any(media.kind_of(r) == "image" for r in refs):
-                        rows = _cached((s.env, s.account, "image"), 300, lambda: meta.get(f"{s.account}/adimages", fields="hash", limit=1).get("data", []))
-                        stand["image_hash"] = rows[0]["hash"] if rows else ""
+                        stand["image_hash"] = _any_image(meta, s)
                     if any(media.kind_of(r) == "video" for r in refs):
                         vr = _cached((s.env, s.account, "video"), 300, lambda: meta.get(f"{s.account}/advideos", fields="id,picture", limit=1).get("data", []))
                         stand["video_id"], stand["thumb"] = (vr[0]["id"], vr[0].get("picture", "")) if vr else ("", "")
@@ -828,7 +906,7 @@ async def check(req: Request):
                         checks.append({"object": "Ad", "name": ad["ad_key"], "ok": None, "message": "Not pre-checked: your ad account has no image or video to test with yet."})
                         continue
                 payload = create_creatives.spec_payload(ad, plan["batch_id"], s, acc, stand_in=stand)
-                checks.append(_one("Ad", ad["ad_key"], lambda p=payload: meta.post(f"{s.account}/adcreatives", p, validate_only=True), s))
+                checks.append(_one("Ad", ad["ad_key"], lambda p=payload: meta.post(f"{s.account}/adcreatives", p, validate_only=True), s, payload, "adcreatives"))
                 continue
             sig = (ad["primary_text"], ad["headline"], ad["destination"], ad["cta"], ad.get("image_hash") or ad.get("image"))
             if sig in seen or len(seen) >= 4:
@@ -837,14 +915,13 @@ async def check(req: Request):
             h = ad.get("image_hash")
             if not h:
                 if stand_in is None:
-                    rows = _cached((s.env, s.account, "image"), 300, lambda: meta.get(f"{s.account}/adimages", fields="hash", limit=1).get("data", []))
-                    stand_in = rows[0]["hash"] if rows else ""
+                    stand_in = _any_image(meta, s)
                 h = stand_in
             if not h:
                 checks.append({"object": "Ad", "name": ad["ad_key"], "ok": None, "message": "Not pre-checked: there is no image in your ad account yet to test with."})
                 continue
             payload = create_creatives.payload(ad, h, plan["batch_id"], s, acc)
-            checks.append(_one("Ad", ad["ad_key"], lambda p=payload: meta.post(f"{s.account}/adcreatives", p, validate_only=True), s))
+            checks.append(_one("Ad", ad["ad_key"], lambda p=payload: meta.post(f"{s.account}/adcreatives", p, validate_only=True), s, payload, "adcreatives"))
     except MetaError as e:
         if "code 17" in str(e) or "too many calls" in str(e).lower():
             raise HTTPException(429, "Meta is limiting how often this ad account can be asked. Wait a few minutes and press Check again.")

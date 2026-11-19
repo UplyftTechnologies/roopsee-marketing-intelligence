@@ -92,6 +92,12 @@ function ExtrasNotice({ found }) {
   )
 }
 
+const ago = (t) => {
+  if (!t) return 'never'
+  const m = Math.max(0, Math.round((Date.now() / 1000 - t) / 60))
+  return m < 2 ? 'just now' : m < 90 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`
+}
+
 function ReportView({ r, kind }) {
   const block = (title, items, tone) => items?.length > 0 && (
     <div style={{ marginTop: 8 }}><div className="lf-label">{title}</div>
@@ -132,12 +138,23 @@ function ImportModal({ kind, onClose, onApply }) {
   const [list, setList] = useState(null)
   const [tpls, setTpls] = useState(null)
   const [q, setQ] = useState('')
+  const [src, setSrc] = useState(null)   // where the list came from: your library or live from Meta
+  const [syncing, setSyncing] = useState(false)
   const file = useRef(null)
   useEffect(() => { const on = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', on); return () => window.removeEventListener('keydown', on) }, [onClose])
   const read = async (t) => { setBusy(true); setErr(null); setRes(null); try { setRes(await api(K.json, { method: 'POST', body: { text: t } })) } catch (e) { setErr(e.message) } setBusy(false) }
   const onFile = async (f) => { if (!f) return; if (f.size > 200 * 1024) { setErr('That file is too large (200 KB limit).'); return } const t = await f.text(); setText(t); read(t) }
   const sample = async (format) => { const j = await api('/api/adsets/sample?format=' + format); downloadJson(j, `adset-sample-${format}.json`) }
-  const loadList = async () => { setBusy(true); setErr(null); try { setList((await api(K.list))[K.key]) } catch (e) { setErr(e.message) } setBusy(false) }
+  const loadList = async () => { setBusy(true); setErr(null); try { const r = await api(K.list); setList(r[K.key]); setSrc({ source: r.source, synced_at: r.synced_at }) } catch (e) { setErr(e.message) } setBusy(false) }
+  const syncNow = async () => {
+    setSyncing(true); setErr(null)
+    try {
+      await api('/api/library/sync', { method: 'POST' })
+      for (let i = 0; i < 200; i++) { await new Promise((r) => setTimeout(r, 1500)); const st = await api('/api/library/status'); if (!st.sync.running) { if (st.sync.error) setErr(st.sync.error); break } }
+      await loadList()
+    } catch (e) { setErr(e.message) }
+    setSyncing(false)
+  }
   const copy = async (id) => { setBusy(true); setErr(null); setRes(null); try { setRes(await api(K.copy + id)) } catch (e) { setErr(e.message) } setBusy(false) }
   const loadTpls = async () => { try { setTpls((await api('/api/templates?kind=' + kind)).templates) } catch (e) { setErr(e.message) } }
   const useTpl = async (id) => { setBusy(true); setErr(null); setRes(null); try { const t = await api('/api/templates/' + id); setRes(await api(K.json, { method: 'POST', body: { json: t.payload } })) } catch (e) { setErr(e.message) } setBusy(false) }
@@ -152,7 +169,7 @@ function ImportModal({ kind, onClose, onApply }) {
         <div className="row"><h3 className="grow">{K.title}</h3><button type="button" className="btn small" onClick={onClose}>Close</button></div>
         <div className="chip-row" style={{ margin: '10px 0' }}>
           <button type="button" className={`chip ${tab === 'json' ? 'on' : ''}`} onClick={() => go('json')}>From a JSON file</button>
-          <button type="button" className={`chip ${tab === 'meta' ? 'on' : ''}`} onClick={() => go('meta')}>Copy from my Meta account</button>
+          <button type="button" className={`chip ${tab === 'meta' ? 'on' : ''}`} onClick={() => go('meta')}>Copy from my account</button>
           <button type="button" className={`chip ${tab === 'tpl' ? 'on' : ''}`} onClick={() => go('tpl')}>My templates</button>
         </div>
         {err && <Banner tone="err">{err}</Banner>}
@@ -174,6 +191,12 @@ function ImportModal({ kind, onClose, onApply }) {
         )}
         {tab === 'meta' && !res && (
           <>
+            <div className="srcline">
+              {src?.source === 'library'
+                ? <span>From your <b>local library</b>, synced {ago(src.synced_at)}. No call to Meta.</span>
+                : <span>Read <b>live from Meta</b>. Sync once to keep a local copy and make this instant.</span>}
+              <button type="button" className="btn small" disabled={syncing} onClick={syncNow}>{syncing ? 'Syncing…' : 'Sync from Meta'}</button>
+            </div>
             <input className="field" placeholder={K.find} value={q} onChange={(e) => setQ(e.target.value)} />
             {kind === 'campaign' && <div className="mini" style={{ marginTop: 6 }}>Copies the campaign with all its ad sets (up to 10) and ads (up to 40). Nothing on Meta is changed.</div>}
             {busy && !list && <div className="muted" style={{ marginTop: 8 }}>Loading from Meta…</div>}
@@ -333,6 +356,11 @@ function Flow({ o, ctx, params }) {
     }).catch(() => {})
   }, [params.metahash]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (params.dup) api('/api/campaigns/from-meta/' + params.dup).then((r) => applyCampaign(r.answers)).catch((e) => setErr(e.message))
+    if (params.dupset) api('/api/adsets/from-meta/' + params.dupset).then((r) => { setStarted(true); applyImport(r.adsets, 'replace') }).catch((e) => setErr(e.message))
+    if (params.dupad) api('/api/ads/from-meta/' + params.dupad).then((r) => { setStarted(true); applyAds(r.ads, 'replace') }).catch((e) => setErr(e.message))
+  }, [params.dup, params.dupset, params.dupad]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     if (params.draft) api('/api/drafts/' + params.draft).then((d) => { setA(normalize(d.answers, o)); setDraftId(d.id); setStarted(true) }).catch(() => {})
   }, [params.draft]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -416,8 +444,8 @@ function Flow({ o, ctx, params }) {
 
   if (phase !== 'edit') return <Progress job={job} phase={phase} prod={prod} ctx={ctx} retry={retry} back={() => setPhase('edit')} again={reset} err={err} />
   const modalEl = modal ? <ImportModal kind={modal} onClose={() => setModal(false)} onApply={modal === 'campaign' ? applyCampaign : modal === 'ad' ? applyAds : applyImport} /> : null
-  if (!started) return <><Start o={o} onImport={() => setModal('campaign')} start={(recipe) => { setA(blank(o, recipe)); setStarted(true); setOpenSec('campaign') }} load={(x, id) => { setA(normalize(x, o)); setDraftId(id); setStarted(true) }}
-    copy={(x) => { const n = normalize(x, o); const d = x.ads?.[0] || n.defaults; setA({ ...n, ads: [], adsets: n.adsets.map((s) => ({ ...s, uid: uid() })), defaults: { ...n.defaults, primary_text: d.primary_text || '', headline: d.headline || '', cta: d.cta || 'LEARN_MORE', destination: d.destination || n.defaults.destination } }); setStarted(true) }} />{modalEl}</>
+  if (!started) return <><Start o={o} onImport={() => setModal('campaign')} onLibrary={() => ctx.go('library')} start={(recipe) => { setA(blank(o, recipe)); setStarted(true); setOpenSec('campaign') }} load={(x, id) => { setA(normalize(x, o)); setDraftId(id); setStarted(true) }}
+    copy={(x) => { const n = normalize(x, o); const d = x.ads?.[0] || n.defaults; const map = {}; const sets = n.adsets.map((s) => { const u = uid(); map[s.uid] = u; return { ...s, uid: u, name: '' } }); const ads = (x.ads || []).map((ad) => { const m = ad.sets ? ad.sets.map((u) => map[u]).filter(Boolean) : null; return { ...ad, ad_key: '', sets: m && m.length ? m : null } }); setA({ ...n, campaign: { ...n.campaign, name: '' }, ads, adsets: sets, defaults: { ...n.defaults, primary_text: d.primary_text || '', headline: d.headline || '', cta: d.cta || 'LEARN_MORE', destination: d.destination || n.defaults.destination } }); setStarted(true) }} />{modalEl}</>
 
   const errs = plan?.errors || []
   const errOf = (re) => errs.filter((e) => re.test(e))
@@ -607,7 +635,7 @@ function Flow({ o, ctx, params }) {
   )
 }
 
-function Start({ o, start, load, copy, onImport }) {
+function Start({ o, start, load, copy, onImport, onLibrary }) {
   const [drafts, reloadD] = useLoad(() => api('/api/drafts'))
   const [hist] = useLoad(() => api('/api/history'))
   return (
@@ -623,6 +651,7 @@ function Start({ o, start, load, copy, onImport }) {
         </div>
         <div className="grp-label">Or</div>
         <div className="choices even two">
+          <button type="button" className="choice alt" onClick={onLibrary}><b>Duplicate a past campaign</b><span>From your local library: any campaign, ad set or ad you have made, with its images. No waiting on Meta.</span></button>
           <button type="button" className="choice alt" onClick={() => start(null)}><b>Start from scratch</b><span>Choose each setting yourself, with every option open.</span></button>
           <button type="button" className="choice alt" onClick={onImport}><b>Import or copy a campaign</b><span>From a JSON file, one of your campaigns on Meta (with its ad sets and ads), or a saved template.</span></button>
         </div>
@@ -638,7 +667,7 @@ function Start({ o, start, load, copy, onImport }) {
         </Card>
       )}
       {hist.data?.length > 0 && (
-        <Card title="Start from an earlier campaign" sub="Copies the ad sets and text. Then add the images you want, including ones you used before.">
+        <Card title="Start from an earlier campaign" sub="Copies the ad sets, the ads and their images. Change what you like before creating.">
           {hist.data.map((h) => (
             <div key={h.batch} className="list-row"><span className="grow"><b>{h.campaign}</b><br /><span className="muted">{h.goal} · {inr(h.budget)}/day · {h.adsets || 1} ad set(s) · {h.ads} ad(s)</span></span>
               <button type="button" className="btn small" disabled={!h.answers} onClick={() => copy(h.answers)}>Copy</button></div>

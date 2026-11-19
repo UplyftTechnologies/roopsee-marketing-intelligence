@@ -1,8 +1,24 @@
 """'Create it only if it does not exist yet' - the reason re-running a batch never makes duplicates."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from .common import Registry, Settings
 from .meta_api import Meta
+
+# Looking an object up by name before creating it costs one call each. It only matters when an earlier run died after Meta created
+# something but before its id was saved, so a brand-new batch skips it and a retry turns it back on.
+LOOKUPS = True
+
+
+@contextmanager
+def no_lookups():
+    global LOOKUPS
+    old, LOOKUPS = LOOKUPS, False
+    try:
+        yield
+    finally:
+        LOOKUPS = old
 
 
 def ensure(s: Settings, meta: Meta, reg: Registry, reg_key: str, edge: str, name: str, payload: dict,
@@ -12,7 +28,7 @@ def ensure(s: Settings, meta: Meta, reg: Registry, reg_key: str, edge: str, name
     if have:
         print(f"  {reg_key}: exists ({have})")
         return have
-    if lookup and not validate_only:
+    if lookup and LOOKUPS and not validate_only:
         found = meta.find_by_name(edge, name)
         if found:
             reg.update(reg_key, id=found, name=name, recovered=True)

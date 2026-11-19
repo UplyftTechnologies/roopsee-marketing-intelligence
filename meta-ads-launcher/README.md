@@ -231,6 +231,10 @@ The summary panel always says what is still missing in plain words. **Check with
 - **Templates:** *Save as template* stores any ad set, campaign setup or ad in `templates/` for reuse.
 - Catalog ads need their product set. Copy them from your Meta account (that includes it); a file without it is flagged.
 
+**Local library (Past campaigns page).** *Sync from Meta* reads your whole ad account once (about 5 calls for 17 campaigns, 27 ad sets and 72 ads, plus image downloads from Meta's file servers) and saves it under `library/<env>/<account>/` (kept out of git; no token is stored). After that, the copy lists, *Duplicate* (campaign, ad set or ad), the image picker and the test campaign used by *Check with Meta* read from disk: **0 calls to Meta**. Images your ads use are kept in full size, the rest as previews, and videos as details plus the cover picture. If an image was deleted on Meta, it is uploaded again from the stored file. *Refresh* re-reads one campaign (3 calls); *Remove* deletes only the local copy. The library never writes to Meta. A copy over a week old is flagged. Known gap: Meta's bulk read leaves out one targeting key (`subscriber_universe`, the WhatsApp audience that is dropped anyway), so the import notice does not list it for library copies.
+
+**Fewer calls.** *Check with Meta* remembers what Meta accepted for 15 minutes (unchanged object: 0 calls; one changed ad: 1 call). A brand-new batch skips the look-up-by-name before each create (a retry turns it back on). The sidebar shows how many calls this session made (hover for the breakdown). If Meta says the account is being asked too often, the launcher stops sending until access returns instead of making the block longer. The Overview page is a live view and still reads from Meta.
+
 **What came with an import.** When you import JSON or copy from Meta, a notice lists the extra settings that came along in three groups: *imported as is* (no field in the builder, sent to Meta as written), *check before creating* (for example custom audiences or a catalog product set that must exist in this account) and *left out on purpose* with the reason. Today that is the WhatsApp customer audience, the Messenger / WhatsApp chat button (message extensions) and the old standard-enhancements switch: Meta rejects them for this app with "(#3) Application does not have the capability" because it has no messaging permission. The rules live in `src/special.py`.
 
 **Ad set tabs and ad advanced options.** Each ad set card has tabs (Basics, Targeting, Bidding & schedule, Expert), with a dot on a tab that holds custom settings. Each ad has an Advanced options fold with Meta's automatic creative enhancements (on, off or Meta's default). The summary on the right shows the campaign, its ad sets and their ads as a tree; click a node to jump to it.
@@ -359,8 +363,7 @@ Creative and ad creation have been proven on the real account (created paused, v
 | `image not uploaded yet` | Run `upload` first |
 | `writes are blocked` | You are on production; add `--confirm-production` (CLI) or tick the confirmation box (UI) only if intended |
 | `No permission to access this profile` (code 10, subcode 1341012) | The token's user cannot act as your Page. In the sandbox this is expected (the sandbox user cannot post as a Page); on production give the user access to the Page in Business Settings |
-| `this ad needs an Ad ID like RS_SKINCARE_001` (UI) | An ad added by image hash has no ID; type one on its card in step 4 |
-| `Ad IDs typed on an ad card is already used` (UI) | An Ad ID you typed belongs to an earlier campaign; clear it (a free one is chosen) or type a new one. Images themselves can be reused freely |
+| `Ad ID ... already used` (UI) | Ad IDs are internal and chosen for you. An ID stored in a draft, template or copy that an earlier campaign already used is replaced by the next free one automatically. Images themselves can be reused freely |
 | `Sales campaigns need your pixel` | Set `META_<ENV>_PIXEL_ID` (find it with `python run.py discover`) |
 
 Full detail of every call (secrets removed) is in `logs/launcher.log`.
