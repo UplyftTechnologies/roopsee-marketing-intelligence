@@ -151,13 +151,13 @@ export default function Sessions() {
         {({ rows, total }) => {
           const chosen = rows.filter((r) => sel.has(r.session_id))
           return (
-            <Card sticky title={`${num(total)} sessions`} sub="click a row for the full session · click a column title to sort · tick rows to exclude them in bulk"
+            <Card title={`${num(total)} sessions`} sub="click a row for the full session · click a column title to sort · tick rows to exclude them in bulk"
               right={<ExportBtn name="sessions" rows={rows} fields={[['Started', 'started_at'], ['Name', 'name'], ['Email', 'email'], ['Phone', 'phone10'], ['Journey', 'key_events'], ['Order value', 'order_value'], ['Channel', 'channel'], ['Campaign', 'campaign'], ['City', 'city'], ['Pincode', 'pincode'], ['Device', 'device'], ['Events', 'events'], ['Seconds', 'duration_s'], ['IP', 'ip'], ['Session id', 'session_id']]} />}>
               <BulkExclude rows={chosen} noun="sessions" onClear={() => setSel(new Set())} fields={[
                 { label: 'browser', kind: 'visitor_id', get: (r) => r.visitor_key }, { label: 'user account', kind: 'user_id', get: (r) => r.user_id },
                 { label: 'phone number', kind: 'phone', get: (r) => r.phone10 }, { label: 'IP address', kind: 'ip', get: (r) => r.ip }, { label: 'session', kind: 'session_id', get: (r) => r.session_id },
               ]} />
-              <Table selectable selected={sel} onToggle={toggle} onToggleAll={toggleAll} rowId={(r) => r.session_id}
+              <Table scroll selectable selected={sel} onToggle={toggle} onToggleAll={toggleAll} rowId={(r) => r.session_id}
                 sort={sort} onSort={(k) => setSort(nextSort(sort, k, TEXT_SORTS))}
                 onRow={(r) => f.go('session', { key: r.session_id })} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} cols={[
                   { label: 'Started', cls: 'nw', sortBy: 'started_at', render: (r) => <>{dt(r.started_at)}{r.is_excluded && <div><Badge tone="bad">excluded</Badge></div>}</> },

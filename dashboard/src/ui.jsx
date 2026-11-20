@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 /* ---------- metric glossary: shown as hover/focus help next to labels ---------- */
 export const GLOSSARY = {
@@ -27,22 +27,10 @@ export const Help = ({ id, text }) => (
   <span className="help" tabIndex={0} data-tip={text || GLOSSARY[id]} aria-label={text || GLOSSARY[id]}>ⓘ</span>
 )
 
-/** `sticky`: the title row and the table's column headings stay pinned under the top bar while the page scrolls. */
-export function Card({ title, sub, right, children, style, help, sticky }) {
-  const section = useRef(null)
-  const head = useRef(null)
-  useEffect(() => {
-    if (!sticky || !head.current || !section.current) return undefined
-    const set = () => section.current && section.current.style.setProperty('--head-h', `${head.current.offsetHeight}px`)
-    set()
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(set) : null
-    ro?.observe(head.current)
-    return () => ro?.disconnect()
-  }, [sticky, title, sub])
-  return (
-  <section className={`card${sticky ? ' sticky-card' : ''}`} style={style} ref={section}>
+export const Card = ({ title, sub, right, children, style, help }) => (
+  <section className="card" style={style}>
     {(title || right) && (
-      <div className="card-head" ref={head}>
+      <div className="card-head">
         <div>
           <h3>{title}{help && <> <Help id={help} /></>}</h3>
           {sub && <div className="sub">{sub}</div>}
@@ -52,8 +40,7 @@ export function Card({ title, sub, right, children, style, help, sticky }) {
     )}
     {children}
   </section>
-  )
-}
+)
 
 /** Change vs the previous period. kind 'count' → relative %, 'rate' → percentage-point difference. */
 export function delta(cur, prev, kind = 'count') {
@@ -109,11 +96,30 @@ export const verdictTone = { Winning: 'good', Converting: 'good', Promising: 'wa
 /** Next server-side sort state when a header is clicked: same key flips direction, a new key starts descending (ascending for text). */
 export const nextSort = (cur, key, textKeys = []) => (cur.key === key ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' })
 
+const CHUNK = 200
+/** One table row. Large tables skip redrawing rows whose data and selection did not change (ticking one box no longer redraws thousands of rows). */
+const Row = memo(function Row({ r, id, cols, idOf, onRow, rowClass, selectable, isSel, onToggle }) {
+  return (
+    <tr className={`${onRow ? 'click' : ''} ${rowClass ? rowClass(r) : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
+      {selectable && <td className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label="Select row" checked={isSel} onChange={() => onToggle(id)} /></td>}
+      {cols.map((c) => (
+        <td key={idOf(c)} className={`${c.num ? 'num' : ''} ${c.cls || ''}`}>
+          {c.render ? c.render(r) : r[c.key] ?? '–'}
+        </td>
+      ))}
+    </tr>
+  )
+}, (a, b) => a.big && b.big && a.r === b.r && a.isSel === b.isSel && a.selectable === b.selectable && a.sig === b.sig)
+
 /** Table with click-to-sort headers and optional row selection.
+ *  `scroll`: the table scrolls inside a box (both ways) with the column headings pinned; rows are added as you scroll down.
  *  Columns: { label, key?, sortBy? (field name or fn), num?, render?, cls? }  - sortable when key or sortBy is set.
  *  Client sort by default; pass `sort` ({key, dir}) + `onSort(key)` for server-side sorting of paginated data. */
-export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort }) {
+export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll }) {
   const [local, setLocal] = useState(null)
+  const [shown, setShown] = useState(CHUNK)
+  const wrap = useRef(null)
+  const tail = useRef(null)
   const server = typeof onSort === 'function'
   const sortOf = (c) => c.sortBy ?? c.key
   const idOf = (c) => c.key || c.label
@@ -132,6 +138,14 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
       return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'en', { numeric: true, sensitivity: 'base' })) * m
     })
   }, [rows, local, cols, server])
+  const count = data ? data.length : 0
+  useEffect(() => { setShown(CHUNK); if (scroll && wrap.current) wrap.current.scrollTop = 0 }, [rows]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {  // draw the next chunk when the end of the drawn rows comes near
+    if (!tail.current || shown >= count || typeof IntersectionObserver === 'undefined') return undefined
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setShown((n) => n + CHUNK) }, { root: scroll ? wrap.current : null, rootMargin: '600px' })
+    io.observe(tail.current)
+    return () => io.disconnect()
+  }, [shown, count, scroll])
   if (!rows || !rows.length) return <div className="empty">{empty}</div>
   const click = (c) => {
     const sb = sortOf(c)
@@ -150,10 +164,11 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
     if (server) return sort && sort.key === (typeof sb === 'function' ? idOf(c) : sb) ? sort.dir : null
     return local && local.id === idOf(c) ? local.dir : null
   }
+  const sig = cols.map(idOf).join('|')
   const ids = selectable ? data.map(rowId) : []
   const allOn = selectable && ids.length > 0 && ids.every((i) => selected.has(i))
   return (
-    <div className="table-wrap">
+    <div className={`table-wrap${scroll ? ' scroll' : ''}`} ref={wrap}>
       <table>
         <thead>
           <tr>
@@ -171,18 +186,14 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
           </tr>
         </thead>
         <tbody>
-          {data.map((r, i) => (
-            <tr key={selectable ? rowId(r) : i} className={`${onRow ? 'click' : ''} ${rowClass ? rowClass(r) : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
-              {selectable && <td className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label="Select row" checked={selected.has(rowId(r))} onChange={() => onToggle(rowId(r))} /></td>}
-              {cols.map((c) => (
-                <td key={idOf(c)} className={`${c.num ? 'num' : ''} ${c.cls || ''}`}>
-                  {c.render ? c.render(r) : r[c.key] ?? '–'}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {data.slice(0, shown).map((r, i) => {
+            const id = selectable ? rowId(r) : i
+            return <Row key={id} r={r} id={id} cols={cols} idOf={idOf} onRow={onRow} rowClass={rowClass} selectable={selectable} isSel={selectable ? selected.has(id) : false}
+              onToggle={onToggle} big={count > 150} sig={sig} />
+          })}
         </tbody>
       </table>
+      {shown < count && <div ref={tail} className="muted" style={{ padding: '10px 4px', fontSize: 12 }}>Showing {shown.toLocaleString('en-IN')} of {count.toLocaleString('en-IN')} rows, more as you scroll…</div>}
     </div>
   )
 }
@@ -201,7 +212,7 @@ export function ExportBtn({ rows, fields, name }) {
     a.click()
     URL.revokeObjectURL(url)
   }
-  return <button className="btn small" onClick={go} title="Download these rows as a CSV file">Export CSV</button>
+  return <button className="btn small" onClick={go} title="Download the rows loaded on this screen as a CSV file">Export CSV ({rows.length.toLocaleString('en-IN')} rows)</button>
 }
 
 /** Horizontal rate bar used inside table cells (single hue, thin, anchored left). */
@@ -229,6 +240,7 @@ export function Pager({ total, limit, offset, setOffset, setLimit }) {
       <span>{offset + 1}–{Math.min(offset + limit, total)} of {total.toLocaleString('en-IN')}</span>
       <button className="btn small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
       <button className="btn small" disabled={offset + limit >= total} onClick={() => setOffset(offset + limit)}>Next</button>
+      {limit >= ALL_ROWS && total > limit && <span className="muted" style={{ fontSize: 12, flexBasis: '100%', textAlign: 'right' }}>“All” shows up to {ALL_ROWS.toLocaleString('en-IN')} rows at a time. Use Next for the rest, or narrow the list with filters.</span>}
     </div>
   )
 }

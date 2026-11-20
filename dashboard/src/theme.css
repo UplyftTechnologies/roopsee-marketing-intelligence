@@ -229,12 +229,6 @@ td.nw { white-space: nowrap; }
 .tree .share { height: 3px; border-radius: 2px; background: var(--series-1); opacity: .45; margin: 3px 0 0 auto; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 
-/* ---------- sticky table cards: title row + column headings stay under the top bar ---------- */
-.sticky-card > .card-head { position: sticky; top: var(--topbar-h, 56px); z-index: 12; background: var(--surface-1); padding: 10px 0 8px; margin: -4px 0 0; }
-.sticky-card thead th { top: calc(var(--topbar-h, 56px) + var(--head-h, 60px)); z-index: 11; }
-@media (min-width: 1200px) { .sticky-card .table-wrap { overflow-x: clip; } }  /* clip (not auto) so the headings can stick to the page; narrower screens keep horizontal scroll */
-@media (max-width: 1199px) { .sticky-card > .card-head { position: static; } .sticky-card thead th { top: 0; } }
-
 /* ---------- session filter panel ---------- */
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px 28px; }
 .filter-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
@@ -255,3 +249,8 @@ td.nw { white-space: nowrap; }
 .tl-all dt { color: var(--text-muted); } .tl-all dd { margin: 0; word-break: break-word; }
 
 .health-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--grid); }
+
+/* ---------- scrolling table box: scrolls both ways, headings stay pinned inside it ---------- */
+.table-wrap.scroll { overflow: auto; max-height: max(320px, calc(100vh - var(--topbar-h, 56px) - 170px)); }
+.table-wrap.scroll thead th { top: 0; z-index: 2; box-shadow: 0 1px 0 var(--border); }
+.pager { flex-wrap: wrap; }

@@ -40,13 +40,13 @@ export default function Users() {
           return (
             <>
               <Chips value={segment} onChange={setSegment} options={[{ value: '', label: 'All segments' }, ...segments.map((g) => ({ value: g.segment, label: `${g.segment} (${num(g.n)})` }))]} />
-              <Card sticky title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser · click a row for their full profile · click a column title to sort · a person who later ordered is never a cart or checkout abandoner"
+              <Card title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser · click a row for their full profile · click a column title to sort · a person who later ordered is never a cart or checkout abandoner"
                 right={<ExportBtn name="people" rows={rows} fields={[['Name', 'name'], ['Phone', 'phone10'], ['Email', 'email'], ['Segment', 'segment'], ['First channel', 'first_channel'], ['City', 'city'], ['State', 'state'], ['Sessions', 'sessions'], ['Orders', 'orders'], ['Revenue', 'revenue'], ['Age', 'age_bucket'], ['Skin type', 'skin_type']]} />}>
                 <BulkExclude rows={chosen} noun="users" onClear={() => setSel(new Set())} fields={[
                   { label: 'user account', kind: 'user_id', get: (r) => r.user_id }, { label: 'browser', kind: 'visitor_id', get: (r) => (r.user_id ? null : r.person_key) },
                   { label: 'phone number', kind: 'phone', get: (r) => r.phone10 }, { label: 'email', kind: 'email', get: (r) => r.email },
                 ]} />
-                <Table selectable selected={sel} onToggle={toggle} onToggleAll={toggleAll} rowId={(r) => r.person_key}
+                <Table scroll selectable selected={sel} onToggle={toggle} onToggleAll={toggleAll} rowId={(r) => r.person_key}
                   sort={sort} onSort={(k) => setSort(nextSort(sort, k, TEXT_SORTS))}
                   onRow={(r) => f.go('person', { key: r.person_key })} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} cols={[
                     { label: 'Person', cls: 'nw', sortBy: 'name', render: (r) => r.name || (r.is_registered ? <span className="muted">no name</span> : <span className="muted mono">anon {r.person_key.slice(0, 8)}</span>) },

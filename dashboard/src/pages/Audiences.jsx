@@ -20,7 +20,7 @@ function People({ id, onClose }) {
             <button className="btn small" onClick={onClose}>Close</button>
           </span>}>
           <div className="banner ok" style={{ marginBottom: 10 }}><div><b>Suggested next step:</b> {d.action}<div className="muted">Messaging is not built yet; export the list or use it as a target for the automated step later.</div></div></div>
-          <Table sort={sort} onSort={(k) => setSort(nextSort(sort, k, ['name', 'city', 'first_channel']))} onRow={(r) => f.go('person', { key: r.person_key })} cols={[
+          <Table scroll sort={sort} onSort={(k) => setSort(nextSort(sort, k, ['name', 'city', 'first_channel']))} onRow={(r) => f.go('person', { key: r.person_key })} cols={[
             { label: 'Person', sortBy: 'name', render: (r) => r.name || <span className="muted">no name</span> },
             { label: 'Phone', cls: 'mono', render: (r) => r.phone10 || <span className="muted">none</span> },
             { label: 'Place', sortBy: 'city', render: (r) => [r.city, r.state].filter(Boolean).join(', ') || '–' },

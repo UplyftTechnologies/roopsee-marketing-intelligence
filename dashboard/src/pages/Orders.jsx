@@ -59,9 +59,9 @@ function OrdersTable() {
                 {(status.length > 0 || payment.length > 0 || coupon) && <button type="button" className="btn small" onClick={() => { setStatus([]); setPayment([]); setCoupon('') }}>Clear filters</button>}
               </div>
             </Card>
-            <Card sticky title={`${num(total)} orders`} sub={`${inr(summary.gmv)} order value · ${inr(summary.aov)} average · click an order for everything about it · click a column title to sort`}
+            <Card title={`${num(total)} orders`} sub={`${inr(summary.gmv)} order value · ${inr(summary.aov)} average · click an order for everything about it · click a column title to sort`}
               right={<ExportBtn name="orders" rows={rows} fields={[['Order id', 'order_id'], ['Placed', 'ts'], ['Customer', 'customer_name'], ['Phone', 'phone10'], ['Email', 'email'], ['City', 'city'], ['Pincode', 'pincode'], ['Items', 'items'], ['Order value', 'total'], ['Products total', 'products_total'], ['Coupon', 'coupon_code'], ['Coupon discount', 'coupon_discount'], ['Delivery fee', 'delivery_fee'], ['Payment', 'payment_method'], ['Payment status', 'payment_status'], ['Status', 'status'], ['Failure reason', 'payment_failed_reason'], ['Customer order #', 'nth_order'], ['Channel', 'channel'], ['Campaign', 'campaign']]} />}>
-              <Table sort={sort} onSort={(k) => setSort(nextSort(sort, k, TEXT_SORTS))} onRow={(r) => f.go('order', { key: r.order_id })}
+              <Table scroll sort={sort} onSort={(k) => setSort(nextSort(sort, k, TEXT_SORTS))} onRow={(r) => f.go('order', { key: r.order_id })}
                 rowClass={(r) => (r.is_excluded || !r.is_valid ? 'excluded' : '')} empty="No orders match these filters." rows={rows} cols={[
                   { label: 'Order', cls: 'mono nw', render: (r) => r.order_id.slice(0, 8) },
                   { label: 'Placed', cls: 'nw', sortBy: 'ts', render: (r) => dt(r.ts) },
