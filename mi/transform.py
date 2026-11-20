@@ -112,6 +112,8 @@ CREATE OR REPLACE MACRO event_key(e) AS CASE
   WHEN e IN ('clicked_pay_now','payment_started','payment_success') THEN 'pay_started'
   WHEN e IN ('page_viewed_checkout','page_view_checkout','clicked_checkout','clicked_checkout_cart_drawer','clicked_my_cart_login_to_checkout') THEN 'checkout_view'
   WHEN e IN ('address_field_filled','clicked_save_address','delivery_location_set') THEN 'address'
+  WHEN e = 'checked_delivery_pincode' THEN 'checked_delivery_pincode'
+  WHEN e = 'clicked_address_modal_open' THEN 'clicked_address_modal_open'
   WHEN e = 'address_saved' THEN 'address_saved'
   WHEN e IN ('payment_cancelled','payment_failed') THEN 'payment_failed'
   WHEN e = 'login_prompt_shown' THEN 'login_prompt'
