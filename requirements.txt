@@ -1,6 +1,8 @@
-duckdb>=1.1
-pandas>=2.2
-requests>=2.32
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pytz>=2024.1
+# Direct dependencies, pinned to the versions this project was tested with.
+# requirements.lock.txt lists every package (including indirect ones) for an exact rebuild:  pip install -r requirements.lock.txt
+duckdb==2.0.0
+pandas==3.1.1
+requests==2.34.2
+fastapi==0.163.1
+uvicorn[standard]==0.54.0
+pytz==2026.6

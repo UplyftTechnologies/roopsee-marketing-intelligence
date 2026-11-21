@@ -3,8 +3,9 @@ import { inr, num, useApi, useFilters } from '../api'
 import { Card, Loading } from '../ui'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
-import MetricChart from '../components/MetricChart'
+import MetricChart from '../components/LazyMetricChart'
 import DataHealth from '../components/DataHealth'
+import { Alerts, WeeklyDigest } from '../components/AlertsDigest'
 
 const GROUPS = [
   { key: 'attention', title: 'Needs attention', tones: ['bad', 'warn'], blurb: 'Things that are costing you customers or money' },
@@ -61,6 +62,8 @@ export default function Home() {
       {({ kpis, prev, insights }) => (
         <>
           <Tip />
+          <Alerts />
+          <WeeklyDigest />
           <ScorecardStrip>
             {CARDS.map((k) => (
               <Scorecard key={k} metric={k} kpis={kpis} prev={prev} compare={f.compare} spark={ts.data?.current[METRICS[k].series]} active={metric === k} onClick={() => setMetric(k)} />

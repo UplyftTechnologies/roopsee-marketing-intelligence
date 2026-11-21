@@ -6,6 +6,7 @@ import { Heatmap } from './Overview'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/MetricChart'
+import ShareLink from '../components/ShareLink'
 
 export const STATUS_TONE = { placed: '', accepted: '', picked_up: '', out_for_delivery: 'warn', delivered: 'good', completed: 'good', payment_cancelled: 'bad', payment_pending: 'warn' }
 export const niceStatus = (s) => (s || '–').replace(/_/g, ' ')
@@ -29,20 +30,22 @@ function MultiPick({ label, options, value, onChange }) {
 
 function OrdersTable() {
   const f = useFilters()
-  const [scope, setScope] = usePersisted('orders.scope', 'sales')
-  const [status, setStatus] = usePersisted('orders.status', [])
-  const [payment, setPayment] = usePersisted('orders.payment', [])
-  const [coupon, setCoupon] = usePersisted('orders.coupon', '')
-  const [search, setSearch] = usePersisted('orders.search', '')
-  const [sort, setSort] = usePersisted('orders.sort', { key: 'ts', dir: 'desc' })
+  const sh = f.prefill?.share || null  // opened from a shared link
+  const [scope, setScope] = usePersisted('orders.scope', sh?.scope ?? 'sales', !!sh)
+  const [status, setStatus] = usePersisted('orders.status', sh?.status ?? [], !!sh)
+  const [payment, setPayment] = usePersisted('orders.payment', sh?.payment ?? [], !!sh)
+  const [coupon, setCoupon] = usePersisted('orders.coupon', sh?.coupon ?? '', !!sh)
+  const [search, setSearch] = usePersisted('orders.search', sh?.search ?? '', !!sh)
+  const [sort, setSort] = usePersisted('orders.sort', sh?.sort ?? { key: 'ts', dir: 'desc' }, !!sh)
   const [offset, setOffset] = useState(0)
-  const [limit, setLimit] = usePersisted('orders.limit', 25)
+  const [limit, setLimit] = usePersisted('orders.limit', sh?.limit ?? 25, !!sh)
   const s = useApi('/orders', { scope, status: status.join(',') || undefined, payment: payment.join(',') || undefined, coupon: coupon || undefined, search, sort: sort.key, direction: sort.dir, limit, offset })
   useEffect(() => setOffset(0), [scope, status, payment, coupon, search, sort, limit])
   return (
     <>
       <div className="chip-row">
         <Search value={search} onChange={setSearch} placeholder="Search order id, name, phone, email, city, pincode, coupon…" />
+        <ShareLink tab="orders" state={{ scope, status, payment, coupon, search, sort }} />
       </div>
       <div className="chip-row" role="group" aria-label="Which orders">
         {SCOPES.map(([k, l, tip]) => <button key={k} type="button" title={tip} className={`chip ${scope === k ? 'on' : ''}`} onClick={() => setScope(k)}>{l}</button>)}

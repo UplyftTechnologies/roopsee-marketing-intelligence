@@ -98,4 +98,5 @@ def log_run(con, step: str, started, rows: int | None = None, note: str = "") ->
 
 
 import threading
-DB_LOCK = threading.RLock()  # serialises writers (extract inserts, transform) against API reads
+DB_LOCK = threading.RLock()  # serialises short writes (extract inserts, exclusion edits) against API reads
+TRANSFORM_LOCK = threading.Lock()  # one rebuild at a time; readers are NOT blocked by it (the rebuild is a single transaction)

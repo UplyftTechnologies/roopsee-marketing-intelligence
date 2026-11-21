@@ -28,6 +28,23 @@ export function usePersisted(key, initial, fresh = false) {
   return [v, setV]
 }
 
+/** Share links: the page's date range and filters, packed into the link after the # (base64url of JSON, so it has no characters that need escaping). */
+export const encodeShare = (obj) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(obj))
+  let bin = ''
+  bytes.forEach((b) => { bin += String.fromCharCode(b) })
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+export const decodeShare = (s) => {
+  if (!s) return null
+  try {
+    const b = s.replace(/-/g, '+').replace(/_/g, '/')
+    const bin = atob(b + '='.repeat((4 - (b.length % 4)) % 4))
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))))
+  } catch { return null }
+}
+export const shareLink = (tab, state) => `${location.origin}${location.pathname}#${tab}?s=${encodeShare(state)}`
+
 /** Forget the remembered filters of one page (keys are `mi:<page>.<name>`). */
 export function clearPersisted(page) {
   try { Object.keys(sessionStorage).filter((k) => k.startsWith(`mi:${page}.`)).forEach((k) => sessionStorage.removeItem(k)) } catch { /* ignore */ }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { inr, num, pct, useApi, useFilters } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, RateBar, Table, axis, chartTip, verdictTone } from '../ui'
+import UtmHealth from '../components/UtmHealth'
 
 const CH = ['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']
 
@@ -57,6 +58,7 @@ export default function Campaigns() {
                 </ResponsiveContainer>
               )}
             </Card>
+            <UtmHealth />
           </>
         )
       }}

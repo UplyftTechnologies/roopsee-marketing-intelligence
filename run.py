@@ -125,7 +125,7 @@ def stop_dashboard() -> int:
 
 
 # ------------------------------------------------------------------ setup steps
-def check_prereqs() -> None:
+def check_prereqs(refresh: bool = False) -> None:
     if sys.version_info < MIN_PY:
         have = sys.version.split()[0]
         hint = ("Install a current Python with Homebrew:  brew install python   (or download from https://www.python.org/downloads/), "
@@ -134,11 +134,23 @@ def check_prereqs() -> None:
     env = ROOT / ".env"
     if not env.exists():
         die("The .env file is missing. Create it next to run.py with at least:\n"
-            "  PRODUCT_SUPABASE_URL=https://<your-project>.supabase.co\n  PRODUCT_SUPABASE_SERVICE_KEY=<service key>")
+            "  PRODUCT_SUPABASE_URL=https://<your-project>.supabase.co\n  PRODUCT_SUPABASE_READ_KEY=<read-only key>   (or PRODUCT_SUPABASE_SERVICE_KEY)")
     lines = [ln.strip() for ln in env.read_text(encoding="utf-8", errors="ignore").splitlines()]
-    for key in ("PRODUCT_SUPABASE_URL", "PRODUCT_SUPABASE_SERVICE_KEY"):
-        if not any(ln.startswith(key + "=") and len(ln) > len(key) + 1 for ln in lines):
-            die(f"{key} is missing (or commented out) in .env - the dashboard needs it to read your production data.")
+    def has(key):
+        return any(ln.startswith(key + "=") and len(ln) > len(key) + 1 for ln in lines)
+    keys = ("PRODUCT_SUPABASE_READ_KEY", "PRODUCT_SUPABASE_ANON_KEY", "PRODUCT_SUPABASE_SERVICE_KEY")
+    missing = []
+    if not has("PRODUCT_SUPABASE_URL"):
+        missing.append("PRODUCT_SUPABASE_URL is missing (or commented out) in .env")
+    if not any(has(k) for k in keys):
+        missing.append("no Supabase key found in .env (add one of: " + ", ".join(keys) + "; a read-only key is best, see docs/read-only-access.md)")
+    if missing:
+        have_data = (DATA / "mi.duckdb").exists() and data_state() == "ready"
+        if have_data and not refresh:
+            # the data is already on this computer: keep the dashboard usable, only pulling new data needs the key
+            print("\nNOTE: " + "; ".join(missing) + ".\n      The dashboard starts with the data you already have. The Refresh button will not work until this is fixed.", flush=True)
+        else:
+            die("The dashboard needs to read your production data, but " + "; ".join(missing) + ".")
 
 
 def ensure_venv_and_deps() -> None:
@@ -226,7 +238,7 @@ def main(argv) -> int:
             return 0
         die(f"Port {PORT} is used by another program. Close it, or use another port:  {port_hint()}")
 
-    check_prereqs()
+    check_prereqs("--refresh" in argv)
     ensure_venv_and_deps()
     ensure_ui("--rebuild-ui" in argv)
     DATA.mkdir(exist_ok=True)

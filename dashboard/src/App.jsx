@@ -1,25 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { FilterCtx, api, clearPersisted, num } from './api'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { FilterCtx, api, clearPersisted, decodeShare, num } from './api'
 import Icon from './components/Icon'
 import Popover from './components/Popover'
 import DatePicker from './components/DatePicker'
-import Home from './pages/Home'
-import Overview from './pages/Overview'
-import Funnel from './pages/Funnel'
-import Campaigns from './pages/Campaigns'
-import Cohorts from './pages/Cohorts'
-import Sessions from './pages/Sessions'
-import Users from './pages/Users'
-import Exclusions from './pages/Exclusions'
-import DataPage from './pages/Data'
-import Basket from './pages/Basket'
-import Loyalty from './pages/Loyalty'
-import Audiences from './pages/Audiences'
-import Person from './pages/Person'
-import SessionPage from './pages/SessionPage'
-import Orders from './pages/Orders'
-import OrderPage from './pages/OrderPage'
-import MetaAds from './pages/MetaAds'
+
+// pages load on demand, so the first screen downloads only what it needs
+const Home = lazy(() => import('./pages/Home'))
+const Overview = lazy(() => import('./pages/Overview'))
+const Funnel = lazy(() => import('./pages/Funnel'))
+const Campaigns = lazy(() => import('./pages/Campaigns'))
+const Cohorts = lazy(() => import('./pages/Cohorts'))
+const Sessions = lazy(() => import('./pages/Sessions'))
+const Users = lazy(() => import('./pages/Users'))
+const Exclusions = lazy(() => import('./pages/Exclusions'))
+const DataPage = lazy(() => import('./pages/Data'))
+const Basket = lazy(() => import('./pages/Basket'))
+const Loyalty = lazy(() => import('./pages/Loyalty'))
+const Audiences = lazy(() => import('./pages/Audiences'))
+const Person = lazy(() => import('./pages/Person'))
+const SessionPage = lazy(() => import('./pages/SessionPage'))
+const Orders = lazy(() => import('./pages/Orders'))
+const OrderPage = lazy(() => import('./pages/OrderPage'))
+const MetaAds = lazy(() => import('./pages/MetaAds'))
+const Dictionary = lazy(() => import('./pages/Dictionary'))
 
 // [key, label, icon, one-line description (tooltip + page subtitle), component, group]
 const NAV = [
@@ -37,6 +40,7 @@ const NAV = [
   ['users', 'Users', 'users', 'People and where they are in the journey', Users, 'Explore'],
   ['exclusions', 'Exclusions', 'ban', 'Remove internal, test and bot traffic', Exclusions, 'Admin'],
   ['data', 'Data & ETL', 'database', 'Refresh data, tracking health', DataPage, 'Admin'],
+  ['dictionary', 'Data dictionary', 'info', 'How every number is worked out', Dictionary, 'Admin'],
 ]
 // Detail pages: not in the menu, reached by clicking a person or a session
 const EXTRA = [
@@ -45,9 +49,11 @@ const EXTRA = [
   ['order', 'Order', 'receipt', 'Everything about one order', OrderPage, 'Orders'],
 ]
 function parseHash() {
-  const [a, ...rest] = decodeURIComponent(location.hash.slice(1)).split('/')
+  const [path, query = ''] = decodeURIComponent(location.hash.slice(1)).split('?')
+  const [a, ...rest] = path.split('/')
   if ((a === 'person' || a === 'session' || a === 'order') && rest.length) return { tab: a, prefill: { key: rest.join('/') } }
-  return { tab: NAV.some((n) => n[0] === a) ? a : 'home', prefill: {} }
+  const share = decodeShare(new URLSearchParams(query).get('s'))  // a shared link carries the dates and filters
+  return { tab: NAV.some((n) => n[0] === a) ? a : 'home', prefill: share ? { share } : {} }
 }
 const iso = (d) => d.toISOString().slice(0, 10)
 const shift = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return iso(d) }
@@ -63,7 +69,7 @@ export default function App() {
   const [meta, setMeta] = useState(null)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [hideInternal, setHideInternal] = useState(true)
+  const [hideInternal, setHideInternal] = useState(init.prefill.share?.hide ?? true)
   const [compare, setCompare] = useState(true)
   const [tick, setTick] = useState(0)
   const [theme, setTheme] = useState(() => { const q = new URLSearchParams(location.search).get('theme'); return ['light', 'dark', 'auto'].includes(q) ? q : localStorage.getItem('theme') || 'light' })
@@ -105,18 +111,42 @@ export default function App() {
 
   const loadMeta = () => api('/meta').then(setMeta).catch(() => {})
   useEffect(() => { loadMeta() }, [tick])
+  const [clock, setClock] = useState(Date.now())
+  const [doneMsg, setDoneMsg] = useState('')
+  const startN = useRef(null)
+  useEffect(() => { const t = setInterval(() => setClock(Date.now()), 60000); return () => clearInterval(t) }, [])
   useEffect(() => {
     if (!meta?.job?.running) return undefined
+    if (startN.current === null) startN.current = meta.raw_events?.n ?? 0
     const t = setInterval(async () => {
       const j = await api('/jobs')
-      if (!j.running) { setTick((x) => x + 1); clearInterval(t) } else setMeta((m) => ({ ...m, job: j }))
+      if (!j.running) {
+        clearInterval(t)
+        const m = await api('/meta').catch(() => null)
+        if (m) {
+          setMeta(m)
+          const added = (m.raw_events?.n ?? 0) - (startN.current ?? 0)
+          if (!j.error) { setDoneMsg(added > 0 ? `Updated: ${added.toLocaleString('en-IN')} new events` : 'Updated: no new events'); setTimeout(() => setDoneMsg(''), 12000) }
+        }
+        startN.current = null
+        setTick((x) => x + 1)
+      } else setMeta((m) => ({ ...m, job: j }))
     }, 1500)
     return () => clearInterval(t)
   }, [meta?.job?.running])
+  const lastEvent = meta?.raw_events?.last ? new Date(meta.raw_events.last) : null
+  const ageH = lastEvent ? (clock - lastEvent.getTime()) / 36e5 : null
+  const ageText = ageH == null ? '' : ageH < 1 ? `${Math.max(1, Math.round(ageH * 60))} min ago` : ageH < 48 ? `${Math.round(ageH)} h ago` : `${Math.round(ageH / 24)} days ago`
+  const freshTone = ageH == null ? '' : ageH <= 6 ? 'good' : ageH <= 24 ? 'warn' : 'bad'
 
   const first = meta?.range?.first
   const last = meta?.range?.last
-  useEffect(() => { if (last && !inited.current) { inited.current = true; setTo(last); setFrom(shift(last, -29)) } }, [last])
+  useEffect(() => {
+    if (!last || inited.current) return
+    inited.current = true
+    const sh = init.prefill.share
+    if (sh && 'from' in sh) { setFrom(sh.from || ''); setTo(sh.to || '') } else { setTo(last); setFrom(shift(last, -29)) }
+  }, [last])
 
   const presets = last ? [
     ['Today', last, last], ['Yesterday', shift(last, -1), shift(last, -1)], ['Last 7 days', shift(last, -6), last],
@@ -130,7 +160,7 @@ export default function App() {
   const railActive = tab === 'person' ? 'users' : tab === 'session' ? 'sessions' : tab === 'order' ? 'orders' : tab
   const Page = cur[4]
   const dateless = tab === 'loyalty' || tab === 'audiences'
-  const noDates = dateless || ['exclusions', 'data', 'person', 'session', 'order'].includes(tab)
+  const noDates = dateless || ['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab)
   const job = meta?.job
   const c = meta?.counts
   const tc = meta?.tracking_change
@@ -183,13 +213,16 @@ export default function App() {
             <button type="button" className="icon-btn menu-btn2" onClick={() => setMenu(!menu)} aria-label="Open menu"><Icon name="menu" /></button>
             <div><span className="crumb">{cur[5] || 'Roopsee'}</span><h1>{cur[1]}</h1></div>
             <div style={{ flex: 1 }} />
-            {job?.running && <span className="badge warn">{job.name}: {job.message || 'running'}…</span>}
-            {job?.error && <span className="badge bad" title={job.error}>last job failed</span>}
+            {job?.running
+              ? <span className="badge warn" role="status">Refreshing: {job.message || 'working'} · {Math.max(0, Math.round((Date.now() - new Date(job.started).getTime()) / 1000))}s</span>
+              : lastEvent && <span className={`badge ${freshTone}`} title={`Newest event ${lastEvent.toLocaleString('en-IN')}${meta?.last_transform ? ` · tables rebuilt ${new Date(meta.last_transform).toLocaleString('en-IN')}` : ''}. Press Refresh to pull newer data.`}>Data as of {lastEvent.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {ageText}</span>}
+            {doneMsg && <span className="badge good" role="status">{doneMsg}</span>}
+            {job?.error && <span className="badge bad" title={job.error}>last refresh failed: {String(job.error).slice(0, 60)}</span>}
             {!noDates && (
               <DatePicker presets={presets} active={active} from={from} to={to} rangeText={rangeText} prevText={prevText} compare={compare} setCompare={setCompare}
                 setRange={(f, t) => { setFrom(f); setTo(t) }} first={first} last={last} canCompare={canCompare} note={crossesUpgrade ? upgradeText : null} />
             )}
-            {!['exclusions', 'data', 'person', 'session', 'order'].includes(tab) && (
+            {!['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab) && (
               <Popover align="right" width={320} trigger={({ open, toggle }) => (
                 <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Internal, test and bot traffic">
                   <span className={`dot ${hideInternal ? '' : 'off'}`} />{hideInternal ? 'Internal traffic hidden' : 'All traffic shown'}<Icon name="chevron" size={16} />
@@ -212,11 +245,12 @@ export default function App() {
             </button>
           </header>
           {crossesUpgrade && <div className="notice" role="note"><Icon name="info" size={18} />{upgradeText}</div>}
+          {freshTone === 'bad' && !job?.running && <div className="notice" role="note"><Icon name="info" size={18} />The data is {ageText} old, so recent activity is missing. Press Refresh to pull the latest events.</div>}
           {dateless && <div className="notice" role="note"><Icon name="info" size={18} />All-time view: the date range does not apply to this page.</div>}
           <main className="page" key={navKey}>
             {meta && !meta.ready
               ? <div className="banner err">No analytics tables yet. Run <span className="mono">python3 run.py</span> or press “Refresh”.</div>
-              : <Page />}
+              : <Suspense fallback={<div className="skeleton" style={{ height: 320 }} />}><Page /></Suspense>}
           </main>
         </div>
       </div>

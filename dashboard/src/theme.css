@@ -254,3 +254,17 @@ td.nw { white-space: nowrap; }
 .table-wrap.scroll { overflow: auto; max-height: max(320px, calc(100vh - var(--topbar-h, 56px) - 170px)); }
 .table-wrap.scroll thead th { top: 0; z-index: 2; box-shadow: 0 1px 0 var(--border); }
 .pager { flex-wrap: wrap; }
+
+tr.click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---------- data dictionary ---------- */
+.dict-row { display: grid; grid-template-columns: minmax(150px, 230px) 1fr; gap: 6px 18px; padding: 9px 0; border-bottom: 1px solid var(--grid); }
+.dict-row dt { font-weight: 500; } .dict-row dd { margin: 0; color: var(--text-secondary); }
+@media (max-width: 700px) { .dict-row { grid-template-columns: 1fr; } }
+
+.digest { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.digest li { font-size: 14px; }
+
+.kpi.click { cursor: pointer; }
+.kpi.click:hover { border-color: var(--accent); }
+.kpi.click:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

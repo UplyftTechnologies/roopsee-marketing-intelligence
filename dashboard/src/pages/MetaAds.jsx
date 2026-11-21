@@ -180,6 +180,8 @@ function Hierarchy() {
   )
 }
 
+import MetaReconcile from '../components/MetaReconcile'
+
 export default function MetaAds() {
   const f = useFilters()
   const [metric, setMetric] = useState('m_spend')
@@ -217,6 +219,8 @@ export default function MetaAds() {
                   Your tracked orders are the conservative figure. Sales on cash-on-delivery orders that never linked to a session are missing from both.
                 </div>
               </Card>
+
+              <MetaReconcile />
 
               {covPct < 0.9 && (
                 <div className="banner">

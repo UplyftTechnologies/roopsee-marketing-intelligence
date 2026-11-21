@@ -10,7 +10,7 @@ and exclusions can be edited and re-applied at any time.
 import time
 from datetime import datetime
 
-from .db import DB_LOCK, log_run
+from .db import TRANSFORM_LOCK, log_run
 
 # ---------------------------------------------------------------- exclusions (editable user data)
 EXCLUSION_KINDS = {
@@ -270,24 +270,29 @@ def step_hits(con) -> None:
                         f"{str(byv).upper()} FROM events_base e WHERE {cond}")
     con.execute("""
       CREATE OR REPLACE TABLE excluded_sessions AS
-        SELECT session_id, string_agg(DISTINCT why, ', ') AS reason FROM hits GROUP BY 1;
+        SELECT session_id, string_agg(DISTINCT why, ', ' ORDER BY why) AS reason FROM hits GROUP BY 1;
       CREATE OR REPLACE TABLE excluded_visitors AS
-        SELECT visitor_key, string_agg(DISTINCT why, ', ') AS reason FROM hits WHERE by_visitor GROUP BY 1;
+        SELECT visitor_key, string_agg(DISTINCT why, ', ' ORDER BY why) AS reason FROM hits WHERE by_visitor GROUP BY 1;
       CREATE OR REPLACE TABLE manual_sessions AS SELECT DISTINCT session_id FROM hits WHERE why NOT LIKE 'rule:%';
       CREATE OR REPLACE TABLE manual_users AS
         SELECT DISTINCT user_id FROM hits WHERE by_visitor AND user_id IS NOT NULL AND why NOT LIKE 'rule:%';
       CREATE OR REPLACE TABLE excluded_users AS
-        SELECT user_id, string_agg(DISTINCT why, ', ') AS reason FROM hits
+        SELECT user_id, string_agg(DISTINCT why, ', ' ORDER BY why) AS reason FROM hits
         WHERE by_visitor AND user_id IS NOT NULL GROUP BY 1;""")
 
 
 STEP_SESSIONS = """
 -- pincode -> place, learned from saved addresses and orders
 CREATE OR REPLACE TABLE dim_pincode AS
-SELECT pincode, mode(initcap(lower(trim(city)))) AS city, mode(initcap(lower(trim(state)))) AS state FROM (
-  SELECT pincode, city, state FROM raw_customer_address WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$')
-  UNION ALL SELECT pincode, city, state FROM raw_orders WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$'))
-GROUP BY 1;
+WITH u AS (
+  SELECT pincode, initcap(lower(trim(city))) AS city, initcap(lower(trim(state))) AS state FROM (
+    SELECT pincode, city, state FROM raw_customer_address WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$')
+    UNION ALL SELECT pincode, city, state FROM raw_orders WHERE regexp_matches(coalesce(pincode, ''), '^[0-9]{6}$'))),
+cc AS (SELECT pincode, city, count(*) AS c FROM u WHERE city IS NOT NULL GROUP BY 1, 2),
+ss AS (SELECT pincode, state, count(*) AS c FROM u WHERE state IS NOT NULL GROUP BY 1, 2)
+SELECT p.pincode, (SELECT first(cc.city ORDER BY cc.c DESC, cc.city) FROM cc WHERE cc.pincode = p.pincode) AS city,
+       (SELECT first(ss.state ORDER BY ss.c DESC, ss.state) FROM ss WHERE ss.pincode = p.pincode) AS state
+FROM (SELECT DISTINCT pincode FROM u) p;
 
 CREATE OR REPLACE TABLE sessions_pre AS
 WITH k AS (
@@ -379,7 +384,7 @@ UNION ALL SELECT s.session_id, 'campaign:' || x.v FROM sessions_pre s JOIN excl 
 UNION ALL SELECT s.session_id, 'channel:' || x.v FROM sessions_pre s JOIN excl x ON x.kind = 'channel' AND lower(s.channel) = x.v;
 
 CREATE OR REPLACE TABLE excluded_sessions AS
-SELECT session_id, string_agg(DISTINCT reason, ', ') AS reason FROM excluded_sessions GROUP BY 1;
+SELECT session_id, string_agg(DISTINCT reason, ', ' ORDER BY reason) AS reason FROM excluded_sessions GROUP BY 1;
 
 CREATE OR REPLACE TABLE sessions AS
 SELECT s.*,
@@ -393,7 +398,8 @@ DROP TABLE sessions_pre;
 """
 
 STEP_EVENTS_CLEAN = """
-CREATE OR REPLACE TABLE events_clean AS
+-- a view, not a second copy of every event: it adds the hidden-traffic flag to events_base when read
+CREATE VIEW events_clean AS
 SELECT e.*,
   (es.session_id IS NOT NULL OR ev.visitor_key IS NOT NULL OR eu.user_id IS NOT NULL) AS is_excluded
 FROM events_base e
@@ -455,7 +461,7 @@ ASOF LEFT JOIN (SELECT coalesce(user_id, visitor_key) AS person_key, started_at,
 CREATE OR REPLACE TABLE session_orders AS
 SELECT session_id, count(*) FILTER (WHERE NOT is_test) AS n_orders, count(*) FILTER (WHERE is_valid) AS n_placed,
   sum(total) FILTER (WHERE is_valid AND NOT is_test) AS order_value, sum(total) FILTER (WHERE NOT is_valid AND NOT is_test) AS other_value,
-  string_agg(DISTINCT status, ', ') FILTER (WHERE NOT is_test) AS statuses, any_value(email_l) FILTER (WHERE email_l IS NOT NULL) AS order_email
+  string_agg(DISTINCT status, ', ' ORDER BY status) FILTER (WHERE NOT is_test) AS statuses, max(email_l) FILTER (WHERE email_l IS NOT NULL) AS order_email
 FROM orders_clean WHERE session_id IS NOT NULL GROUP BY 1;
 
 -- which event names each session contains (powers the "had event" filter and event-name search on Sessions)
@@ -480,11 +486,12 @@ FROM raw_catalog_master WHERE product_id IS NOT NULL AND product_id NOT IN (SELE
 -- Order lines use several product-id schemes; brand / kind fall back to the name stored on the line.
 CREATE OR REPLACE TABLE order_lines AS
 WITH l AS (SELECT lower(o.id) AS order_id, unnest(from_json(o.items, '["JSON"]')) AS j FROM raw_orders o WHERE o.items IS NOT NULL),
-brands AS (
-  SELECT DISTINCT lower(trim(brand)) AS b, trim(brand) AS brand FROM dim_products WHERE brand IS NOT NULL AND length(trim(brand)) > 2
-  UNION
-  SELECT DISTINCT lower(trim(json_extract_string(j, '$.brand_name'))), trim(json_extract_string(j, '$.brand_name')) FROM l
-  WHERE length(trim(coalesce(json_extract_string(j, '$.brand_name'), ''))) > 2),
+brands AS (  -- one spelling per brand (the alphabetically first), so "AXIS-Y" and "Axis-Y" never flip between rebuilds
+  SELECT b, min(brand) AS brand FROM (
+    SELECT DISTINCT lower(trim(brand)) AS b, trim(brand) AS brand FROM dim_products WHERE brand IS NOT NULL AND length(trim(brand)) > 2
+    UNION
+    SELECT DISTINCT lower(trim(json_extract_string(j, '$.brand_name'))), trim(json_extract_string(j, '$.brand_name')) FROM l
+    WHERE length(trim(coalesce(json_extract_string(j, '$.brand_name'), ''))) > 2) GROUP BY b),
 x AS (
   SELECT c.order_id, c.user_id, c.ts, c.date_ist, c.is_valid, c.is_excluded, c.is_staff_order, c.total AS order_total, c.items_count,
     json_extract_string(l.j, '$.id') AS product_id,
@@ -509,7 +516,7 @@ FROM x;
 STEP_META = """
 -- every id / name Meta knows for a campaign -> that campaign (ambiguous keys are dropped, never guessed)
 CREATE OR REPLACE TABLE meta_ids AS
-SELECT key, any_value(campaign_id) AS campaign_id FROM (
+SELECT key, max(campaign_id) AS campaign_id FROM (
   SELECT campaign_id AS key, campaign_id FROM raw_meta_insights
   UNION ALL SELECT adset_id, campaign_id FROM raw_meta_insights
   UNION ALL SELECT ad_id, campaign_id FROM raw_meta_insights
@@ -520,7 +527,7 @@ WHERE key IS NOT NULL GROUP BY key HAVING count(DISTINCT campaign_id) = 1;
 
 -- our sessions that came from a Meta campaign we can identify (utm_campaign holds the campaign id, name, or an ad-set / ad id)
 CREATE OR REPLACE TABLE session_meta AS
-SELECT s.session_id, any_value(m.campaign_id) AS meta_campaign_id
+SELECT s.session_id, max(m.campaign_id) AS meta_campaign_id
 FROM sessions s JOIN meta_ids m ON m.key = s.campaign OR m.key = lower(trim(s.campaign))
 WHERE s.source IN ('facebook', 'instagram') GROUP BY s.session_id;
 """
@@ -533,7 +540,7 @@ WITH e AS (
     min(ts) FILTER (WHERE event_key = 'pay_started') AS pay_at,
     min(ts) FILTER (WHERE event_key = 'order_placed') AS order_at,
     max(amount) FILTER (WHERE event_key IN ('checkout_view','pay_started','order_placed')) AS cart_value,
-    any_value(payment_method) FILTER (WHERE payment_method IS NOT NULL) AS payment_method,
+    max(payment_method) FILTER (WHERE payment_method IS NOT NULL) AS payment_method,
     max(order_id) AS order_id, bool_or(event_key = 'address') AS address_entered
   FROM events_base WHERE event_key IN ('checkout_view','pay_started','order_placed','address') GROUP BY 1)
 SELECT s.session_id, s.person_key_dummy AS person_key, s.user_id, s.phone10, s.channel, s.campaign, s.device, s.city,
@@ -561,22 +568,30 @@ dl AS (  -- where they want delivery: saved address first, else the latest order
   LEFT JOIN (SELECT person_key, pincode, delivery_city AS city, delivery_state AS state, row_number() OVER (PARTITION BY person_key ORDER BY started_at DESC) rn
              FROM sp WHERE pincode IS NOT NULL) ls ON ls.person_key = p.person_key AND ls.rn = 1),
 agg AS (
-  SELECT person_key, any_value(user_id) AS user_id, min(started_at) AS first_seen, max(ended_at) AS last_seen,
+  SELECT person_key, max(user_id) AS user_id, min(started_at) AS first_seen, max(ended_at) AS last_seen,
     count(*) AS sessions, sum(events) AS events, sum(pageviews) AS pageviews,
     arg_min(channel, started_at) AS first_channel, arg_min(campaign, started_at) AS first_campaign,
     arg_min(source, started_at) AS first_source, arg_min(medium, started_at) AS first_medium, min(date_ist) AS first_date,
     arg_min(landing_type, started_at) AS first_landing,
-    mode(city) AS city, mode(region) AS state, mode(country) AS country, mode(device) AS device, mode(platform) AS platform,
-    any_value(phone10) FILTER (WHERE phone10 IS NOT NULL) AS phone10, bool_or(is_app) AS uses_app,
+    max(phone10) FILTER (WHERE phone10 IS NOT NULL) AS phone10, bool_or(is_app) AS uses_app,
     count(*) FILTER (WHERE f_product) AS product_sessions, count(*) FILTER (WHERE f_cart) AS cart_sessions,
     count(*) FILTER (WHERE f_checkout) AS checkout_sessions, count(*) FILTER (WHERE f_quiz_done) AS quiz_sessions,
     bool_or(f_cart) AS ever_cart, bool_or(f_checkout) AS ever_checkout, bool_or(f_quiz_done) AS ever_quiz,
     bool_or(f_login) AS ever_login, bool_and(is_excluded) AS all_excluded, max(visitor_key) AS visitor_key
   FROM sp GROUP BY 1),
+mv AS (  -- most common value of each attribute per person; ties go to the alphabetically first value, so a rebuild never changes the answer
+  SELECT person_key, k, v, count(*) AS c FROM (
+    SELECT person_key, 'city' AS k, city AS v FROM sp UNION ALL SELECT person_key, 'state', region FROM sp UNION ALL SELECT person_key, 'country', country FROM sp
+    UNION ALL SELECT person_key, 'device', device FROM sp UNION ALL SELECT person_key, 'platform', platform FROM sp) WHERE v IS NOT NULL GROUP BY 1, 2, 3),
+mvt AS (
+  SELECT person_key, first(v ORDER BY c DESC, v) FILTER (WHERE k = 'city') AS city, first(v ORDER BY c DESC, v) FILTER (WHERE k = 'state') AS state,
+         first(v ORDER BY c DESC, v) FILTER (WHERE k = 'country') AS country, first(v ORDER BY c DESC, v) FILTER (WHERE k = 'device') AS device,
+         first(v ORDER BY c DESC, v) FILTER (WHERE k = 'platform') AS platform FROM mv GROUP BY 1),
+agg2 AS (SELECT agg.*, mvt.city, mvt.state, mvt.country, mvt.device, mvt.platform FROM agg LEFT JOIN mvt USING (person_key)),
 ord AS (
   SELECT coalesce(o.user_id, s.person_key) AS person_key, count(*) FILTER (WHERE o.is_valid) AS orders,
     sum(o.revenue) AS revenue, max(o.ts) FILTER (WHERE o.is_valid) AS last_order_at,
-    mode(o.state) AS order_state, mode(o.city) AS order_city
+    arg_max(o.state, o.ts) AS order_state, arg_max(o.city, o.ts) AS order_city  -- where they last ordered
   FROM orders_clean o LEFT JOIN (SELECT DISTINCT session_id, person_key FROM sp) s ON s.session_id = o.session_id
   WHERE NOT o.is_test GROUP BY 1),
 q AS (
@@ -605,7 +620,7 @@ SELECT a.person_key, a.user_id, u.name, nullif(coalesce(a.phone10, right(regexp_
        WHEN a.product_sessions > 0 THEN 'Engaged browser'
        ELSE 'Visitor' END AS segment,
   coalesce(a.all_excluded OR a.user_id IN (SELECT user_id FROM excluded_users) OR a.visitor_key IN (SELECT visitor_key FROM excluded_visitors), FALSE) AS is_excluded
-FROM agg a
+FROM agg2 a
 LEFT JOIN raw_users u ON lower(u.id) = a.user_id
 LEFT JOIN ord od ON od.person_key = a.person_key
 LEFT JOIN q ON q.person_key = a.person_key
@@ -650,35 +665,62 @@ def _log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
-def run(con, flags_only: bool = False) -> dict:
-    """Rebuild every derived table from raw. Holds the DB lock for the duration (a few seconds)."""
-    with DB_LOCK:
+def run(con, flags_only: bool = False, progress=None) -> dict:
+    """Rebuild every derived table from raw.
+
+    The whole rebuild is ONE transaction: dashboard queries keep reading the previous tables (consistent snapshot) and switch
+    to the new ones the instant it commits, so a refresh never freezes the dashboard. `progress(message)` reports the current step."""
+    note = progress or (lambda m: None)
+    with TRANSFORM_LOCK:
         t0 = time.time()
-        seed_exclusions(con)
-        con.execute(MACROS)
-        # exclusions never change events_base / identity_map, so an exclusion edit can skip the two slowest steps
-        have_base = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'events_base'").fetchall()[0][0] > 0
-        steps = [] if (flags_only and have_base) else [("identity_map", STEP_IDENTITY), ("events_base", STEP_EVENTS_BASE)]
-        for name, sql in steps:
-            t = time.time()
-            con.execute(sql)
-            _log(f"{name}: {time.time() - t:.1f}s")
-        t = time.time(); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
-        for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
-                          ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS)]:
-            t = time.time()
-            con.execute(sql)
-            _log(f"{name}: {time.time() - t:.1f}s")
-        con.execute("DROP TABLE IF EXISTS events_base_x")
-        stats = {
-            "events": con.execute("SELECT count(*) FROM events_clean").fetchone()[0],
-            "events_excluded": con.execute("SELECT count(*) FROM events_clean WHERE is_excluded").fetchone()[0],
-            "sessions": con.execute("SELECT count(*) FROM sessions").fetchone()[0],
-            "sessions_excluded": con.execute("SELECT count(*) FROM sessions WHERE is_excluded").fetchone()[0],
-            "people": con.execute("SELECT count(*) FROM users_360").fetchone()[0],
-            "seconds": round(time.time() - t0, 1),
-        }
-        con.execute("INSERT OR REPLACE INTO etl_meta VALUES ('last_transform', ?)", [datetime.now().isoformat(timespec="seconds")])
-        _log(f"transform done {stats}")
-        log_run(con, "transform", datetime.fromtimestamp(t0), stats["events"], f"{stats['sessions']} sessions, {stats['people']} people, {stats['seconds']}s")
-        return stats
+        con.execute("BEGIN TRANSACTION")
+        try:
+            return _run_steps(con, flags_only, note, t0)
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+
+
+def _drop_any(con, name: str) -> None:
+    """Drop `name` whether it currently exists as a table or as a view."""
+    if con.execute("SELECT 1 FROM duckdb_tables() WHERE table_name = ?", [name]).fetchall():
+        con.execute(f"DROP TABLE {name}")
+    if con.execute("SELECT 1 FROM duckdb_views() WHERE view_name = ? AND NOT internal", [name]).fetchall():
+        con.execute(f"DROP VIEW {name}")
+
+
+def _run_steps(con, flags_only, note, t0) -> dict:
+    seed_exclusions(con)
+    con.execute(MACROS)
+    # exclusions never change events_base / identity_map, so an exclusion edit can skip the two slowest steps
+    have_base = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'events_base'").fetchall()[0][0] > 0
+    steps = [] if (flags_only and have_base) else [("identity_map", STEP_IDENTITY), ("events_base", STEP_EVENTS_BASE)]
+    for name, sql in steps:
+        t = time.time()
+        note(f"rebuilding: {name}")
+        con.execute(sql)
+        _log(f"{name}: {time.time() - t:.1f}s")
+    t = time.time(); note("rebuilding: exclusion hits"); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
+    for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
+                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS)]:
+        t = time.time()
+        note(f"rebuilding: {name}")
+        if name == "events_clean":
+            _drop_any(con, "events_clean")  # older builds stored it as a table
+        con.execute(sql)
+        _log(f"{name}: {time.time() - t:.1f}s")
+    con.execute("DROP TABLE IF EXISTS events_base_x")
+    stats = {
+        "events": con.execute("SELECT count(*) FROM events_clean").fetchone()[0],
+        "events_excluded": con.execute("SELECT count(*) FROM events_clean WHERE is_excluded").fetchone()[0],
+        "sessions": con.execute("SELECT count(*) FROM sessions").fetchone()[0],
+        "sessions_excluded": con.execute("SELECT count(*) FROM sessions WHERE is_excluded").fetchone()[0],
+        "people": con.execute("SELECT count(*) FROM users_360").fetchone()[0],
+        "seconds": round(time.time() - t0, 1),
+    }
+    con.execute("INSERT OR REPLACE INTO etl_meta VALUES ('last_transform', ?)", [datetime.now().isoformat(timespec="seconds")])
+    note("publishing the new tables")
+    con.execute("COMMIT")
+    _log(f"transform done {stats}")
+    log_run(con, "transform", datetime.fromtimestamp(t0), stats["events"], f"{stats['sessions']} sessions, {stats['people']} people, {stats['seconds']}s")
+    return stats

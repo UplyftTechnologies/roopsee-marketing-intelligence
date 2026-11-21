@@ -3,7 +3,7 @@ import { inr, num, useApi, useFilters } from '../api'
 import { Card, Loading } from '../ui'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
-import MetricChart from '../components/MetricChart'
+import MetricChart from '../components/LazyMetricChart'
 import ReportTable from '../components/ReportTable'
 import PageSpeed from '../components/PageSpeed'
 

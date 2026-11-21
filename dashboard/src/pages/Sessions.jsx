@@ -3,6 +3,7 @@ import { dt, dur, inr, num, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import { STAGE, STAGE_TONE } from '../shared'
 import BulkExclude from '../components/BulkExclude'
+import ShareLink from '../components/ShareLink'
 import { Journey } from '../components/profile'
 
 // what a session can have done, grouped; each row is a three-way choice: Any / Did / Did not
@@ -48,17 +49,18 @@ export default function Sessions() {
   const f = useFilters()
   const pre = f.prefill || {}
   // filters are remembered while you open a session / person and come back; a drill-down from another tab starts fresh
-  const fresh = Boolean(pre.search || pre.channel)
-  const [search, setSearch] = usePersisted('sessions.search', pre.search || '', fresh)
-  const [channel, setChannel] = usePersisted('sessions.channel', pre.channel || 'All', fresh)
-  const [has, setHas] = usePersisted('sessions.has', [], fresh)
-  const [lacks, setLacks] = usePersisted('sessions.lacks', [], fresh)
-  const [match, setMatch] = usePersisted('sessions.match2', 'all', fresh)
-  const [only, setOnly] = usePersisted('sessions.only', 'counted', fresh)
-  const [pincode, setPincode] = usePersisted('sessions.pincode', '', fresh)
-  const [event, setEvent] = usePersisted('sessions.event', '', fresh)
+  const sh = pre.share || null  // opened from a shared link
+  const fresh = Boolean(pre.search || pre.channel || sh)
+  const [search, setSearch] = usePersisted('sessions.search', sh?.search ?? (pre.search || ''), fresh)
+  const [channel, setChannel] = usePersisted('sessions.channel', sh?.channel ?? (pre.channel || 'All'), fresh)
+  const [has, setHas] = usePersisted('sessions.has', sh?.has ?? [], fresh)
+  const [lacks, setLacks] = usePersisted('sessions.lacks', sh?.lacks ?? [], fresh)
+  const [match, setMatch] = usePersisted('sessions.match2', sh?.match ?? 'all', fresh)
+  const [only, setOnly] = usePersisted('sessions.only', sh?.only ?? 'counted', fresh)
+  const [pincode, setPincode] = usePersisted('sessions.pincode', sh?.pincode ?? '', fresh)
+  const [event, setEvent] = usePersisted('sessions.event', sh?.event ?? '', fresh)
   const evNames = useApi('/events/names', {}, { scoped: false })
-  const [sort, setSort] = usePersisted('sessions.sort', { key: 'started_at', dir: 'desc' }, fresh)
+  const [sort, setSort] = usePersisted('sessions.sort', sh?.sort ?? { key: 'started_at', dir: 'desc' }, fresh)
   const [limit, setLimit] = usePersisted('sessions.limit', 50)
   const [panel, setPanel] = usePersisted('sessions.panel', false)
   const [offset, setOffset] = useState(0)
@@ -98,6 +100,7 @@ export default function Sessions() {
           Filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
         </button>
         {(nFilters > 0 || search) && <button type="button" className="btn" onClick={clearAll}>Clear all</button>}
+        <ShareLink tab="sessions" state={{ search, channel, has, lacks, match, only, pincode, event, sort }} />
       </div>
       <div className="chip-row" role="group" aria-label="Quick views">
         <span className="muted" style={{ fontSize: 12 }}>Quick views</span>

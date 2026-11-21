@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { dt, inr, num, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import BulkExclude from '../components/BulkExclude'
+import ShareLink from '../components/ShareLink'
 
 const TONE = { 'Repeat buyer': 'good', Buyer: 'good', 'Abandoned checkout': 'serious', 'Cart, no checkout': 'warn', 'Quiz done, no cart': 'warn' }
 const PRESETS = [['', 'Everyone'], ['cart_abandoners', 'Cart abandoners'], ['checkout_abandoners', 'Checkout abandoners'], ['logged_in', 'Logged in'], ['buyers', 'Buyers'], ['reachable', 'Reachable by phone'], ['has_pincode', 'Has a delivery pincode'], ['saved_address', 'Saved an address']]
@@ -9,10 +10,11 @@ const TEXT_SORTS = ['name', 'email', 'city', 'segment', 'first_channel']
 
 export default function Users() {
   const f = useFilters()
-  const [search, setSearch] = usePersisted('users.search', '')
-  const [segment, setSegment] = usePersisted('users.segment', '')
-  const [preset, setPreset] = usePersisted('users.preset', '')
-  const [sort, setSort] = usePersisted('users.sort', { key: 'last_seen', dir: 'desc' })
+  const sh = f.prefill?.share || null  // opened from a shared link
+  const [search, setSearch] = usePersisted('users.search', sh?.search ?? '', !!sh)
+  const [segment, setSegment] = usePersisted('users.segment', sh?.segment ?? '', !!sh)
+  const [preset, setPreset] = usePersisted('users.preset', sh?.preset ?? '', !!sh)
+  const [sort, setSort] = usePersisted('users.sort', sh?.sort ?? { key: 'last_seen', dir: 'desc' }, !!sh)
   const [offset, setOffset] = useState(0)
   const [sel, setSel] = useState(new Set())
   const [limit, setLimit] = usePersisted('users.limit', 50)
@@ -26,6 +28,7 @@ export default function Users() {
     <>
       <div className="chip-row">
         <Search value={search} onChange={setSearch} placeholder="Search name, phone, email, city, id…" />
+        <ShareLink tab="users" state={{ search, segment, preset, sort }} />
       </div>
       <div className="chip-row" role="group" aria-label="Quick views">
         {PRESETS.map(([k, label]) => (

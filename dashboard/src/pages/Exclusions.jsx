@@ -28,7 +28,7 @@ function AddForm({ kinds, onDone }) {
     <Card title="Add an exclusion" sub="Excluded traffic is flagged, not deleted – you can switch it back on any time with “Include excluded traffic” in the header.">
       <div className="form-grid">
         <label>What to exclude
-          <select className="field" style={{ width: '100%' }} value={kind} onChange={(e) => { setKind(e.target.value); setPreview(null) }}>
+          <select className="field" aria-label="Rule type" style={{ width: '100%' }} value={kind} onChange={(e) => { setKind(e.target.value); setPreview(null) }}>
             {Object.entries(kinds).map(([k, d]) => <option key={k} value={k}>{k}</option>)}
           </select>
         </label>
@@ -62,7 +62,7 @@ function Finder({ onAdded }) {
   const add = async (kind, value) => { await api('/exclusions', { method: 'POST', body: { kind, value, note: 'from finder' } }); f.reloadMeta(); onAdded() }
   return (
     <Card title="Find a name, IP, phone, session or browser id" sub="Type part of anything you know about a person – then exclude the exact identifier with one click.">
-      <input className="field" style={{ width: '100%', maxWidth: 480 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. raja, 9967, 45.119, a815962…" />
+      <input className="field" style={{ width: '100%', maxWidth: 480 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. raja, 9967, 45.119, a815962…" aria-label="Find a name, phone, IP or id to exclude" />
       {res && (
         <div style={{ marginTop: 10 }}>
           <Table empty="Nothing matches" cols={[
@@ -87,7 +87,7 @@ function Row({ r, onChange }) {
   const del = async () => { if (confirm(`Remove ${r.kind}: ${r.value}?`)) { await api(`/exclusions/${r.id}`, { method: 'DELETE' }); f.reloadMeta(); onChange() } }
   return (
     <tr style={{ opacity: r.active ? 1 : 0.55 }}>
-      <td><input type="checkbox" checked={r.active} onChange={(e) => patch({ active: e.target.checked })} title="Active" /></td>
+      <td><input type="checkbox" checked={r.active} onChange={(e) => patch({ active: e.target.checked })} title="Active" aria-label="Rule active" /></td>
       <td><Badge>{r.kind}</Badge></td>
       <td className="mono">{edit ? <input className="field" value={v} onChange={(e) => setV(e.target.value)} /> : r.value}</td>
       <td>{edit ? <input className="field" style={{ width: '100%' }} value={n} onChange={(e) => setN(e.target.value)} /> : r.note || <span className="muted">–</span>}</td>
@@ -111,7 +111,7 @@ const sortRules = (rows, how) => [...rows].sort(SORTERS[how] || SORTERS.new)
 export default function Exclusions() {
   const f = useFilters()
   const list = useApi('/exclusions', {}, { scoped: false })
-  const impact = useApi('/meta', {}, { scoped: false })
+  const impact = { data: f.meta }
   const [kindFilter, setKindFilter] = useState('')
   const [listSort, setListSort] = useState('new')
   const reload = () => f.bump()
@@ -134,7 +134,7 @@ export default function Exclusions() {
       <Loading state={list}>
         {({ rows, kinds }) => (
           <Card title={`Exclusion list (${rows.length})`} sub="tick/untick to enable or disable a rule · edit or delete · every change re-applies automatically"
-            right={<span className="chip-row"><select className="field" value={listSort} onChange={(e) => setListSort(e.target.value)} aria-label="Sort rules"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="az">Value A → Z</option><option value="za">Value Z → A</option><option value="kind">Type A → Z</option><option value="active">Active first</option></select><select className="field" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}><option value="">All types</option>{Object.keys(kinds).map((k) => <option key={k}>{k}</option>)}</select></span>}>
+            right={<span className="chip-row"><select className="field" value={listSort} onChange={(e) => setListSort(e.target.value)} aria-label="Sort rules"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="az">Value A → Z</option><option value="za">Value Z → A</option><option value="kind">Type A → Z</option><option value="active">Active first</option></select><select className="field" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)} aria-label="Filter rules by type"><option value="">All types</option>{Object.keys(kinds).map((k) => <option key={k}>{k}</option>)}</select></span>}>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>On</th><th>Type</th><th>Value</th><th>Note</th><th>Source · updated</th><th /></tr></thead>

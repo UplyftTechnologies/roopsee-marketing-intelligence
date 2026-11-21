@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+from . import payload
 from .db import DB_LOCK, RAW_SCHEMAS, connect, log_run
 from .supa import ReadOnlySupabase
 
@@ -43,7 +44,8 @@ def _frame(rows: list[dict], schema: dict) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=cols)
     for c, d in schema.items():
         if d.startswith("JSON"):
-            df[c] = df[c].map(lambda v: None if v is None else json.dumps(v, ensure_ascii=False))
+            keep = payload.slim if c == "extra_data" else (lambda v: v)  # event payloads are stored without their plumbing fields
+            df[c] = df[c].map(lambda v: None if v is None else json.dumps(keep(v), ensure_ascii=False))
         elif d.startswith(("DOUBLE", "INTEGER", "BIGINT")):
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -82,7 +84,7 @@ def _fetch_window(start: datetime, end: datetime) -> list[dict]:
         cursor = last if last > first else last + timedelta(microseconds=1)
 
 
-def extract_events(con) -> int:
+def extract_events(con, progress=None) -> int:
     t_start = datetime.now()
     sb = ReadOnlySupabase()
     mx = con.execute("SELECT max(created_at) FROM raw_event_log").fetchall()[0][0]
@@ -111,16 +113,20 @@ def extract_events(con) -> int:
             done += 1
             if done % 5 == 0 or done == len(windows):
                 _log(f"  windows {done}/{len(windows)}  rows fetched {total:,}")
+            if progress:
+                progress(f"pulling events: day {done} of {len(windows)}, {total:,} rows")
     n = con.execute("SELECT count(*) FROM raw_event_log").fetchall()[0][0]
     _log(f"raw_event_log now {n:,} rows")
     log_run(con, "extract:event_log", t_start, n, f"{total:,} rows fetched")
     return n
 
 
-def extract_small(con) -> None:
+def extract_small(con, progress=None) -> None:
     sb = ReadOnlySupabase()
     for raw, (src, select_override) in SMALL_TABLES.items():
         schema = RAW_SCHEMAS[raw]
+        if progress:
+            progress(f"pulling {src}")
         rows, off = [], 0
         while True:
             params = {"select": select_override or ",".join(schema), "limit": PAGE, "offset": off}
@@ -149,13 +155,71 @@ def extract_small(con) -> None:
         log_run(con, f"extract:{raw}", t_start, len(rows))
 
 
-def run(con=None, small_only: bool = False) -> None:
+def slim_stored_payloads(con) -> None:
+    """One-off for events stored before payloads were slimmed: drop the plumbing fields in place (the file is compacted afterwards)."""
+    from . import config
+    path = config.DB_PATH
+    before = path.stat().st_size
+    n = con.execute("SELECT count(*) FROM raw_event_log").fetchone()[0]
+    top = json.dumps({k: None for k in sorted(payload.REMOVE)})
+    both = json.dumps({**{k: None for k in sorted(payload.REMOVE)}, "rawBody": {k: None for k in sorted(payload.REMOVE)}})
+    t = time.time()
+    print(f"Trimming {n:,} stored event payloads (a null in a JSON merge patch removes the field)...")
+    con.execute("""UPDATE raw_event_log SET extra_data = CASE WHEN json_exists(extra_data, '$.rawBody')
+                   THEN json_merge_patch(extra_data, ?::JSON) ELSE json_merge_patch(extra_data, ?::JSON) END WHERE extra_data IS NOT NULL""", [both, top])
+    con.execute("CHECKPOINT")
+    print(f"  done in {time.time() - t:.0f}s. File size is still {before / 1e6:,.0f} MB until it is compacted (next step).")
+    con.close()
+    compact_database(path)
+
+
+def compact_database(path) -> None:
+    """Copy the database into a fresh file so the space freed by deleted or trimmed data is really given back."""
+    import os
+
+    import duckdb
+    tmp = path.with_suffix(".compact.duckdb")
+    if tmp.exists():
+        tmp.unlink()
+    before = path.stat().st_size
+    con = duckdb.connect(str(path))
+    name = con.execute("SELECT current_database()").fetchone()[0]  # the catalog is named after the file
+    con.execute(f"ATTACH '{tmp.as_posix()}' AS compact")
+    con.execute(f'COPY FROM DATABASE "{name}" TO compact')
+    con.execute("DETACH compact")
+    con.close()
+    for ext in (".wal",):
+        w = path.with_name(path.name + ext)
+        if w.exists():
+            w.unlink()
+    os.replace(tmp, path)
+    after = path.stat().st_size
+    print(f"Compacted {path.name}: {before / 1e6:,.0f} MB -> {after / 1e6:,.0f} MB")
+
+
+def purge_old_events(con, days: int, execute: bool) -> None:
+    """Retention: remove raw events older than `days` days (a dry run unless execute). Rebuild afterwards (Refresh)."""
+    cutoff = f"now() - INTERVAL {int(days)} DAY"
+    old = con.execute(f"SELECT count(*), min(created_at), max(created_at) FROM raw_event_log WHERE created_at < {cutoff}").fetchall()[0]
+    total = con.execute("SELECT count(*) FROM raw_event_log").fetchone()[0]
+    print(f"{old[0]:,} of {total:,} stored events are older than {days} days" + (f" (from {old[1]:%d %b %Y} to {old[2]:%d %b %Y})." if old[0] else "."))
+    if not old[0]:
+        return
+    if not execute:
+        print("Dry run: nothing was deleted. Add --yes to delete them. The dashboard's history before that date will disappear after the next rebuild.")
+        return
+    con.execute(f"DELETE FROM raw_event_log WHERE created_at < {cutoff}")
+    con.execute("CHECKPOINT")
+    print("Deleted. Press Refresh to rebuild the tables, and run `python -m mi.cli compact` to shrink the file.")
+
+
+def run(con=None, small_only: bool = False, progress=None) -> None:
     own = con is None
     con = con or connect()
     try:
-        extract_small(con)
+        extract_small(con, progress)
         if not small_only:
-            extract_events(con)
+            extract_events(con, progress)
     finally:
         if own:
             con.close()

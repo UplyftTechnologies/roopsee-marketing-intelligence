@@ -82,8 +82,13 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
               </tbody>
             </table>
           </div>
+          {d.reconcile && d.reconcile.orders_other > 0 && !search && (
+            <div className="muted" style={{ fontSize: 12, margin: '8px 2px 0' }}>
+              {d.reconcile.orders_other} of the {d.reconcile.orders_total} orders in this period {d.reconcile.orders_other === 1 ? 'is' : 'are'} not in the table: {d.reconcile.orders_other === 1 ? 'it' : 'they'} came from a visit that started before this period, or from before tracking began.
+            </div>
+          )}
           <div className="rt-foot">
-            <span>Rows per page{' '}<select className="field" value={limit} onChange={(e) => setLimit(+e.target.value)}>{[10, 25, 50, 100, 5000].map((n) => <option key={n} value={n}>{n === 5000 ? 'All' : n}</option>)}</select></span>
+            <span>Rows per page{' '}<select className="field" aria-label="Rows per page" value={limit} onChange={(e) => setLimit(+e.target.value)}>{[10, 25, 50, 100, 5000].map((n) => <option key={n} value={n}>{n === 5000 ? 'All' : n}</option>)}</select></span>
             <span>{d.groups ? `${offset + 1}–${Math.min(offset + limit, d.groups)} of ${num(d.groups)}` : '0 of 0'}</span>
             <span>
               <button className="icon-btn" aria-label="Previous page" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}><Icon name="left" size={18} /></button>

@@ -7,8 +7,17 @@ Supabase (production, READ-ONLY REST)
    └─ mi/extract.py    parallel day-window pulls, incremental, idempotent
         └─ data/mi.duckdb  raw_* tables
              └─ mi/transform.py  SQL: identity stitching → sessions → checkout / orders → users_360 → cohorts / campaigns
-                  └─ mi/api.py   FastAPI (+ serves the built dashboard)
+                  └─ mi/api.py   FastAPI (+ serves the built dashboard), split by area into the modules below
                        └─ dashboard/   React + Recharts
+```
+
+```
+mi/core.py         the app, database helpers, shared helpers        mi/acquisition.py  campaigns, ad tagging health
+mi/system.py       status, refresh jobs, data health                mi/people.py       profiles, users, cohorts, retention, audiences
+mi/overview.py     overview, funnel, report table, insights         mi/sessions.py     session list, filters, one session
+mi/orders.py       orders, order analytics, basket lab              mi/exclusions.py   hide internal / test / bot traffic
+mi/meta_ads.py     Meta Ads joined to sessions and orders           mi/alerts.py       what changed this week, weekly summary
+mi/payload.py      which event payload fields are kept              tests/             safety checks (see "Tests")
 ```
 
 ## Quick start (macOS, Linux, Windows – terminal only)
@@ -43,7 +52,10 @@ What it does for you – each step is skipped once done, so later starts take a 
 | `MI_PORT=8010 python3 run.py` | use another port (Windows PowerShell: `$env:MI_PORT=8010; python run.py`) |
 
 Day to day you rarely need `--refresh`: the **Refresh data** button in the dashboard pulls only the new events
-(about a minute) and rebuilds.
+(about a minute) and rebuilds. **Nothing updates by itself**: the top bar shows "Data as of …" (amber after 6 hours, red after a day)
+so you can see how old the data is, and the dashboard keeps working while a refresh runs.
+
+If the Supabase key is missing from `.env`, the dashboard still starts with the data you already have; only Refresh needs the key.
 
 ### Manual / developer commands
 
@@ -55,7 +67,16 @@ Use `.venv/bin/python` on macOS/Linux or `.venv\Scripts\python` on Windows:
 cd dashboard && npm run dev             # hot-reload UI on http://localhost:5173 (proxies /api to :8000)
 ```
 
-`python -m mi.cli {extract | transform | all | serve}`. DuckDB allows one writer, so stop the dashboard
+`python -m mi.cli {extract | transform | all | serve | access | slim | compact | purge}`:
+
+| Command | Does |
+|---|---|
+| `access` | says which Supabase key is in use and what it can do (never prints the key) |
+| `slim` | one-off: removes duplicated fields and tracking plumbing from stored event payloads, then shrinks the file (a 967 MB file became 390 MB). Everything can be restored by a normal pull |
+| `compact` | shrinks the file after deleting data |
+| `purge 365 [--yes]` | retention: deletes raw events older than N days (dry run unless `--yes`) |
+
+DuckDB allows one writer, so stop the dashboard
 before using `extract` / `transform` from the command line (or just use the buttons in the dashboard).
 
 ### Troubleshooting
@@ -65,7 +86,7 @@ before using `extract` / `transform` from the command line (or just use the butt
 | `command not found: python` (macOS) | use `python3` – macOS has no plain `python` |
 | "Python 3.11 or newer is required" | macOS: `brew install python`; otherwise https://www.python.org/downloads/ (the macOS built-in python3 is usually too old) |
 | "Node.js is required once" | macOS: `brew install node`; otherwise https://nodejs.org/ (LTS), then run again |
-| "PRODUCT_SUPABASE_URL is missing" | add the production URL and service key to `.env` |
+| "no Supabase key found" / "PRODUCT_SUPABASE_URL is missing" | add the production URL and a key to `.env`: `PRODUCT_SUPABASE_READ_KEY` (read-only, best: `docs/read-only-access.md`) or `PRODUCT_SUPABASE_SERVICE_KEY`. The dashboard still opens without it; only Refresh needs it |
 | "Port 8000 is used by another program" | close that program, or start with `MI_PORT=8010` |
 | Page shows "No analytics tables yet" | press **Refresh data**, or run `python3 run.py --refresh` |
 
@@ -104,13 +125,38 @@ email, name) remove every session of that person. Every change re-applies automa
 Built-in rules (all editable): `staff_roles`, `admin_pages`, `dev_hosts`, `non_india`, `staff_orders`,
 `@roopsee.com`, `@joinuplyft.com`, `qa_bot`.
 
+## Tests
+
+```
+.venv\Scripts\python -m unittest discover -s tests -v     (macOS/Linux: .venv/bin/python)
+```
+
+27 checks for things that must always hold: "did" + "did not" adds up to every session, the same order count on every screen,
+pages of a list never repeat a row, every endpoint answers, trimming never drops a field the pipeline reads. They read a copy of
+the data, so they are safe to run while the dashboard is open (if the file is locked, point `MI_DB_PATH` at a copy).
+
+`tests/snapshot.py` saves every endpoint's answer to a folder so two versions of the code can be compared (`--diff before after`).
+
+## Keeping the key safe
+
+The pipeline only reads, but a service-role key can do anything. Use a read-only key instead: `docs/read-only-access.md`
+(10 minutes, once) and check with `python -m mi.cli access`.
+
 ## Definitions worth knowing
+
+Every number is explained in the dashboard: **Admin → Data dictionary**. The short version:
+
 
 - **Session** = `session_id`. **Person** = logged-in account, or an anonymous browser (`visitor_id`); a browser is linked to an
   account from any event or `visitor_identity_links` row that carries both.
 - **Channel** is derived per session: UTM params → gclid/fbclid → referrer → direct.
 - **Order credited twice, on purpose**: to the session it happened in, and to the buyer's *first* visit (first touch).
-- **Valid order** = status not `payment_cancelled` / `payment_pending`, and not a ₹1 test order.
+- **Valid order** = status not `payment_cancelled` / `payment_pending`, and not a ₹1 test order. Each sale also has a payment state
+  (confirmed / COD pending / unconfirmed / conflicting); unconfirmed ones are flagged "at risk" but still counted.
+- **Repeated events**: the tracker often fires one action several times; repeats within 2 seconds are flagged (`is_dup`) and left out of counts, never deleted.
+- **Time spent** counts only gaps of 30 minutes or less between events (a session id can live for weeks).
+- **A rebuild never freezes the dashboard**: it runs as one transaction and readers keep seeing the previous tables until it commits.
+  Results are deterministic: rebuilding the same data twice gives identical numbers.
 - Event names changed across three tracking generations; `event_key()` in `mi/transform.py` maps them to one set
   (the **Data & ETL** tab lists every event name and what it maps to).
 

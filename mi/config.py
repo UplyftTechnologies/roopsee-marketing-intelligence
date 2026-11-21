@@ -1,10 +1,11 @@
 """Paths and environment loading. Only PRODUCTION read credentials are used."""
+import os
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
-DB_PATH = DATA_DIR / "mi.duckdb"
+DB_PATH = Path(os.environ["MI_DB_PATH"]) if os.environ.get("MI_DB_PATH") else DATA_DIR / "mi.duckdb"  # MI_DB_PATH: point tests / a copy at another file
 ENV_PATH = ROOT / ".env"
 IST = "Asia/Kolkata"
 
@@ -21,7 +22,9 @@ def load_env() -> dict:
 
 def supabase_creds() -> tuple[str, str]:
     env = load_env()
-    url, key = env.get("PRODUCT_SUPABASE_URL"), env.get("PRODUCT_SUPABASE_SERVICE_KEY")
+    url = env.get("PRODUCT_SUPABASE_URL")
+    # a read-only key is preferred (see docs/read-only-access.md); the full-access service key still works
+    key = env.get("PRODUCT_SUPABASE_READ_KEY") or env.get("PRODUCT_SUPABASE_ANON_KEY") or env.get("PRODUCT_SUPABASE_SERVICE_KEY")
     if not url or not key:
-        raise RuntimeError("PRODUCT_SUPABASE_URL / PRODUCT_SUPABASE_SERVICE_KEY missing in .env")
+        raise RuntimeError("PRODUCT_SUPABASE_URL and one of PRODUCT_SUPABASE_READ_KEY / PRODUCT_SUPABASE_ANON_KEY / PRODUCT_SUPABASE_SERVICE_KEY are required in .env")
     return url.rstrip("/"), key

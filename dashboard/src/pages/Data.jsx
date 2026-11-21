@@ -4,7 +4,7 @@ import { Badge, Card, Kpi, Loading, Table } from '../ui'
 
 export default function DataPage() {
   const f = useFilters()
-  const meta = useApi('/meta', {}, { scoped: false })
+  const meta = { data: f.meta }
   const cat = useApi('/events/catalogue', {})
   const [filter, setFilter] = useState('')
   const m = meta.data
@@ -40,7 +40,7 @@ export default function DataPage() {
       <Loading state={cat}>
         {(rows) => (
           <Card title="Event catalogue" sub="every event name in the data and how it maps to a key funnel event – use this to spot tracking drift or events worth mapping"
-            right={<input className="field" placeholder="filter event name…" value={filter} onChange={(e) => setFilter(e.target.value)} />}>
+            right={<input className="field" placeholder="filter event name…" aria-label="Filter event names" value={filter} onChange={(e) => setFilter(e.target.value)} />}>
             <Table cols={[
               { label: 'Event name', cls: 'mono', key: 'event_name' },
               { label: 'Mapped to', sortBy: 'event_key', render: (r) => (r.event_key.startsWith('(') ? <span className="muted">{r.event_key}</span> : <Badge tone="good">{KEY_LABEL[r.event_key] || r.event_key}</Badge>) },

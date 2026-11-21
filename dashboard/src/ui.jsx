@@ -67,8 +67,10 @@ export const Delta = ({ d, goodWhen = 'up' }) => {
   )
 }
 
-export const Kpi = ({ label, value, note, help, d, goodWhen, big }) => (
-  <div className={`kpi ${big ? 'big' : ''}`}>
+/** `onClick` makes the whole tile a button (for example, to open the rows behind the number). */
+export const Kpi = ({ label, value, note, help, d, goodWhen, big, onClick, hint }) => (
+  <div className={`kpi ${big ? 'big' : ''}${onClick ? ' click' : ''}`} title={hint}
+    {...(onClick ? { role: 'button', tabIndex: 0, onClick, onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } } : {})}>
     <div className="label">{label}{help && <> <Help id={help} /></>}</div>
     <div className="value">{value}</div>
     <div className="note">{d ? <><Delta d={d} goodWhen={goodWhen} /> <span className="muted">vs previous</span></> : null}{d && note ? ' · ' : ''}{note}</div>
@@ -100,7 +102,9 @@ const CHUNK = 200
 /** One table row. Large tables skip redrawing rows whose data and selection did not change (ticking one box no longer redraws thousands of rows). */
 const Row = memo(function Row({ r, id, cols, idOf, onRow, rowClass, selectable, isSel, onToggle }) {
   return (
-    <tr className={`${onRow ? 'click' : ''} ${rowClass ? rowClass(r) : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
+    <tr className={`${onRow ? 'click' : ''} ${rowClass ? rowClass(r) : ''}`} onClick={onRow ? () => onRow(r) : undefined}
+      tabIndex={onRow ? 0 : undefined} role={onRow ? 'link' : undefined}
+      onKeyDown={onRow ? (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onRow(r) } } : undefined}>
       {selectable && <td className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label="Select row" checked={isSel} onChange={() => onToggle(id)} /></td>}
       {cols.map((c) => (
         <td key={idOf(c)} className={`${c.num ? 'num' : ''} ${c.cls || ''}`}>
@@ -261,7 +265,7 @@ export function Chips({ options, value, onChange }) {
 export function Search({ value, onChange, placeholder }) {
   const [v, setV] = useState(value || '')
   return (
-    <input className="field" style={{ minWidth: 260 }} placeholder={placeholder} value={v}
+    <input className="field" style={{ minWidth: 260 }} placeholder={placeholder} aria-label={placeholder} type="search" value={v}
       onChange={(e) => { setV(e.target.value); clearTimeout(Search.t); Search.t = setTimeout(() => onChange(e.target.value), 350) }} />
   )
 }

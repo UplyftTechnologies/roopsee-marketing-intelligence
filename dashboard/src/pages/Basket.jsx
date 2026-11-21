@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { inr, num, pct, useApi } from '../api'
+import { inr, num, pct, useApi, useFilters } from '../api'
 import { Card, Chips, ExportBtn, Kpi, Loading, Table, axis, chartTip } from '../ui'
 
 export default function Basket() {
+  const f = useFilters()
   const [threshold, setThreshold] = useState(499)
   const s = useApi('/basket', { threshold })
   return (
@@ -16,7 +17,8 @@ export default function Basket() {
         return (
           <>
             <div className="kpis">
-              <Kpi label="Orders" help="orders" value={num(k.orders)} note={`${inr(k.revenue)} revenue`} />
+              <Kpi label="Orders" help="orders" value={num(k.orders)} note={`${inr(k.revenue)} revenue · click to see these orders`} hint="Open the list of these orders: together they add up to this revenue"
+                onClick={() => f.go('orders', { share: { scope: 'sales', limit: 5000, sort: { key: 'ts', dir: 'desc' } } })} />
               <Kpi label="Average order value" help="aov" value={inr(k.aov)} note={`median ${inr(k.median_aov)}`} />
               <Kpi label="Items per order" value={k.items_per_order.toFixed(2)} note={`${num(k.single_item_orders)} orders (${pct(k.single_item_orders / (k.orders || 1), 0)}) have just one item`} />
               <Kpi label="2+ items vs 1 item" value={uplift === null ? '–' : `${uplift >= 0 ? '+' : ''}${(uplift * 100).toFixed(0)}%`} note={`${inr(k.aov_multi)} vs ${inr(k.aov_single)} per order`} />
