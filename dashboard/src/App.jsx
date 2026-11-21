@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import { FilterCtx, api, clearPersisted, decodeShare, num } from './api'
+import { DEVICE_OPTIONS, FilterCtx, api, clearPersisted, decodeShare, num } from './api'
 import Icon from './components/Icon'
 import Popover from './components/Popover'
 import DatePicker from './components/DatePicker'
@@ -79,6 +79,8 @@ export default function App() {
   const [to, setTo] = useState('')
   const [hideInternal, setHideInternal] = useState(init.prefill.share?.hide ?? true)
   const [compare, setCompare] = useState(true)
+  const [deviceType, setDeviceType] = useState(() => init.prefill.share?.device ?? (() => { try { return sessionStorage.getItem('mi:device') || '' } catch { return '' } })())
+  useEffect(() => { try { sessionStorage.setItem('mi:device', deviceType) } catch { /* ignore */ } }, [deviceType])
   const [tick, setTick] = useState(0)
   const [theme, setTheme] = useState(() => { const q = new URLSearchParams(location.search).get('theme'); return ['light', 'dark', 'auto'].includes(q) ? q : localStorage.getItem('theme') || 'light' })
   const [collapsed, setCollapsed] = useState(() => { const q = new URLSearchParams(location.search).get('rail'); return q ? q === '1' : localStorage.getItem('rail') === '1' })
@@ -168,6 +170,8 @@ export default function App() {
   const railActive = tab === 'person' ? 'users' : tab === 'session' ? 'sessions' : tab === 'order' ? 'orders' : tab
   const Page = cur[4]
   const dateless = tab === 'loyalty' || tab === 'audiences'
+  // pages built on people or campaigns (not on visits) cannot be narrowed by device
+  const deviceApplies = !['campaigns', 'cohorts', 'users', 'audiences', 'loyalty', 'meta', 'exclusions', 'data', 'dictionary', 'person'].includes(tab)
   const noDates = dateless || ['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab)
   const job = meta?.job
   const c = meta?.counts
@@ -176,8 +180,8 @@ export default function App() {
   const crossesUpgrade = !noDates && tc && ((from ? from < tc : first && first < tc) || (compare && prevStart && prevStart < tc))
   const upgradeText = tc ? `Tracking was upgraded on ${fmt(tc)}. Session counts, bounce rate and session length from before that date are not comparable with after it.` : ''
 
-  const ctx = useMemo(() => ({ from, to, includeExcluded: !hideInternal, compare: compare && canCompare, tick, bump: () => setTick((x) => x + 1), meta, reloadMeta: loadMeta, go, prefill, rangeText, prevText }),
-    [from, to, hideInternal, compare, canCompare, tick, meta, prefill, rangeText, prevText])
+  const ctx = useMemo(() => ({ from, to, includeExcluded: !hideInternal, deviceType, deviceApplies, compare: compare && canCompare, tick, bump: () => setTick((x) => x + 1), meta, reloadMeta: loadMeta, go, prefill, rangeText, prevText }),
+    [from, to, hideInternal, deviceType, deviceApplies, compare, canCompare, tick, meta, prefill, rangeText, prevText])
   const startRefresh = async () => { await api('/refresh', { method: 'POST', params: { mode: 'full' } }); loadMeta() }
   let lastGroup = null
 
@@ -230,6 +234,24 @@ export default function App() {
               <DatePicker presets={presets} active={active} from={from} to={to} rangeText={rangeText} prevText={prevText} compare={compare} setCompare={setCompare}
                 setRange={(f, t) => { setFrom(f); setTo(t) }} first={first} last={last} canCompare={canCompare} note={crossesUpgrade ? upgradeText : null} />
             )}
+            {deviceApplies && !['session', 'order'].includes(tab) && (
+              <Popover align="right" width={260} trigger={({ open, toggle }) => (
+                <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Show only visits from one kind of device">
+                  <span className={`dot ${deviceType ? '' : 'off'}`} />{DEVICE_OPTIONS.find(([v]) => v === deviceType)?.[1] || 'Custom devices'}<Icon name="chevron" size={16} />
+                </button>
+              )}>
+                {(close) => (
+                  <>
+                    <div className="muted" style={{ fontSize: 12, padding: '2px 4px 6px' }}>Web = the website in a browser. App = the Android app.</div>
+                    {DEVICE_OPTIONS.map(([v, label]) => (
+                      <button key={v} type="button" className="pop-item" aria-pressed={deviceType === v} onClick={() => { setDeviceType(v); close() }}>
+                        <span>{deviceType === v ? '● ' : '○ '}{label}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Popover>
+            )}
             {!['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab) && (
               <Popover align="right" width={320} trigger={({ open, toggle }) => (
                 <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Internal, test and bot traffic">
@@ -254,6 +276,7 @@ export default function App() {
           </header>
           {crossesUpgrade && <div className="notice" role="note"><Icon name="info" size={18} />{upgradeText}</div>}
           {freshTone === 'bad' && !job?.running && <div className="notice" role="note"><Icon name="info" size={18} />The data is {ageText} old, so recent activity is missing. Press Refresh to pull the latest events.</div>}
+          {deviceType && !deviceApplies && !['exclusions', 'data', 'dictionary'].includes(tab) && <div className="notice" role="note"><Icon name="info" size={18} />The device filter does not apply to this page: it is built on people or campaigns, not on single visits.</div>}
           {dateless && <div className="notice" role="note"><Icon name="info" size={18} />All-time view: the date range does not apply to this page.</div>}
           <main className="page" key={navKey}>
             {meta && !meta.ready

@@ -11,7 +11,7 @@ from statistics import median
 
 from fastapi import HTTPException
 
-from .core import app, one, prev_range, q
+from .core import DEVICE, app, one, prev_range, q
 
 INR_PER_USD = 88
 CONVERSATIONS_SHOWN = 300
@@ -26,6 +26,8 @@ def has_chats() -> bool:
 def _rows(d_from, d_to, include_excluded, conversation=None, session=None):
     """Messages in the range, oldest first. A conversation with any hidden message (hidden visit or hidden person) is left out whole."""
     hide = "" if include_excluded else """ AND x.conversation NOT IN (SELECT conversation FROM x WHERE h)"""
+    if DEVICE.get() and not conversation and not session:  # a device filter keeps only messages whose visit is on that device
+        hide += " AND x.session_id IN (SELECT session_id FROM sessions)"
     w, a = "x.date_ist BETWEEN ? AND ?", [d_from or "2000-01-01", d_to or "2999-12-31"]
     if conversation:
         w, a = "x.conversation = ?", [conversation]

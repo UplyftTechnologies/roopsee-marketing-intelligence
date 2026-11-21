@@ -137,10 +137,10 @@ function Rows({ scope, names, setNames, payload, addPayload, by, setBy, cols, se
   useEffect(() => {  // most common values of the chosen field, for the value box
     if (!builder.field) { setVals([]); return undefined }
     let live = true
-    api('/events/values', { params: { field: builder.field, event: scope.event, date_from: f.from, date_to: f.to, include_excluded: f.includeExcluded, limit: 30 } })
+    api('/events/values', { params: { field: builder.field, event: scope.event, date_from: f.from, date_to: f.to, include_excluded: f.includeExcluded, device_type: (f.deviceApplies && f.deviceType) || undefined, limit: 30 } })
       .then((d) => live && setVals(d.rows)).catch(() => live && setVals([]))
     return () => { live = false }
-  }, [builder.field, scope.event, f.from, f.to, f.includeExcluded, f.tick])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [builder.field, scope.event, f.from, f.to, f.includeExcluded, f.deviceType, f.tick])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useApi('/events/rows', { ...scope, cols: cols.join(',') || undefined, sort: sort.key, direction: sort.dir, limit, offset })
   const toggleCol = (c) => setCols((x) => (x.includes(c) ? x.filter((y) => y !== c) : x.length < 8 ? [...x, c] : x))

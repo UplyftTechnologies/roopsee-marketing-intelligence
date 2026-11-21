@@ -339,3 +339,32 @@ class RoopChats(unittest.TestCase):
         d = api.session_detail(sid)
         self.assertTrue(d["chats"])
         self.assertEqual(sum(1 for e in d["events"] if e["event_name"] == "assistant_chat"), len(d["chats"]))
+
+
+class DeviceFilter(unittest.TestCase):
+    def _run(self, devices):
+        from mi.core import DEVICE
+        t = DEVICE.set(devices)
+        try:
+            k = api.overview(date_from="2026-10-01", date_to="2026-11-20")["kpis"]
+            return k["sessions"], k["orders"], k["logins"], api.events_summary(date_from="2026-10-01", date_to="2026-11-20")["totals"]["events"]
+        finally:
+            DEVICE.reset(t)
+
+    def test_the_device_types_add_up_to_everything(self):
+        from mi.core import DEVICE_TYPES
+        parts = [self._run((d,)) for d in DEVICE_TYPES]
+        self.assertEqual(tuple(sum(x) for x in zip(*parts)), self._run(None))
+
+    def test_web_is_the_three_web_types(self):
+        web = self._run(("Mobile web", "Desktop web", "Tablet web"))
+        app_only = self._run(("App",))
+        self.assertEqual(tuple(a + b for a, b in zip(web, app_only)), tuple(a - u for a, u in zip(self._run(None), self._run(("Unknown",)))))
+
+    def test_only_the_visit_tables_are_narrowed(self):
+        from mi.core import narrow
+        out = narrow("SELECT 1 FROM sessions s JOIN session_orders o ON 1=1 JOIN sessions_pre p ON 1=1", ("App",))
+        self.assertEqual(out.count("SELECT * FROM sessions WHERE"), 1)
+        self.assertIn("JOIN session_orders o", out)
+        self.assertIn("JOIN sessions_pre p", out)
+        self.assertEqual(narrow("SELECT 1 FROM sessions", None), "SELECT 1 FROM sessions")

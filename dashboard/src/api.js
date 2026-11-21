@@ -44,6 +44,9 @@ export const decodeShare = (s) => {
     return JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))))
   } catch { return null }
 }
+export const DEVICE_OPTIONS = [
+  ['', 'All devices'], ['Mobile web,Desktop web,Tablet web', 'All web'], ['Mobile web', 'Mobile web'], ['Desktop web', 'Desktop web'], ['Tablet web', 'Tablet web'], ['App', 'Android app'],
+]
 export const shareLink = (tab, state) => `${location.origin}${location.pathname}#${tab}?s=${encodeShare(state)}`
 
 /** Forget the remembered filters of one page (keys are `mi:<page>.<name>`). */
@@ -59,12 +62,13 @@ export const useFilters = () => useContext(FilterCtx)
 export function useApi(path, extra = {}, { scoped = true } = {}) {
   const f = useFilters()
   const [state, setState] = useState({ data: null, loading: true, error: null })
-  const key = JSON.stringify([path, extra, scoped ? [f.from, f.to, f.includeExcluded] : null, f.tick])
+  const dev = scoped && f.deviceApplies ? f.deviceType || '' : ''
+  const key = JSON.stringify([path, extra, scoped ? [f.from, f.to, f.includeExcluded, dev] : null, f.tick])
   useEffect(() => {
     let live = true
     setState((s) => ({ ...s, loading: true, error: null }))
     const params = scoped
-      ? { date_from: f.from, date_to: f.to, include_excluded: f.includeExcluded, ...extra }
+      ? { date_from: f.from, date_to: f.to, include_excluded: f.includeExcluded, device_type: dev || undefined, ...extra }
       : extra
     api(path, { params })
       .then((data) => live && setState({ data, loading: false, error: null }))
