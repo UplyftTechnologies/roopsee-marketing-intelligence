@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import { DEVICE_OPTIONS, FilterCtx, api, clearPersisted, decodeShare, num } from './api'
+import { DEVICE_OPTIONS, FilterCtx, SALES_OPTIONS, api, clearPersisted, decodeShare, num } from './api'
 import Icon from './components/Icon'
 import Popover from './components/Popover'
 import DatePicker from './components/DatePicker'
@@ -8,10 +8,12 @@ import DatePicker from './components/DatePicker'
 const Home = lazy(() => import('./pages/Home'))
 const Overview = lazy(() => import('./pages/Overview'))
 const PainPoints = lazy(() => import('./pages/PainPoints'))
+const Journeys = lazy(() => import('./pages/Journeys'))
 const Funnel = lazy(() => import('./pages/Funnel'))
 const Campaigns = lazy(() => import('./pages/Campaigns'))
 const Cohorts = lazy(() => import('./pages/Cohorts'))
 const Sessions = lazy(() => import('./pages/Sessions'))
+const Deeper = lazy(() => import('./pages/Deeper'))
 const Events = lazy(() => import('./pages/Events'))
 const Logins = lazy(() => import('./pages/Logins'))
 const Chats = lazy(() => import('./pages/Chats'))
@@ -34,6 +36,7 @@ const NAV = [
   ['performance', 'Performance', 'chart', 'Traffic, orders and trends over time', Overview, 'Reports'],
   ['orders', 'Orders', 'receipt', 'Every order, payments, delivery and order analytics', Orders, 'Reports'],
   ['funnel', 'Funnel & checkout', 'funnel', 'Where people drop off, who to follow up', Funnel, 'Reports'],
+  ['journeys', 'Journeys', 'funnel', 'Every journey: purchase, checkout, login, quiz, search, Roop and delivery, and each visit', Journeys, 'Reports'],
   ['painpoints', 'Pain points', 'info', 'What went wrong from login to payment, and who got stuck', PainPoints, 'Reports'],
   ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Reports'],
   ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Reports'],
@@ -42,6 +45,7 @@ const NAV = [
   ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],
   ['audiences', 'Audiences', 'target', 'Who you can reach, and with what', Audiences, 'Grow'],
   ['sessions', 'Sessions', 'list', 'Every visit, with a full event timeline', Sessions, 'Explore'],
+  ['deeper', 'Deeper analysis', 'loop', 'Journeys, search, quiz, ads and segments: why people did or did not buy', Deeper, 'Explore'],
   ['events', 'Events', 'list', 'Every tracked event, from event names down to payload fields', Events, 'Explore'],
   ['logins', 'Logins', 'users', 'Every login: who, how, new or returning', Logins, 'Explore'],
   ['chats', 'Roop chats', 'search', 'What shoppers ask Roop, and what it answers', Chats, 'Explore'],
@@ -81,6 +85,8 @@ export default function App() {
   const [compare, setCompare] = useState(true)
   const [deviceType, setDeviceType] = useState(() => init.prefill.share?.device ?? (() => { try { return sessionStorage.getItem('mi:device') || '' } catch { return '' } })())
   useEffect(() => { try { sessionStorage.setItem('mi:device', deviceType) } catch { /* ignore */ } }, [deviceType])
+  const [salesBasis, setSalesBasis] = useState(() => init.prefill.share?.sales ?? (() => { try { return sessionStorage.getItem('mi:sales') || '' } catch { return '' } })())
+  useEffect(() => { try { sessionStorage.setItem('mi:sales', salesBasis) } catch { /* ignore */ } }, [salesBasis])
   const [tick, setTick] = useState(0)
   const [theme, setTheme] = useState(() => { const q = new URLSearchParams(location.search).get('theme'); return ['light', 'dark', 'auto'].includes(q) ? q : localStorage.getItem('theme') || 'light' })
   const [collapsed, setCollapsed] = useState(() => { const q = new URLSearchParams(location.search).get('rail'); return q ? q === '1' : localStorage.getItem('rail') === '1' })
@@ -171,6 +177,8 @@ export default function App() {
   const Page = cur[4]
   const dateless = tab === 'loyalty' || tab === 'audiences'
   // pages built on people or campaigns (not on visits) cannot be narrowed by device
+  // the pages that show revenue and orders can count only paid sales
+  const salesApplies = ['home', 'performance', 'orders', 'basket', 'funnel'].includes(tab)
   const deviceApplies = !['campaigns', 'cohorts', 'users', 'audiences', 'loyalty', 'meta', 'exclusions', 'data', 'dictionary', 'person'].includes(tab)
   const noDates = dateless || ['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab)
   const job = meta?.job
@@ -180,8 +188,8 @@ export default function App() {
   const crossesUpgrade = !noDates && tc && ((from ? from < tc : first && first < tc) || (compare && prevStart && prevStart < tc))
   const upgradeText = tc ? `Tracking was upgraded on ${fmt(tc)}. Session counts, bounce rate and session length from before that date are not comparable with after it.` : ''
 
-  const ctx = useMemo(() => ({ from, to, includeExcluded: !hideInternal, deviceType, deviceApplies, compare: compare && canCompare, tick, bump: () => setTick((x) => x + 1), meta, reloadMeta: loadMeta, go, prefill, rangeText, prevText }),
-    [from, to, hideInternal, deviceType, deviceApplies, compare, canCompare, tick, meta, prefill, rangeText, prevText])
+  const ctx = useMemo(() => ({ from, to, includeExcluded: !hideInternal, deviceType, deviceApplies, salesBasis, salesApplies, compare: compare && canCompare, tick, bump: () => setTick((x) => x + 1), meta, reloadMeta: loadMeta, go, prefill, rangeText, prevText }),
+    [from, to, hideInternal, deviceType, deviceApplies, salesBasis, salesApplies, compare, canCompare, tick, meta, prefill, rangeText, prevText])
   const startRefresh = async () => { await api('/refresh', { method: 'POST', params: { mode: 'full' } }); loadMeta() }
   let lastGroup = null
 
@@ -233,6 +241,24 @@ export default function App() {
             {!noDates && (
               <DatePicker presets={presets} active={active} from={from} to={to} rangeText={rangeText} prevText={prevText} compare={compare} setCompare={setCompare}
                 setRange={(f, t) => { setFrom(f); setTo(t) }} first={first} last={last} canCompare={canCompare} note={crossesUpgrade ? upgradeText : null} />
+            )}
+            {salesApplies && (
+              <Popover align="right" width={280} trigger={({ open, toggle }) => (
+                <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Which sales count as revenue">
+                  <span className={`dot ${salesBasis ? '' : 'off'}`} />Sales counted: {SALES_OPTIONS.find(([v]) => v === salesBasis)?.[1] || 'All sales'}<Icon name="chevron" size={16} />
+                </button>
+              )}>
+                {(close) => (
+                  <>
+                    <div className="muted" style={{ fontSize: 12, padding: '2px 4px 6px' }}>All sales = every valid order when it is placed. Cash on delivery is counted before the cash is collected.</div>
+                    {SALES_OPTIONS.map(([v, label]) => (
+                      <button key={v} type="button" className="pop-item" aria-pressed={salesBasis === v} onClick={() => { setSalesBasis(v); close() }}>
+                        <span>{salesBasis === v ? '● ' : '○ '}{label}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Popover>
             )}
             {deviceApplies && !['session', 'order'].includes(tab) && (
               <Popover align="right" width={260} trigger={({ open, toggle }) => (

@@ -23,6 +23,9 @@ def _kpis(d_from, d_to, include_excluded) -> dict:
         FROM sessions s WHERE {w}""", a)
     ow = "date_ist BETWEEN ? AND ? AND is_valid" + ("" if include_excluded else " AND NOT is_excluded")
     o = one(f"SELECT count(*) orders, coalesce(sum(revenue),0) revenue FROM orders_clean WHERE {ow}", a)
+    split = {r["payment_state"]: r for r in q(f"SELECT payment_state, count(*) orders, coalesce(sum(revenue), 0) revenue FROM orders_clean WHERE {ow} GROUP BY 1", a)}
+    g = lambda *names: sum(float(split.get(n, {}).get("revenue", 0) or 0) for n in names)  # noqa: E731
+    k.update(revenue_confirmed=g("confirmed"), revenue_cod_pending=g("cod_pending"), revenue_unconfirmed=g("unconfirmed", "conflicting"))  # how much of the revenue is actually paid
     k.update(orders=o["orders"], revenue=o["revenue"], aov=ratio(o["revenue"], o["orders"]),
              order_cvr=ratio(o["orders"], k["sessions"]), cart_rate=ratio(k["cart_sessions"], k["sessions"]),
              bounce_rate=ratio(k["bounced"], k["sessions"]))
@@ -43,13 +46,18 @@ def overview(date_from: str | None = None, date_to: str | None = None, include_e
     for r in daily:
         r["orders"] = od.get(r["date"], {}).get("orders", 0)
         r["revenue"] = od.get(r["date"], {}).get("revenue", 0) or 0
+    seen = {r["date"] for r in daily}
+    for d, r in od.items():  # days with orders but no tracked visit (for example before tracking began) still count
+        if d not in seen:
+            daily.append({"date": d, "sessions": 0, "visitors": 0, "carts": 0, "checkouts": 0, "orders": r["orders"], "revenue": r["revenue"] or 0})
+    daily.sort(key=lambda r: r["date"])
     channels = q(f"""SELECT channel, count(*) sessions, count(*) FILTER (WHERE f_cart) carts, count(*) FILTER (WHERE f_order) orders
         FROM sessions s WHERE {w} GROUP BY 1 ORDER BY 2 DESC""", a)
     devices = q(f"SELECT coalesce(CASE WHEN is_app THEN 'Android app' ELSE device END,'Unknown') device, count(*) sessions FROM sessions s WHERE {w} GROUP BY 1 ORDER BY 2 DESC", a)
     hours = q(f"""SELECT extract(dow FROM timezone('Asia/Kolkata', started_at))::INT AS dow, extract(hour FROM timezone('Asia/Kolkata', started_at))::INT AS hour,
         count(*) sessions FROM sessions s WHERE {w} GROUP BY 1,2""", a)
     landing = q(f"SELECT landing_type, count(*) sessions, count(*) FILTER (WHERE f_cart) carts FROM sessions s WHERE {w} GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8", a)
-    staff = one("SELECT count(*) orders, coalesce(sum(total),0) revenue FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND is_valid AND is_staff_order", a)
+    staff = one("SELECT count(*) orders, coalesce(sum(total),0) revenue FROM orders_clean WHERE date_ist BETWEEN ? AND ? AND is_valid AND is_staff_order AND is_excluded", a)
     rule_on = bool(q("SELECT 1 FROM exclusions WHERE kind='rule' AND value='staff_orders' AND active"))
     return {"kpis": k, "prev": prev, "prev_range": pr, "staff_orders": {**staff, "excluded": rule_on}, "daily": daily, "channels": channels, "devices": devices, "hours": hours, "landing": landing}
 
@@ -269,8 +277,9 @@ def _series(lo: str, hi: str, include_excluded: bool) -> dict:
 
 @app.get("/api/timeseries")
 def timeseries(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
-    lo = date_from or str(one("SELECT min(date_ist) AS d FROM sessions")["d"])
-    hi = date_to or str(one("SELECT max(date_ist) AS d FROM sessions")["d"])
+    # "All time" starts at the first visit OR the first order, whichever is earlier, so the chart adds up to the headline revenue
+    lo = date_from or str(min(one("SELECT min(date_ist) AS d FROM sessions")["d"], one("SELECT min(date_ist) AS d FROM orders_clean WHERE is_valid")["d"] or date.max))
+    hi = date_to or str(max(one("SELECT max(date_ist) AS d FROM sessions")["d"], one("SELECT max(date_ist) AS d FROM orders_clean WHERE is_valid")["d"] or date.min))
     cur = _series(lo, hi, include_excluded)
     pr = prev_range(date_from, date_to)
     prev = _series(pr[0], pr[1], include_excluded) if pr else None

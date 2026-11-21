@@ -110,6 +110,22 @@ function Analytics() {
               <MetricChart ts={ts} metric={metric} compare={f.compare} height={240} ranges={{ cur: f.rangeText, prev: f.prevText }} />
             </Card>
 
+            {a.revenue_split?.length > 0 && (
+              <Card title="Revenue by payment status" sub="every valid sale counts as revenue; this is how much of it is paid">
+                <div className="mini-list">
+                  {a.revenue_split.map((x) => (
+                    <div key={x.state} className="mini-row">
+                      <span className="name">{{ confirmed: 'Paid (confirmed)', cod_pending: 'Cash on delivery, not collected yet', unconfirmed: 'No confirmed payment', conflicting: 'Payment shows cancelled, order went ahead' }[x.state] || x.state}</span>
+                      <span className="val">{num(x.orders)} orders · {inr(x.revenue)}</span>
+                      <span className="mini-bar"><i style={{ width: `${(x.revenue / Math.max(1, k.gmv)) * 100}%` }} /></span>
+                    </div>
+                  ))}
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  Discounts given: coupons {inr(k.coupon_discount)} and wallet credit {inr(k.wallet_used)} (the recorded coupon amount also holds the wallet amount when no coupon code was used; it is shown separately here).
+                </div>
+              </Card>
+            )}
             {(k.at_risk_orders > 0 || k.cod_pending_orders > 0) && (
               <div className="banner">
                 <div>

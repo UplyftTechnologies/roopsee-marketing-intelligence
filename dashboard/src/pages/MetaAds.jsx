@@ -60,7 +60,7 @@ function Levels({ campaigns }) {
           { label: 'Spend', num: true, sortBy: 'spend', render: (r) => <b>{inr(r.spend)}</b> },
           { label: 'Verdict', cls: 'nw', sortBy: 'verdict', render: (r) => <Badge tone={VERDICT[r.verdict]}>{r.verdict}</Badge> },
           { label: 'Our orders', num: true, sortBy: 'orders', render: (r) => num(r.orders) },
-          { label: 'Our ROAS', num: true, sortBy: 'our_roas', render: (r) => (r.our_roas == null ? '–' : `${r.our_roas.toFixed(2)}×`) },
+          { label: 'ROAS (matched orders)', num: true, sortBy: 'our_roas', render: (r) => (r.our_roas == null ? '–' : `${r.our_roas.toFixed(2)}×`) },
           { label: 'Carts', num: true, sortBy: 'carts', render: (r) => num(r.carts) },
           { label: 'Cost / cart', num: true, sortBy: 'cost_per_cart', render: (r) => rupee(r.cost_per_cart) },
           { label: 'Our sessions', num: true, sortBy: 'sessions', render: (r) => num(r.sessions) },
@@ -109,7 +109,7 @@ function Flow({ data, open, setOpen, q }) {
         <thead>
           <tr>
             <th>Campaign → ad set → ad</th><th>Status</th><th className="num">Budget / day</th><th className="num">Spend</th><th className="num">Impressions</th><th className="num">Clicks</th>
-            <th className="num">CTR</th><th className="num">CPC</th><th className="num">Meta: carts</th><th className="num">Meta: purchases</th><th className="num">Meta ROAS</th><th className="num">Our orders</th><th className="num">Our ROAS</th>
+            <th className="num">CTR</th><th className="num">CPC</th><th className="num">Meta: carts</th><th className="num">Meta: purchases</th><th className="num">Meta ROAS</th><th className="num" title="Orders tied to this campaign by its id or name">Matched orders</th><th className="num" title="Revenue of the matched orders divided by spend">ROAS (matched)</th>
           </tr>
         </thead>
         <tbody>
@@ -215,7 +215,8 @@ export default function MetaAds() {
                   <Kpi label="Cost per order" value={b.cost_per_order == null ? '–' : inr(b.cost_per_order)} note={`Meta itself reports ${num(t.meta_purchases)} purchases (${inr(t.meta_value)})`} />
                 </div>
                 <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                  Meta counts conversions within its own attribution window (7-day click, 1-day view) and can report orders your site never saw, so the two numbers rarely agree.
+                  Of the {num(b.orders)} orders, <b>{num(t.orders)} ({inr(t.revenue)})</b> could be tied to a specific campaign: only those appear in the campaign table below, so its ROAS is lower than the figure above.
+                  <br />Meta counts conversions within its own attribution window (7-day click, 1-day view) and can report orders your site never saw, so the two numbers rarely agree.
                   Your tracked orders are the conservative figure. Sales on cash-on-delivery orders that never linked to a session are missing from both.
                 </div>
               </Card>

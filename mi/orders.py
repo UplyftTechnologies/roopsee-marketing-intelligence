@@ -29,18 +29,18 @@ def basket(date_from: str | None = None, date_to: str | None = None, include_exc
     bands = q(f"""SELECT CASE WHEN products_total < 300 THEN '1. under 300' WHEN products_total < 500 THEN '2. 300-499' WHEN products_total < 800 THEN '3. 500-799'
         WHEN products_total < 1200 THEN '4. 800-1199' ELSE '5. 1200+' END AS band, count(*) orders, coalesce(sum(revenue),0) revenue
         FROM orders_clean c WHERE {ow} GROUP BY 1 ORDER BY 1""", oa)
-    products = q(f"""SELECT product_name, coalesce(max(brand) FILTER (WHERE brand <> 'Unknown'), 'Unknown') brand, max(product_type) product_type, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue
+    products = q(f"""SELECT product_name, coalesce(max(brand) FILTER (WHERE brand <> 'Unknown'), 'Unknown') brand, max(product_type) product_type, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue, sum(net_line) net_revenue
         FROM order_lines l WHERE {lw} GROUP BY product_name ORDER BY round(revenue, 2) DESC, 1 LIMIT 12""", la)
-    brands = q(f"""SELECT coalesce(max(brand) FILTER (WHERE brand <> 'Unknown'), 'Unknown') brand, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue
+    brands = q(f"""SELECT coalesce(max(brand) FILTER (WHERE brand <> 'Unknown'), 'Unknown') brand, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue, sum(net_line) net_revenue
         FROM order_lines l WHERE {lw} GROUP BY lower(brand) ORDER BY round(revenue, 2) DESC, 1 LIMIT 10""", la)
-    types = q(f"""SELECT product_type, max(category) category, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue
+    types = q(f"""SELECT product_type, max(category) category, sum(qty) units, count(DISTINCT order_id) orders, sum(line_total) revenue, sum(net_line) net_revenue
         FROM order_lines l WHERE {lw} GROUP BY product_type ORDER BY round(revenue, 2) DESC, 1 LIMIT 12""", la)
     cover = one(f"SELECT coalesce(100.0 * sum(line_total) FILTER (WHERE brand <> 'Unknown') / nullif(sum(line_total),0), 0) brand_known_pct, coalesce(100.0 * sum(line_total) FILTER (WHERE NOT type_inferred) / nullif(sum(line_total),0), 0) catalog_type_pct FROM order_lines l WHERE {lw}", la)
     pairs = q(f"""WITH t AS (SELECT DISTINCT order_id, product_type FROM order_lines l WHERE {lw} AND product_type NOT IN ('Other','Unknown'))
         SELECT a.product_type AS a, b.product_type AS b, count(*) orders FROM t a JOIN t b ON a.order_id = b.order_id AND a.product_type < b.product_type
         GROUP BY 1,2 HAVING count(*) >= 2 ORDER BY 3 DESC, 1 LIMIT 10""", la)
     coupons = q(f"""SELECT coalesce(split_part(c.coupon_code, ',', 1), '(no coupon)') coupon, count(*) orders, avg(c.total) aov, avg(c.products_total) avg_basket,
-        avg(try_cast(o.coupon_discount AS DOUBLE)) avg_discount FROM orders_clean c JOIN raw_orders o ON lower(o.id) = c.order_id
+        avg(c.coupon_value) avg_discount FROM orders_clean c JOIN raw_orders o ON lower(o.id) = c.order_id
         WHERE {ow} GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 10""", oa)
     t = int(threshold)
     sim = one(f"""SELECT count(*) orders, count(*) FILTER (WHERE products_total >= ?) at_or_above,
@@ -51,7 +51,11 @@ def basket(date_from: str | None = None, date_to: str | None = None, include_exc
     ab = one(f"""SELECT count(*) FILTER (WHERE cart_value >= ?) at_or_above, count(*) FILTER (WHERE cart_value < ? AND cart_value >= ? * 0.7) near,
         count(*) FILTER (WHERE cart_value IS NULL) unknown FROM checkout ck JOIN sessions s USING (session_id)
         WHERE {cw} AND ck.outcome IN ('checkout_abandoned','payment_abandoned')""", [t, t, t, date_from or "2000-01-01", date_to or "2999-12-31"])
-    return {"kpis": k, "by_size": by_size, "bands": bands, "products": products, "brands": brands, "types": types, "coverage": cover,
+    # from the value of the items in the baskets to the revenue: what the customer was given off, what they paid on top, and what is left
+    bridge = one(f"""SELECT coalesce(sum(c.products_total), 0) AS items, coalesce(sum(c.coupon_value), 0) AS coupons, coalesce(sum(c.wallet_amount_used), 0) AS wallet,
+        coalesce(sum(c.delivery_fee), 0) AS delivery, coalesce(sum(c.handling_fee), 0) AS handling, coalesce(sum(c.revenue), 0) AS revenue FROM orders_clean c WHERE {ow}""", oa)
+    bridge["other"] = round(bridge["revenue"] - (bridge["items"] - bridge["coupons"] - bridge["wallet"] + bridge["delivery"] + bridge["handling"]), 2)  # other discounts and rounding
+    return {"kpis": k, "bridge": bridge, "by_size": by_size, "bands": bands, "products": products, "brands": brands, "types": types, "coverage": cover,
             "pairs": pairs, "coupons": coupons, "threshold": {"value": t, "orders": sim, "abandoned": ab}}
 
 
@@ -115,7 +119,7 @@ def _order_kpis(d_from, d_to, include_excluded) -> dict:
         count(*) FILTER (WHERE o.status = 'payment_cancelled') AS cancelled, count(*) FILTER (WHERE o.status = 'payment_pending') AS pending,
         count(*) FILTER (WHERE o.is_valid AND o.payment_method ILIKE 'COD%') AS cod_orders,
         count(*) FILTER (WHERE o.is_valid AND coalesce(o.payment_method, '') NOT ILIKE 'COD%') AS online_orders,
-        coalesce(sum(o.coupon_discount) FILTER (WHERE o.is_valid), 0) AS coupon_discount, coalesce(sum(o.products_total) FILTER (WHERE o.is_valid), 0) AS products_total,
+        coalesce(sum(o.coupon_value) FILTER (WHERE o.is_valid), 0) AS coupon_discount, coalesce(sum(o.products_total) FILTER (WHERE o.is_valid), 0) AS products_total,
         coalesce(sum(o.delivery_fee) FILTER (WHERE o.is_valid), 0) AS delivery_fees, coalesce(sum(o.wallet_amount_used) FILTER (WHERE o.is_valid), 0) AS wallet_used,
         count(*) FILTER (WHERE o.is_valid AND o.nth_order = 1) AS first_orders, count(*) FILTER (WHERE o.is_valid AND o.nth_order > 1) AS repeat_orders,
         count(*) FILTER (WHERE o.is_valid AND o.delivered_at IS NOT NULL) AS delivered,
@@ -165,13 +169,14 @@ def orders_analytics(date_from: str | None = None, date_to: str | None = None, i
     pser = _order_series(pr[0], pr[1], include_excluded) if pr else None
     w = "o.date_ist BETWEEN ? AND ? AND NOT o.is_test" + ("" if include_excluded else " AND NOT o.is_excluded")
     a = [date_from or "2000-01-01", date_to or "2999-12-31"]
+    split = q(f"""SELECT o.payment_state AS state, count(*) AS orders, coalesce(sum(o.revenue), 0) AS revenue FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY 3 DESC""", a)
     status = q(f"SELECT o.status, count(*) AS n, coalesce(sum(o.total), 0) AS gmv FROM orders_clean o WHERE {w} GROUP BY 1 ORDER BY n DESC", a)
     payment = q(f"""SELECT coalesce(o.payment_method, '(not recorded)') AS method, count(*) AS attempts, count(*) FILTER (WHERE o.is_valid) AS orders,
         coalesce(sum(o.total) FILTER (WHERE o.is_valid), 0) AS gmv, coalesce(avg(o.total) FILTER (WHERE o.is_valid), 0) AS aov,
         count(*) FILTER (WHERE o.status = 'payment_cancelled') AS cancelled FROM orders_clean o WHERE {w} GROUP BY 1 ORDER BY attempts DESC""", a)
     failures = q(f"SELECT coalesce(o.payment_failed_reason, '(no reason recorded)') AS reason, count(*) AS n FROM orders_clean o WHERE {w} AND NOT o.is_placed GROUP BY 1 ORDER BY n DESC, 1 LIMIT 8", a)
     coupons = q(f"""SELECT coalesce(split_part(o.coupon_code, ',', 1), '(no coupon)') AS coupon, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov,
-        avg(o.coupon_discount) AS avg_discount FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC, 1 LIMIT 10""", a)
+        avg(o.coupon_value) AS avg_discount FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC, 1 LIMIT 10""", a)
     cities = q(f"SELECT coalesce(o.city, 'Unknown') AS city, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv, avg(o.total) AS aov FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC, 1 LIMIT 10", a)
     pins = q(f"SELECT coalesce(o.pincode, 'Unknown') AS pincode, max(o.city) AS city, count(*) AS orders, coalesce(sum(o.total), 0) AS gmv FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC, 1 LIMIT 10", a)
     hours = q(f"""SELECT extract(dow FROM o.ts_ist)::INT AS dow, extract(hour FROM o.ts_ist)::INT AS hour, count(*) AS orders FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1, 2""", a)
@@ -190,7 +195,7 @@ def orders_analytics(date_from: str | None = None, date_to: str | None = None, i
     riders = q(f"""SELECT coalesce(o.rider_name, 'Unassigned') AS rider, count(*) AS orders, count(*) FILTER (WHERE o.delivered_at IS NOT NULL) AS delivered,
         median(date_diff('minute', o.ts, o.delivered_at)) FILTER (WHERE o.delivered_at IS NOT NULL) / 60.0 AS median_h
         FROM orders_clean o WHERE {w} AND o.is_valid GROUP BY 1 ORDER BY orders DESC, 1 LIMIT 8""", a)
-    return {"kpis": kpis, "prev": prev, "prev_range": pr, "dates": cur["dates"], "current": cur["m"], "prev_dates": pser["dates"] if pser else None, "previous": pser["m"] if pser else None,
+    return {"kpis": kpis, "revenue_split": split, "prev": prev, "prev_range": pr, "dates": cur["dates"], "current": cur["m"], "prev_dates": pser["dates"] if pser else None, "previous": pser["m"] if pser else None,
             "status": status, "payment": payment, "failures": failures, "coupons": coupons, "cities": cities, "pincodes": pins, "hours": hours,
             "customers": customers, "channels": channels, "credited_channels": credited, "buckets": buckets, "delivery": delivery, "riders": riders}
 

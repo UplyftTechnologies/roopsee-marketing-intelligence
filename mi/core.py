@@ -43,11 +43,15 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 # query having to know about it. Pages built on person-level or campaign-level tables (users_360, campaign_performance) are not narrowed.
 DEVICE_TYPES = ("Mobile web", "Desktop web", "Tablet web", "App", "Unknown")
 DEVICE: contextvars.ContextVar = contextvars.ContextVar("device_type", default=None)
+# ?sales=confirmed | paid_or_cod : count only sales with a confirmed payment (or a confirmed / cash-on-delivery one). Default (absent) = every valid sale.
+SALES_BASIS = {"confirmed": ("confirmed",), "paid_or_cod": ("confirmed", "cod_pending")}
+SALES: contextvars.ContextVar = contextvars.ContextVar("sales_basis", default=None)
 DEVICE_SKIP = ("/api/meta", "/api/health", "/api/jobs", "/api/refresh", "/api/exclusions", "/api/lookup", "/api/performance", "/api/users", "/api/cohorts",
-               "/api/retention", "/api/loyalty", "/api/audiences", "/api/person", "/api/campaigns", "/api/utm-health", "/api/events/names", "/api/events/catalogue")
+               "/api/retention", "/api/loyalty", "/api/audiences", "/api/person", "/api/campaigns", "/api/utm-health", "/api/deeper/segments", "/api/ad-image", "/api/events/names", "/api/events/catalogue")
+SALES_SKIP = ("/api/meta", "/api/health", "/api/jobs", "/api/refresh", "/api/exclusions", "/api/lookup", "/api/staff-orders")
 # the columns that say app / device in each table
 _DEV_COLS = {"sessions": ("is_app", "device"), "events_clean": ("is_app", "device_n"), "orders_clean": ("is_app", "device")}
-_TABLE_RE = re.compile(r"\b(FROM|JOIN)(\s+)(sessions|events_clean|orders_clean)(?![\w])", re.I)
+_TABLE_RE = re.compile(r"\b(FROM|JOIN)(\s+)(sessions|events_clean|orders_clean|order_lines)(?![\w])", re.I)
 
 
 def device_expr(app_col: str, dev_col: str) -> str:
@@ -60,16 +64,22 @@ def parse_devices(v: str | None) -> tuple | None:
     return got or None
 
 
-def narrow(sql: str, devices: tuple | None) -> str:
-    """The query with sessions / events_clean / orders_clean replaced by those tables limited to the devices."""
-    if not devices:
+def narrow(sql: str, devices: tuple | None, sales: tuple | None = None) -> str:
+    """The query with sessions / events_clean / orders_clean / order_lines replaced by those tables limited to the devices and to the sales that count."""
+    if not devices and not sales:
         return sql
-    inlist = ", ".join("'" + d + "'" for d in devices)  # values come from DEVICE_TYPES only
+    inlist = ", ".join("'" + d + "'" for d in (devices or ()))  # values come from DEVICE_TYPES only
+    states = ", ".join("'" + s + "'" for s in (sales or ()))  # and from SALES_BASIS
 
     def sub(m):
         t = m.group(3).lower()
-        a, d = _DEV_COLS[t]
-        return f"{m.group(1)}{m.group(2)}(SELECT * FROM {t} WHERE {device_expr(a, d)} IN ({inlist}))"
+        conds = []
+        if devices and t in _DEV_COLS:
+            a, d = _DEV_COLS[t]
+            conds.append(f"{device_expr(a, d)} IN ({inlist})")
+        if sales and t in ("orders_clean", "order_lines"):
+            conds.append(f"(NOT is_valid OR payment_state IN ({states}))")  # orders that are not sales are left alone: they bring in no revenue
+        return f"{m.group(1)}{m.group(2)}(SELECT * FROM {t} WHERE {' AND '.join(conds)})" if conds else m.group(0)
     return _TABLE_RE.sub(sub, sql)
 
 
@@ -77,15 +87,17 @@ def narrow(sql: str, devices: tuple | None) -> str:
 async def _device_filter(request: Request, call_next):
     path = request.url.path
     devices = parse_devices(request.query_params.get("device_type")) if path.startswith("/api/") and not path.startswith(DEVICE_SKIP) else None
-    token = DEVICE.set(devices)
+    sales = SALES_BASIS.get(request.query_params.get("sales") or "") if path.startswith("/api/") and not path.startswith(SALES_SKIP) else None
+    token, token2 = DEVICE.set(devices), SALES.set(sales)
     try:
         return await call_next(request)
     finally:
         DEVICE.reset(token)
+        SALES.reset(token2)
 
 
 def q(sql: str, args: list | tuple = ()) -> list[dict]:
-    sql = narrow(sql, DEVICE.get())
+    sql = narrow(sql, DEVICE.get(), SALES.get())
     with DB_LOCK:
         cur = CON.cursor()
         try:
@@ -165,3 +177,18 @@ def _reapply():
 
 def _in(col: str, values: list[str]) -> tuple[str, list]:
     return f"{col} IN ({', '.join('?' for _ in values)})", list(values)
+
+
+def untracked_sales(include_excluded: bool = False) -> dict:
+    """Sales (all time) from customers who have no person record, so they are not in the Users / Cohorts / Segments revenue: orders placed before
+    tracking began, or by an account that never had a tracked visit. Keeps those pages reconcilable with the headline revenue."""
+    ex = "" if include_excluded else " AND NOT o.is_excluded"
+    r = one(f"""SELECT count(*) AS orders, coalesce(sum(o.revenue), 0) AS revenue, count(DISTINCT coalesce(o.user_id, o.order_id)) AS customers,
+                count(*) FILTER (WHERE o.date_ist < (SELECT min(date_ist) FROM sessions)) AS before_tracking
+                FROM orders_clean o WHERE o.is_valid{ex} AND (o.user_id IS NULL OR o.user_id NOT IN (SELECT user_id FROM users_360 WHERE user_id IS NOT NULL))""")
+    r["revenue"] = round(float(r["revenue"] or 0), 2)
+    # customers whose VISITS are hidden (a foreign address, a browser shared with staff) but whose orders are real and counted: they are not in the lists either
+    h = one(f"""SELECT count(*) AS orders, coalesce(sum(o.revenue), 0) AS revenue FROM orders_clean o WHERE o.is_valid{ex}
+                AND o.user_id IN (SELECT user_id FROM users_360 WHERE is_excluded AND user_id IS NOT NULL)""") if not include_excluded else {"orders": 0, "revenue": 0}
+    r["hidden_orders"], r["hidden_revenue"] = int(h["orders"] or 0), round(float(h["revenue"] or 0), 2)
+    return r

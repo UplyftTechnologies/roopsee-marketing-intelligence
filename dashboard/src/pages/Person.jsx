@@ -78,6 +78,7 @@ export default function Person() {
           </div>
           <div className="chip-row" style={{ marginTop: 6 }}>
             {p.segment && <Badge>{p.segment}</Badge>}
+            {(d.labels || []).map((t) => <Badge key={t} tone="good">{t}</Badge>)}
             <Badge tone={p.is_registered ? 'good' : ''}>{p.is_registered ? 'Registered' : 'Anonymous'}</Badge>
             {p.is_excluded && <Badge tone="bad">Excluded from analytics</Badge>}
             {p.first_channel && <Badge>First seen via {p.first_channel}</Badge>}

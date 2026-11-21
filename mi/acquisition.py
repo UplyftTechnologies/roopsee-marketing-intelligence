@@ -73,4 +73,10 @@ def campaigns(date_from: str | None = None, date_to: str | None = None, include_
             r["verdict"] = "No carts - review"
         else:
             r["verdict"] = "Too early"
-    return {"rows": rows, "baseline_cart_rate": base_cart}
+    # how much of the period's revenue the table can place: orders with no visit (placed before tracking, or not linked) have no campaign
+    tot = one("SELECT count(*) orders, coalesce(sum(revenue), 0) revenue FROM orders_clean WHERE is_valid AND date_ist BETWEEN ? AND ?" + ("" if include_excluded else " AND NOT is_excluded"),
+              [date_from or "2000-01-01", date_to or "2999-12-31"])
+    placed_o, placed_r = sum(r["orders"] for r in rows), sum(r["revenue"] for r in rows)
+    return {"rows": rows, "baseline_cart_rate": base_cart, "reconcile": {"orders_total": tot["orders"], "revenue_total": float(tot["revenue"] or 0), "orders_in_table": placed_o,
+            "revenue_in_table": float(placed_r or 0), "orders_other": max(0, tot["orders"] - placed_o), "revenue_other": round(max(0.0, float(tot["revenue"] or 0) - float(placed_r or 0)), 2),
+            "first_touch_orders": sum(r["ft_orders"] for r in rows), "first_touch_revenue": float(sum(r["ft_revenue"] for r in rows) or 0)}}

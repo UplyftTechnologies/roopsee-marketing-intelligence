@@ -3,6 +3,7 @@ import { dt, inr, num, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import BulkExclude from '../components/BulkExclude'
 import ShareLink from '../components/ShareLink'
+import { UntrackedNote } from '../components/RevenueNotes'
 
 const TONE = { 'Repeat buyer': 'good', Buyer: 'good', 'Abandoned checkout': 'serious', 'Cart, no checkout': 'warn', 'Quiz done, no cart': 'warn' }
 const PRESETS = [['', 'Everyone'], ['cart_abandoners', 'Cart abandoners'], ['checkout_abandoners', 'Checkout abandoners'], ['logged_in', 'Logged in'], ['buyers', 'Buyers'], ['reachable', 'Reachable by phone'], ['has_pincode', 'Has a delivery pincode'], ['saved_address', 'Saved an address']]
@@ -38,10 +39,11 @@ export default function Users() {
         ))}
       </div>
       <Loading state={s}>
-        {({ rows, total, segments }) => {
+        {({ rows, total, segments, untracked }) => {
           const chosen = rows.filter((r) => sel.has(r.person_key))
           return (
             <>
+              <UntrackedNote untracked={untracked} />
               <Chips value={segment} onChange={setSegment} options={[{ value: '', label: 'All segments' }, ...segments.map((g) => ({ value: g.segment, label: `${g.segment} (${num(g.n)})` }))]} />
               <Card title={`${num(total)} people`} sub="a person = a logged-in account, or an anonymous browser · click a row for their full profile · click a column title to sort · a person who later ordered is never a cart or checkout abandoner"
                 right={<ExportBtn name="people" rows={rows} fields={[['Name', 'name'], ['Phone', 'phone10'], ['Email', 'email'], ['Segment', 'segment'], ['First channel', 'first_channel'], ['City', 'city'], ['State', 'state'], ['Sessions', 'sessions'], ['Orders', 'orders'], ['Revenue', 'revenue'], ['Age', 'age_bucket'], ['Skin type', 'skin_type']]} />}>

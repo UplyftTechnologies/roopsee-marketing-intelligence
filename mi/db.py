@@ -38,7 +38,7 @@ RAW_SCHEMAS = {
     },
     "raw_catalog_roopsee": {
         "product_uid": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
-        "product_type_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE",
+        "product_type_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE", "images": "JSON",
     },
     "raw_catalog_master": {
         "product_id": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
@@ -59,7 +59,7 @@ RAW_SCHEMAS = {
     "raw_meta_entities": {
         "account_id": "VARCHAR", "entity_type": "VARCHAR", "entity_id": "VARCHAR", "name": "VARCHAR", "campaign_id": "VARCHAR", "adset_id": "VARCHAR",
         "status": "VARCHAR", "effective_status": "VARCHAR", "objective": "VARCHAR", "daily_budget": "DOUBLE", "lifetime_budget": "DOUBLE",
-        "thumbnail_url": "VARCHAR", "created_time": "TIMESTAMPTZ",
+        "thumbnail_url": "VARCHAR", "image_url": "VARCHAR", "created_time": "TIMESTAMPTZ",
     },
     "raw_customer_address": {
         "id": "BIGINT", "user_id": "VARCHAR", "city": "VARCHAR", "state": "VARCHAR", "pincode": "VARCHAR",

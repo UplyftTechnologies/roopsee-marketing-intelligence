@@ -1,3 +1,4 @@
+import { UntrackedNote } from '../components/RevenueNotes'
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { day, inr, num, pct, useApi } from '../api'
@@ -46,11 +47,12 @@ export default function Cohorts() {
     <>
       <Chips options={DIMS.map(([v, label]) => ({ value: v, label }))} value={dim} onChange={setDim} />
       <Loading state={s}>
-        {({ rows }) => {
+        {({ rows, untracked }) => {
           const maxBuy = Math.max(0.0001, ...rows.map((r) => r.buyer_rate))
           const chart = rows.slice(0, 15)
           return (
             <>
+              <UntrackedNote untracked={untracked} />
               <div className="grid g-main">
                 <Card title={`People by ${DIMS.find((d) => d[0] === dim)[1].toLowerCase()}`} sub="people = browsers/accounts, grouped by when they first visited in the selected range">
                   <ResponsiveContainer width="100%" height={Math.max(200, chart.length * 26)}>

@@ -32,6 +32,7 @@ EXCLUSION_KINDS = {
     "channel": "Channel (e.g. Paid Google)",
     "any_text": "Anything - matches name, ids, ip, phone, email, page URL, referrer, city",
     "rule": "Built-in rule: staff_roles, admin_pages, dev_hosts, non_india, crawler_ua",
+    "real_customer": "Account with a staff role (admin / rider / doctor) whose ORDERS are real customer orders and must be counted (user id)",
 }
 DEFAULT_RULES = [
     ("rule", "staff_roles", "Accounts with role admin / rider / doctor, and everything their browsers did"),
@@ -424,7 +425,10 @@ o AS (
     (coalesce(o.items::VARCHAR,'') ILIKE '%test product%' OR coalesce(o.total, 0) <= 1) AS is_test,
     (o.status NOT IN ('payment_cancelled','payment_pending')) AS is_placed,
     o.name AS customer_name, try_cast(o.delivery_fee AS DOUBLE) AS delivery_fee, try_cast(o.handling_fee AS DOUBLE) AS handling_fee,
-    try_cast(o.coupon_discount AS DOUBLE) AS coupon_discount, o.discount AS discount, o.savings AS savings, o.wallet_amount_used,
+    try_cast(o.coupon_discount AS DOUBLE) AS coupon_discount,
+    -- the recorded coupon discount also holds the wallet amount when no coupon code was used: coupon_value is the coupon alone
+    CASE WHEN coalesce(o.coupon_code, '') = '' THEN greatest(coalesce(try_cast(o.coupon_discount AS DOUBLE), 0) - coalesce(o.wallet_amount_used, 0), 0)
+         ELSE coalesce(try_cast(o.coupon_discount AS DOUBLE), 0) END AS coupon_value, o.discount AS discount, o.savings AS savings, o.wallet_amount_used,
     o.cashback_amount, o.cashback_percent, o.payment_failed_reason, o.paid_at, o.delivered_at,
     try_cast(json_extract_string(o.metadata, '$.picked_up_at') AS TIMESTAMPTZ) AS picked_up_at,
     try_cast(json_extract_string(o.metadata, '$.delivery_started_at') AS TIMESTAMPTZ) AS delivery_started_at,
@@ -446,7 +450,8 @@ SELECT o.*, (o.is_placed AND NOT o.is_test) AS is_valid,
        THEN count(*) FILTER (WHERE o.is_placed AND NOT o.is_test) OVER (PARTITION BY o.user_id ORDER BY o.ts) END AS nth_order,
   (o.user_id IN (SELECT lower(id) FROM raw_users WHERE role IN ('admin','rider','doctor'))) AS is_staff_order,
   coalesce(o.is_test
-   OR (o.user_id IN (SELECT lower(id) FROM raw_users WHERE role IN ('admin','rider','doctor')) AND EXISTS (SELECT 1 FROM excl WHERE kind = 'rule' AND v = 'staff_orders'))
+   OR (o.user_id IN (SELECT lower(id) FROM raw_users WHERE role IN ('admin','rider','doctor')) AND EXISTS (SELECT 1 FROM excl WHERE kind = 'rule' AND v = 'staff_orders')
+       AND o.user_id NOT IN (SELECT v FROM excl WHERE kind = 'real_customer'))
    OR o.user_id IN (SELECT user_id FROM manual_users)
    OR o.session_id IN (SELECT session_id FROM manual_sessions)
    OR o.phone10 IN (SELECT right(regexp_replace(v, '[^0-9]', '', 'g'), 10) FROM excl WHERE kind = 'phone')
@@ -476,10 +481,10 @@ FROM events_clean WHERE event_name = 'page_load_sample' AND load_ms IS NOT NULL 
 
 STEP_PRODUCTS = """
 CREATE OR REPLACE TABLE dim_products AS
-SELECT product_uid AS product_id, product_name, brand, category_l1, product_type_l2 AS product_type, mrp, selling_price
+SELECT product_uid AS product_id, product_name, brand, category_l1, product_type_l2 AS product_type, mrp, selling_price, images
 FROM raw_catalog_roopsee WHERE product_uid IS NOT NULL
 UNION ALL
-SELECT product_id, product_name, brand, category_l1, category_l2, mrp, selling_price
+SELECT product_id, product_name, brand, category_l1, category_l2, mrp, selling_price, NULL::JSON
 FROM raw_catalog_master WHERE product_id IS NOT NULL AND product_id NOT IN (SELECT product_uid FROM raw_catalog_roopsee WHERE product_uid IS NOT NULL);
 
 -- one row per product line on every order (order flags copied from orders_clean so the same filters apply).
@@ -493,7 +498,7 @@ brands AS (  -- one spelling per brand (the alphabetically first), so "AXIS-Y" a
     SELECT DISTINCT lower(trim(json_extract_string(j, '$.brand_name'))), trim(json_extract_string(j, '$.brand_name')) FROM l
     WHERE length(trim(coalesce(json_extract_string(j, '$.brand_name'), ''))) > 2) GROUP BY b),
 x AS (
-  SELECT c.order_id, c.user_id, c.ts, c.date_ist, c.is_valid, c.is_excluded, c.is_staff_order, c.total AS order_total, c.items_count,
+  SELECT c.order_id, c.user_id, c.ts, c.date_ist, c.is_valid, c.is_excluded, c.is_staff_order, c.total AS order_total, c.items_count, c.payment_state, c.revenue AS order_revenue,
     json_extract_string(l.j, '$.id') AS product_id,
     coalesce(nullif(json_extract_string(l.j, '$.name'), ''), d.product_name, 'Unknown product') AS product_name,
     nullif(json_extract_string(l.j, '$.brand_name'), '') AS brand_raw,
@@ -503,7 +508,9 @@ x AS (
     (d.product_id IS NOT NULL) AS in_catalog
   FROM l JOIN orders_clean c ON c.order_id = l.order_id
   LEFT JOIN dim_products d ON d.product_id = json_extract_string(l.j, '$.id'))
-SELECT x.order_id, x.user_id, x.ts, x.date_ist, x.is_valid, x.is_excluded, x.is_staff_order, x.order_total, x.items_count,
+SELECT x.order_id, x.user_id, x.ts, x.date_ist, x.is_valid, x.is_excluded, x.is_staff_order, x.order_total, x.items_count, x.payment_state,
+  -- what the line brought in after discounts, delivery and wallet: the order's revenue shared out by each line's list value
+  x.order_revenue * (x.price * x.qty) / nullif(sum(x.price * x.qty) OVER (PARTITION BY x.order_id), 0) AS net_line,
   x.product_id, x.product_name,
   coalesce(x.brand_raw, x.brand_cat, (SELECT bl.brand FROM brands bl WHERE lower(x.product_name) LIKE bl.b || '%' ORDER BY length(bl.b) DESC LIMIT 1), 'Unknown') AS brand,
   coalesce(x.cat_cat, kind_category(product_kind(x.product_name))) AS category,
@@ -896,11 +903,21 @@ def _run_steps(con, flags_only, note, t0) -> dict:
         _log(f"{name}: {time.time() - t:.1f}s")
     t = time.time(); note("rebuilding: exclusion hits"); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
     for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
-                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS), ("pain points", None), ("logins", None), ("roop chats", None)]:
+                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS), ("pain points", None), ("logins", None), ("roop chats", None), ("deeper analysis", None), ("journeys", None)]:
         t = time.time()
         note(f"rebuilding: {name}")
         if name == "events_clean":
             _drop_any(con, "events_clean")  # older builds stored it as a table
+        if name == "journeys":
+            if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'journey_sessions'").fetchall()[0][0]:
+                continue  # exclusion edits never change this table (hidden traffic is applied when it is read)
+            from .journey_sql import journey_sql
+            sql = journey_sql()
+        if name == "deeper analysis":
+            if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'user_labels'").fetchall()[0][0]:
+                continue  # exclusion edits never change these tables (hidden traffic is applied when they are read)
+            from .deeper_sql import deeper_sql
+            sql = deeper_sql()
         if name == "roop chats":
             if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'chat_messages'").fetchall()[0][0]:
                 continue  # exclusion edits never change this table (hidden traffic is applied when it is read)

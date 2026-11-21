@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, dt, num, useApi, useFilters } from '../api'
 import { Badge, Card, CopyTable, Loading, Table } from '../ui'
 import { Inventory, ShareBar } from '../components/ExclusionTools'
+import StaffOrders from '../components/StaffOrders'
 
 /** Manual, editable exclusion list. Every change re-applies automatically (a few seconds) and all tabs reload. */
 function AddForm({ kinds, onDone }) {
@@ -127,6 +128,7 @@ export default function Exclusions() {
         <div className="spacer" />
         <button className="btn" disabled={job?.running} onClick={async () => { await api('/exclusions/apply', { method: 'POST' }); f.reloadMeta() }}>Re-apply all rules</button>
       </div>
+      <StaffOrders exclusions={list.data?.rows} />
       <ShareBar />
       {list.data && <AddForm kinds={list.data.kinds} onDone={reload} />}
       <Finder onAdded={reload} />

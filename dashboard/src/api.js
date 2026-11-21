@@ -47,6 +47,7 @@ export const decodeShare = (s) => {
 export const DEVICE_OPTIONS = [
   ['', 'All devices'], ['Mobile web,Desktop web,Tablet web', 'All web'], ['Mobile web', 'Mobile web'], ['Desktop web', 'Desktop web'], ['Tablet web', 'Tablet web'], ['App', 'Android app'],
 ]
+export const SALES_OPTIONS = [['', 'All sales'], ['paid_or_cod', 'Paid or cash on delivery'], ['confirmed', 'Confirmed payments only']]
 export const shareLink = (tab, state) => `${location.origin}${location.pathname}#${tab}?s=${encodeShare(state)}`
 
 /** Forget the remembered filters of one page (keys are `mi:<page>.<name>`). */
@@ -63,12 +64,13 @@ export function useApi(path, extra = {}, { scoped = true } = {}) {
   const f = useFilters()
   const [state, setState] = useState({ data: null, loading: true, error: null })
   const dev = scoped && f.deviceApplies ? f.deviceType || '' : ''
-  const key = JSON.stringify([path, extra, scoped ? [f.from, f.to, f.includeExcluded, dev] : null, f.tick])
+  const sales = scoped && f.salesApplies ? f.salesBasis || '' : ''
+  const key = JSON.stringify([path, extra, scoped ? [f.from, f.to, f.includeExcluded, dev, sales] : null, f.tick])
   useEffect(() => {
     let live = true
     setState((s) => ({ ...s, loading: true, error: null }))
     const params = scoped
-      ? { date_from: f.from, date_to: f.to, include_excluded: f.includeExcluded, device_type: dev || undefined, ...extra }
+      ? { date_from: f.from, date_to: f.to, include_excluded: f.includeExcluded, device_type: dev || undefined, sales: sales || undefined, ...extra }
       : extra
     api(path, { params })
       .then((data) => live && setState({ data, loading: false, error: null }))

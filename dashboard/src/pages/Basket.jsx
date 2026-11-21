@@ -60,6 +60,15 @@ export default function Basket() {
               <div className="muted">The “nudge zone” is where an add-on suggestion, a progress bar (“add ₹X for free delivery”) or a bundle offer is most likely to lift the order. Small sample, so treat as directional.</div>
             </Card>
 
+            <Card title="From the value of the baskets to the revenue" sub="why product and brand totals are higher than Revenue: item value is before discounts">
+              <div className="mini-list">
+                {[['Value of the items bought', d.bridge.items, 1], ['− Coupons', -d.bridge.coupons, 0], ['− Wallet credit used', -d.bridge.wallet, 0], ['+ Delivery fees', d.bridge.delivery, 0], ['+ Handling fees', d.bridge.handling, 0],
+                  ['± Other discounts and rounding', d.bridge.other, 0], ['= Revenue', d.bridge.revenue, 1]].map(([label, v, strong]) => (
+                  <div key={label} className="mini-row"><span className="name">{strong ? <b>{label}</b> : label}</span><span className="val">{strong ? <b>{inr(v)}</b> : `${v < 0 ? '−' : ''}${inr(Math.abs(v))}`}</span></div>
+                ))}
+              </div>
+            </Card>
+
             <div className="grid g2">
               <Card title="Often bought together" sub="product types that appear together in 2+ orders (inferred from names where the catalog has no match)">
                 <Table cols={[{ label: 'Type A', key: 'a' }, { label: 'Type B', key: 'b' }, { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) }]} rows={d.pairs} empty="No pair of product types has appeared together in 2+ orders in this range yet" />
@@ -74,19 +83,20 @@ export default function Basket() {
             </div>
 
             <div className="grid g2">
-              <Card title="Top products" sub="by revenue" right={<ExportBtn name="top-products" rows={d.products} fields={[['Product', 'product_name'], ['Brand', 'brand'], ['Type', 'product_type'], ['Units', 'units'], ['Orders', 'orders'], ['Revenue', 'revenue']]} />}>
+              <Card title="Top products" sub="by item value (list price × quantity, before discounts); net revenue is what is left after discounts and delivery" right={<ExportBtn name="top-products" rows={d.products} fields={[['Product', 'product_name'], ['Brand', 'brand'], ['Type', 'product_type'], ['Units', 'units'], ['Orders', 'orders'], ['Item value', 'revenue'], ['Net revenue', 'net_revenue']]} />}>
                 <Table cols={[
                   { label: 'Product', sortBy: 'product_name', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={r.product_name}>{r.product_name}</span> },
                   { label: 'Type', key: 'product_type' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) },
-                  { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) },
+                  { label: 'Item value', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) },
+                  { label: 'Net revenue', sortBy: 'net_revenue', num: true, render: (r) => inr(r.net_revenue) },
                 ]} rows={d.products} />
               </Card>
               <div className="grid" style={{ gap: 14 }}>
-                <Card title="Brands" sub="by revenue">
-                  <Table cols={[{ label: 'Brand', key: 'brand' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) }, { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) }, { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) }]} rows={d.brands} />
+                <Card title="Brands" sub="by item value, with the net revenue after discounts">
+                  <Table cols={[{ label: 'Brand', key: 'brand' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) }, { label: 'Orders', sortBy: 'orders', num: true, render: (r) => num(r.orders) }, { label: 'Item value', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) }, { label: 'Net', sortBy: 'net_revenue', num: true, render: (r) => inr(r.net_revenue) }]} rows={d.brands} />
                 </Card>
                 <Card title="Product types">
-                  <Table cols={[{ label: 'Type', key: 'product_type' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) }, { label: 'Revenue', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) }]} rows={d.types} />
+                  <Table cols={[{ label: 'Type', key: 'product_type' }, { label: 'Units', sortBy: 'units', num: true, render: (r) => num(r.units) }, { label: 'Item value', sortBy: 'revenue', num: true, render: (r) => inr(r.revenue) }, { label: 'Net', sortBy: 'net_revenue', num: true, render: (r) => inr(r.net_revenue) }]} rows={d.types} />
                 </Card>
               </div>
             </div>

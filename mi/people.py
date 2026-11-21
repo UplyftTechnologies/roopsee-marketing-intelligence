@@ -2,7 +2,7 @@
 import re
 from fastapi import HTTPException
 
-from .core import _csv, app, one, q, ratio
+from .core import _csv, app, one, q, ratio, untracked_sales
 from .orders import _order_filter
 from .sessions import _addresses
 
@@ -25,7 +25,7 @@ def cohorts(dim: str = "state", date_from: str | None = None, date_to: str | Non
     for r in rows:
         r.update(cart_rate=ratio(r["carted"], r["people"]), buyer_rate=ratio(r["buyers"], r["people"]),
                  avg_sessions=round(r["sessions"] / r["people"], 2) if r["people"] else 0)
-    return {"dim": dim, "rows": rows}
+    return {"dim": dim, "rows": rows, "untracked": untracked_sales(include_excluded)}
 
 
 @app.get("/api/retention")
@@ -76,7 +76,12 @@ def person_profile(key: str):
               "seconds": sum(r["duration_s"] or 0 for r in sess), "browsers": len(browsers), "ips": len(ips),
               "devices": len({(r["device"], r["platform"], r["is_app"]) for r in sess})}
     uid = key if re.fullmatch(r"[0-9a-fA-F-]{36}", key or "") else None
-    return {"person_key": key, "addresses": _addresses(uid), "profile": profile or None, "totals": totals, "sessions": sess, "browsers": sorted(browsers.values(), key=lambda b: b["last_seen"], reverse=True),
+    labels = []
+    if q("SELECT 1 FROM information_schema.tables WHERE table_name = 'user_labels'"):  # the Deeper analysis labels (quiz user, makeup user, price range ...)
+        from .deeper import _label_meta
+        meta = _label_meta()
+        labels = [meta.get(r["label_key"], {}).get("title", r["label_key"]) for r in q("SELECT label_key FROM user_labels WHERE person_key = ? AND label_key NOT LIKE 'stage:%' ORDER BY label_key", [key])]
+    return {"person_key": key, "labels": labels, "addresses": _addresses(uid), "profile": profile or None, "totals": totals, "sessions": sess, "browsers": sorted(browsers.values(), key=lambda b: b["last_seen"], reverse=True),
             "ips": ips, "orders": orders, "daily": daily}
 
 
@@ -117,7 +122,7 @@ def users(date_from: str | None = None, date_to: str | None = None, include_excl
         delivery_pincode, has_saved_address, ip_city
         FROM users_360 WHERE {w} ORDER BY {order} {d} NULLS LAST, last_seen DESC, person_key LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     segs = q(f"SELECT segment, count(*) n FROM users_360 WHERE {'TRUE' if include_excluded else 'NOT is_excluded'} GROUP BY 1 ORDER BY 2 DESC")
-    return {"total": total, "rows": rows, "segments": segs}
+    return {"total": total, "rows": rows, "segments": segs, "untracked": untracked_sales(include_excluded)}
 
 
 @app.get("/api/users/counts")

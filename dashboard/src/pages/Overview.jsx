@@ -6,6 +6,7 @@ import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/LazyMetricChart'
 import ReportTable from '../components/ReportTable'
 import PageSpeed from '../components/PageSpeed'
+import { RevenueSplit } from '../components/RevenueNotes'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const RAMP = ['var(--seq-100)', 'var(--seq-200)', 'var(--seq-300)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
@@ -59,6 +60,7 @@ export default function Overview() {
               <Scorecard key={k} metric={k} kpis={kpis} prev={prev} compare={f.compare} spark={ts.data?.current[METRICS[k].series]} active={metric === k} onClick={() => setMetric(k)} />
             ))}
           </ScorecardStrip>
+          <RevenueSplit kpis={kpis} />
           <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
             {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 280 }} />}
           </Card>

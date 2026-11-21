@@ -368,3 +368,211 @@ class DeviceFilter(unittest.TestCase):
         self.assertIn("JOIN session_orders o", out)
         self.assertIn("JOIN sessions_pre p", out)
         self.assertEqual(narrow("SELECT 1 FROM sessions", None), "SELECT 1 FROM sessions")
+
+
+class DeeperAnalysis(unittest.TestCase):
+    R = dict(date_from="2026-10-01", date_to="2026-11-20")
+
+    def test_first_order_buckets_add_up(self):
+        b = api.deeper_journeys(**self.R)["before_order"]
+        self.assertEqual(sum(x["count"] for x in b["visits"]), b["orders"])
+        self.assertEqual(sum(x["count"] for x in b["days"]), b["orders"])
+
+    def test_ad_cards_follow_the_funnel(self):
+        for ad in api.deeper_journeys(**self.R)["ads"]:
+            with self.subTest(ad=ad["ad_id"]):
+                self.assertGreaterEqual(ad["sessions"], ad["carts"])
+                self.assertGreaterEqual(ad["carts"], ad["checkouts"] - 0 if ad["checkouts"] <= ad["carts"] else 0)
+                self.assertLessEqual(ad["orders"], ad["sessions"])
+
+    def test_search_numbers_are_consistent(self):
+        k = api.deeper_discovery(**self.R)["kpis"]
+        self.assertLessEqual(k["zero_searches"], k["searches"])
+        self.assertLessEqual(k["click_sessions"], k["sessions"])
+
+    def test_quiz_numbers_are_consistent(self):
+        f = api.deeper_quiz(**self.R)["funnel"]
+        self.assertLessEqual(f["completed"], f["engaged"])
+        self.assertLessEqual(f["completed_ordered"], f["completed_carted"] + f["completed_ordered"])
+
+    def test_chain_steps_never_grow(self):
+        c = api.deeper_chain(**self.R, step=["product_view", "add_to_cart", "view_cart"], unit="key")
+        counts = [x["sessions"] for x in c["steps"]]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        self.assertLessEqual(sum(n["sessions"] for n in c["next"]) + c["ended"], c["last"] + 0)
+
+    def test_chain_needs_a_known_unit(self):
+        from fastapi import HTTPException
+        with self.assertRaises(HTTPException):
+            api.deeper_chain(**self.R, step=[], unit="nope")
+
+    def test_every_label_lists_exactly_its_people(self):
+        d = api.deeper_segments(**self.R)
+        for l in d["labels"][:6]:
+            with self.subTest(label=l["key"]):
+                self.assertEqual(api.deeper_segment_people(label=l["key"], limit=1, **self.R)["total"], l["people"])
+
+    def test_labels_belong_to_known_people(self):
+        bad = one("SELECT count(*) n FROM user_labels l WHERE l.person_key NOT IN (SELECT person_key FROM users_360)")
+        self.assertEqual(bad["n"], 0)
+
+    def test_flow_never_exceeds_the_ad_visits(self):
+        d = api.deeper_flow(**self.R)
+        sess = {a["ad_id"]: a["sessions"] for a in d["ads"]}
+        per = {}
+        for r in d["ad_concern"]:
+            per[(r["ad_id"], r["concern"])] = per.get((r["ad_id"], r["concern"]), 0) + r["sessions"]
+        for (ad, _c), n in per.items():
+            self.assertLessEqual(n, sess[ad])
+
+
+class RevenueReconciliation(unittest.TestCase):
+    """Every revenue figure either equals the headline or shows the gap, so no page contradicts another."""
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def test_all_time_chart_adds_up_to_the_headline(self):
+        ov = api.overview()
+        k = ov["kpis"]
+        self.assertEqual(sum(d["orders"] for d in ov["daily"]), k["orders"])
+        self.assertAlmostEqual(sum(d["revenue"] for d in ov["daily"]), k["revenue"], places=2)
+        ts = api.timeseries()["current"]
+        self.assertEqual(sum(ts["orders"]), k["orders"])
+        self.assertAlmostEqual(sum(ts["revenue"]), k["revenue"], places=2)
+
+    def test_revenue_is_split_by_payment_status_without_loss(self):
+        for R in ({}, self.R):
+            with self.subTest(R=R):
+                k = api.overview(**R)["kpis"]
+                self.assertAlmostEqual(k["revenue_confirmed"] + k["revenue_cod_pending"] + k["revenue_unconfirmed"], k["revenue"], places=2)
+                oa = api.orders_analytics(**R)
+                self.assertAlmostEqual(sum(x["revenue"] for x in oa["revenue_split"]), oa["kpis"]["gmv"], places=2)
+
+    def test_pages_agree_on_revenue(self):
+        for R in ({}, self.R):
+            with self.subTest(R=R):
+                rev = api.overview(**R)["kpis"]["revenue"]
+                self.assertAlmostEqual(api.orders_analytics(**R)["kpis"]["gmv"], rev, places=2)
+                self.assertAlmostEqual(api.orders_list(**R, limit=1)["summary"]["gmv"], rev, places=2)
+                self.assertAlmostEqual(api.basket(**R)["kpis"]["revenue"], rev, places=2)
+
+    def test_net_revenue_of_all_lines_is_the_revenue(self):
+        r = one("SELECT coalesce(sum(net_line), 0) AS n FROM order_lines WHERE is_valid AND NOT is_excluded")["n"]
+        self.assertAlmostEqual(r, api.overview()["kpis"]["revenue"], places=1)
+
+    def test_the_bridge_from_item_value_to_revenue_closes(self):
+        b = api.basket()["bridge"]
+        self.assertAlmostEqual(b["items"] - b["coupons"] - b["wallet"] + b["delivery"] + b["handling"] + b["other"], b["revenue"], places=2)
+
+    def test_coupon_value_never_exceeds_the_recorded_discount(self):
+        bad = one("SELECT count(*) n FROM orders_clean WHERE coupon_value > coalesce(coupon_discount, 0) + 0.001 OR coupon_value < 0")["n"]
+        self.assertEqual(bad, 0)
+
+    def test_campaigns_show_what_they_do_not_cover(self):
+        for R in ({}, self.R):
+            with self.subTest(R=R):
+                c = api.campaigns(**R)["reconcile"]
+                self.assertEqual(c["orders_in_table"] + c["orders_other"], c["orders_total"])
+                self.assertAlmostEqual(c["revenue_in_table"] + c["revenue_other"], c["revenue_total"], places=1)
+                self.assertAlmostEqual(c["revenue_total"], api.overview(**R)["kpis"]["revenue"], places=2)
+
+    def test_people_lists_plus_the_notes_equal_the_revenue(self):
+        shown = one("SELECT coalesce(sum(revenue), 0) AS r FROM users_360 WHERE NOT is_excluded")["r"]
+        u = api.untracked_sales()
+        self.assertAlmostEqual(shown + u["revenue"] + u["hidden_revenue"], api.overview()["kpis"]["revenue"], places=1)
+
+    def test_sales_basis_only_narrows(self):
+        from mi.core import SALES, SALES_BASIS
+        full = api.overview()["kpis"]
+        got = {}
+        for name, states in SALES_BASIS.items():
+            t = SALES.set(states)
+            try:
+                got[name] = api.overview()["kpis"]
+            finally:
+                SALES.reset(t)
+        self.assertLessEqual(got["confirmed"]["revenue"], got["paid_or_cod"]["revenue"])
+        self.assertLessEqual(got["paid_or_cod"]["revenue"], full["revenue"])
+        self.assertAlmostEqual(got["confirmed"]["revenue"], full["revenue_confirmed"], places=2)
+        self.assertAlmostEqual(got["paid_or_cod"]["revenue"], full["revenue_confirmed"] + full["revenue_cod_pending"], places=2)
+
+    def test_staff_orders_are_listed_and_add_up(self):
+        so = api.staff_orders()
+        self.assertEqual(sum(a["orders"] for a in so["accounts"]), so["totals"]["orders"])
+        hidden = one("SELECT count(*) n FROM orders_clean WHERE is_valid AND is_staff_order AND is_excluded")["n"]
+        self.assertEqual(so["totals"]["orders"] - so["totals"]["counted_orders"], hidden)
+
+    @unittest.skipUnless(os.environ.get("MI_LIVE_RECONCILE") == "1", "set MI_LIVE_RECONCILE=1 to compare with a fresh read of Supabase")
+    def test_revenue_matches_a_fresh_read_of_supabase(self):
+        """Recomputes the revenue from the live orders table with the documented rules and compares it with every page."""
+        import json
+        from mi.supa import ReadOnlySupabase
+        sb = ReadOnlySupabase()
+        rows, off = [], 0
+        while True:
+            page = sb.select("orders", {"select": "id,user_id,total,status,items", "order": "id.asc", "limit": 1000, "offset": off})
+            rows += page
+            if len(page) < 1000:
+                break
+            off += 1000
+        roles = {r["id"].lower(): r["role"] for r in sb.select("users", {"select": "id,role", "limit": 5000})}
+        marked = {r["value"].lower() for r in q("SELECT value FROM exclusions WHERE kind = 'real_customer' AND active")}
+
+        def counted(r):
+            if r["status"] in ("payment_cancelled", "payment_pending") or (r["total"] or 0) <= 1 or "test product" in json.dumps(r["items"]).lower():
+                return False
+            staff = roles.get((r["user_id"] or "").lower()) in ("admin", "rider", "doctor")
+            return not staff or (r["user_id"] or "").lower() in marked
+        mine = round(sum(r["total"] for r in rows if counted(r)), 2)
+        self.assertAlmostEqual(api.overview()["kpis"]["revenue"], mine, places=2)
+
+
+class JourneysTab(unittest.TestCase):
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def test_every_funnel_only_shrinks(self):
+        from mi import journey_defs
+        for j in journey_defs.JOURNEY_KEYS:
+            for by in ("people", "sessions"):
+                with self.subTest(journey=j, by=by):
+                    counts = [x["count"] for x in api.journeys_funnel(journey=j, by=by, **self.R)["funnel"]]
+                    self.assertEqual(counts, sorted(counts, reverse=True))
+
+    def test_people_never_exceed_visits(self):
+        from mi import journey_defs
+        for j in journey_defs.JOURNEY_KEYS:
+            with self.subTest(journey=j):
+                p = [x["count"] for x in api.journeys_funnel(journey=j, by="people", **self.R)["funnel"]]
+                v = [x["count"] for x in api.journeys_funnel(journey=j, by="sessions", **self.R)["funnel"]]
+                self.assertTrue(all(a <= b for a, b in zip(p, v)))
+
+    def test_purchase_journey_starts_with_every_visit(self):
+        self.assertEqual(api.journeys_funnel(journey="purchase", by="sessions", **self.R)["funnel"][0]["count"], api.overview(**self.R)["kpis"]["sessions"])
+        self.assertGreaterEqual(api.journeys_funnel(journey="purchase", by="sessions", **self.R)["funnel"][-1]["count"], api.funnel(**self.R)["stages"][5]["sessions"])
+
+    def test_stopped_lists_match_the_counts(self):
+        for j, step in (("purchase", "add_to_cart"), ("checkout", "address"), ("login", "otp_sent"), ("quiz", "finished")):
+            with self.subTest(journey=j, step=step):
+                f = api.journeys_funnel(journey=j, by="people", **self.R)["funnel"]
+                stopped = next(x["stopped"] for x in f if x["key"] == step)
+                self.assertEqual(api.journeys_people(journey=j, step=step, limit=1, **self.R)["total"], stopped)
+
+    def test_the_explorer_adds_up(self):
+        v = api.journeys_explore(mode="visits", limit=1, **self.R)["total"]
+        self.assertEqual(v, api.overview(**self.R)["kpis"]["sessions"])
+        parts = sum(api.journeys_explore(mode="visits", outcome=o, limit=1, **self.R)["total"] for o in api.OUTCOME_STAGE)
+        self.assertEqual(parts, v)
+        self.assertEqual(api.journeys_explore(mode="people", limit=1, **self.R)["total"], api.journeys_funnel(journey="purchase", by="people", **self.R)["funnel"][0]["count"])
+
+    def test_after_the_order_starts_with_the_orders(self):
+        a = api.journeys_after_order(**self.R)
+        self.assertEqual(a["funnel"][0]["count"], api.overview(**self.R)["kpis"]["orders"])
+        counts = [x["count"] for x in a["funnel"]]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+
+    def test_bad_input_is_refused(self):
+        from fastapi import HTTPException
+        for call in (lambda: api.journeys_funnel(journey="nope", **self.R), lambda: api.journeys_funnel(journey="quiz", by="x", **self.R),
+                     lambda: api.journeys_people(journey="quiz", step="ordered", **self.R), lambda: api.journeys_explore(mode="x", **self.R),
+                     lambda: api.journeys_explore(outcome="x", **self.R)):
+            with self.assertRaises(HTTPException):
+                call()

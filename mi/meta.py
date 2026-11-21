@@ -123,7 +123,7 @@ class MetaClient:
         out = []
         specs = {"campaign": ("campaigns", "id,name,status,effective_status,objective,daily_budget,lifetime_budget,created_time"),
                  "adset": ("adsets", "id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,created_time"),
-                 "ad": ("ads", "id,name,adset_id,campaign_id,status,effective_status,created_time,creative{thumbnail_url}")}
+                 "ad": ("ads", "id,name,adset_id,campaign_id,status,effective_status,created_time,creative.thumbnail_width(400).thumbnail_height(400){thumbnail_url,image_url}")}
         for kind, (edge, fields) in specs.items():
             for e in self.pages(f"{account}/{edge}", {"fields": fields, "limit": 200}):
                 out.append({
@@ -132,7 +132,7 @@ class MetaClient:
                     "status": e.get("status"), "effective_status": e.get("effective_status"), "objective": e.get("objective"),
                     "daily_budget": _f(e.get("daily_budget")) / 100 if e.get("daily_budget") else None,  # Meta reports minor units
                     "lifetime_budget": _f(e.get("lifetime_budget")) / 100 if e.get("lifetime_budget") else None,
-                    "thumbnail_url": ((e.get("creative") or {}).get("thumbnail_url")), "created_time": e.get("created_time"),
+                    "thumbnail_url": ((e.get("creative") or {}).get("thumbnail_url")), "image_url": ((e.get("creative") or {}).get("image_url")), "created_time": e.get("created_time"),
                 })
         return out
 

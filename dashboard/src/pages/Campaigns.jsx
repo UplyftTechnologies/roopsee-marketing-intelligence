@@ -13,7 +13,7 @@ export default function Campaigns() {
   const s = useApi('/campaigns', { min_sessions: min })
   return (
     <Loading state={s}>
-      {({ rows, baseline_cart_rate: base }) => {
+      {({ rows, baseline_cart_rate: base, reconcile: rec }) => {
         const shown = rows.filter((r) => channel === 'All' || r.channel === channel)
         const maxCart = Math.max(0.0001, ...shown.map((r) => r.cart_rate))
         const chart = shown.filter((r) => r.sessions >= 100).slice(0, 12).map((r) => ({ name: r.campaign.slice(0, 28), cart_rate: +(r.cart_rate * 100).toFixed(2), sessions: r.sessions }))
@@ -25,6 +25,13 @@ export default function Campaigns() {
                 <select className="field" value={min} onChange={(e) => setMin(+e.target.value)}>{[1, 10, 30, 100, 300].map((n) => <option key={n}>{n}</option>)}</select>
               </label>
             </div>
+            {rec && rec.orders_other > 0 && (
+              <div className="banner" role="note">
+                <div><b>{num(rec.orders_other)} of {num(rec.orders_total)} orders ({inr(rec.revenue_other)} of {inr(rec.revenue_total)}) are not credited to a campaign here.</b>{' '}
+                  <span className="muted">They have no visit to credit (placed before tracking began, or never linked to a visit), so the table covers {inr(rec.revenue_in_table)} of the period's revenue.
+                  First touch credits an order to the date of the buyer's <b>first visit</b>, not the order date, so it can differ from the period's revenue ({num(rec.first_touch_orders)} orders, {inr(rec.first_touch_revenue)}).</span></div>
+              </div>
+            )}
             <Card right={<ExportBtn name="campaigns" rows={shown} fields={[['Campaign', 'campaign'], ['Channel', 'channel'], ['Source', 'source'], ['Medium', 'medium'], ['Sessions', 'sessions'], ['Cart rate', 'cart_rate'], ['Orders same session', 'orders'], ['Orders first touch', 'ft_orders'], ['Revenue', 'best_revenue'], ['Verdict', 'verdict']]} />} title="Which campaigns are working?" sub={`Site-wide cart rate is ${pct(base, 2)}. Orders are credited to both the session they happened in and the buyer's FIRST visit (first touch); the verdict uses the higher of the two. Click a row to see its sessions.`}>
               <Table
                 cols={[
@@ -36,7 +43,7 @@ export default function Campaigns() {
                   { label: 'Cart rate', sortBy: 'cart_rate', num: true, render: (r) => <RateBar v={r.cart_rate} max={maxCart} text={pct(r.cart_rate, 1)} /> },
                   { label: 'Checkout', sortBy: 'checkout_rate', num: true, render: (r) => pct(r.checkout_rate, 1) },
                   { label: 'Orders (same session)', sortBy: 'orders', num: true, render: (r) => num(r.orders) },
-                  { label: 'Orders (first touch)', sortBy: 'ft_orders', num: true, render: (r) => num(r.ft_orders) },
+                  { label: 'Orders (buyer\'s first visit)', sortBy: 'ft_orders', num: true, render: (r) => num(r.ft_orders) },
                   { label: 'Orders (last campaign, 7 days)', sortBy: 'lnd_orders', num: true, render: (r) => num(r.lnd_orders) },
                   { label: 'Revenue', sortBy: 'best_revenue', num: true, render: (r) => inr(r.best_revenue) },
                   { label: 'Verdict', sortBy: 'verdict', render: (r) => <Badge tone={verdictTone[r.verdict]}>{r.verdict}</Badge> },

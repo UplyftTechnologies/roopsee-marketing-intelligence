@@ -2,7 +2,7 @@
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from . import core, extract, meta as meta_mod, transform
+from . import adimages, core, extract, meta as meta_mod, transform
 from .transform import EXCLUSION_KINDS
 from .core import JOB, _run_job, app, has_tables, one, q
 
@@ -36,6 +36,7 @@ def refresh(mode: str = "full"):
                 JOB["message"] = "pulling Meta Ads"
                 try:
                     meta_mod.sync(core.CON.cursor())
+                    adimages.cache(core.CON.cursor())
                 except Exception as e:  # keep the refresh going; the error is shown on the Meta Ads page
                     meta_mod.record_error(core.CON.cursor(), e)
         JOB["message"] = "rebuilding the analytics tables"

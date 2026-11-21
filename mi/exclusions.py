@@ -291,3 +291,23 @@ def exclusion_inventory():
     for r in rows:
         by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
     return {"rows": rows, "summary": {"total": len(rows), "in_list": sum(r["in_list"] for r in rows), "still_counted": sum(1 for r in rows if r["counted"] > 0 and not r["in_list"]), "by_kind": by_kind}}
+
+
+@app.get("/api/staff-orders")
+def staff_orders():
+    """Orders placed from accounts with a staff role (admin / rider / doctor), one row per account, with the evidence of whether they are real sales.
+    Marking an account "real customer" (kind real_customer) counts its orders everywhere; the account's visits stay hidden."""
+    marked = {str(r["value"]).lower() for r in q("SELECT value FROM exclusions WHERE kind = 'real_customer' AND active")}
+    rule_on = bool(q("SELECT 1 FROM exclusions WHERE kind = 'rule' AND value = 'staff_orders' AND active"))
+    rows = q("""SELECT o.user_id, max(o.customer_name) AS name, max(u.role) AS role, max(o.phone10) AS phone10, count(*) AS orders, coalesce(sum(o.total), 0) AS revenue,
+                count(*) FILTER (WHERE o.delivered_at IS NOT NULL OR o.status IN ('delivered', 'completed', 'out_for_delivery', 'picked_up')) AS shipped,
+                count(*) FILTER (WHERE o.payment_state = 'confirmed') AS paid, count(*) FILTER (WHERE upper(coalesce(o.payment_method, '')) LIKE 'COD%') AS cod,
+                count(DISTINCT o.phone10) AS phones, count(DISTINCT o.city) AS cities, min(o.ts) AS first_order, max(o.ts) AS last_order
+                FROM orders_clean o JOIN raw_users u ON lower(u.id) = o.user_id WHERE o.is_valid AND u.role IN ('admin', 'rider', 'doctor') GROUP BY 1 ORDER BY revenue DESC""")
+    for r in rows:
+        r["real_customer"] = str(r["user_id"]).lower() in marked
+        r["counted"] = r["real_customer"] or not rule_on
+        r["looks_real"] = r["shipped"] >= max(1, r["orders"] // 2) and r["paid"] >= 1  # most orders shipped and at least one confirmed payment
+    return {"rule_on": rule_on, "accounts": rows,
+            "totals": {"orders": sum(r["orders"] for r in rows), "revenue": sum(r["revenue"] for r in rows),
+                       "counted_orders": sum(r["orders"] for r in rows if r["counted"]), "counted_revenue": sum(r["revenue"] for r in rows if r["counted"])}}

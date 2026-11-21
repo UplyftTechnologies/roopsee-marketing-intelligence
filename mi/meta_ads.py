@@ -120,6 +120,8 @@ def meta_sync(full: bool = False):
         JOB["message"] = "pulling Meta Ads"
         try:
             meta_mod.sync(core.CON.cursor(), full=full)
+            from . import adimages
+            adimages.cache(core.CON.cursor())
         except Exception as e:
             meta_mod.record_error(core.CON.cursor(), e)
             raise

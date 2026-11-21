@@ -7,6 +7,7 @@ import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/LazyMetricChart'
 import DataHealth from '../components/DataHealth'
 import { Alerts, WeeklyDigest } from '../components/AlertsDigest'
+import { RevenueSplit } from '../components/RevenueNotes'
 
 const GROUPS = [
   { key: 'attention', title: 'Needs attention', tones: ['bad', 'warn'], blurb: 'Things that are costing you customers or money' },
@@ -71,6 +72,7 @@ export default function Home() {
               <Scorecard key={k} metric={k} kpis={kpis} prev={prev} compare={f.compare} spark={ts.data?.current[METRICS[k].series]} active={metric === k} onClick={() => setMetric(k)} />
             ))}
           </ScorecardStrip>
+          <RevenueSplit kpis={kpis} />
           <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
             {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} height={230} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 250 }} />}
           </Card>
