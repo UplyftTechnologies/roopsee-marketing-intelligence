@@ -44,6 +44,12 @@ RAW_SCHEMAS = {
         "product_id": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
         "category_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE",
     },
+    # Roop (the skin assistant) chats. Only the columns the dashboard needs: prompt_messages / raw_response (fine-tuning data) are never pulled.
+    "raw_chat_logs": {
+        "id": "VARCHAR", "created_at": "TIMESTAMPTZ", "conversation_id": "VARCHAR", "user_id": "VARCHAR", "guest_session_id": "VARCHAR", "intent": "VARCHAR",
+        "user_message": "VARCHAR", "reply": "VARCHAR", "product_ids": "JSON", "has_profile": "BOOLEAN", "model": "VARCHAR", "latency_ms": "INTEGER",
+        "error": "VARCHAR", "rating": "INTEGER", "prompt_tokens": "INTEGER", "completion_tokens": "INTEGER", "product_id": "VARCHAR",
+    },
     "raw_meta_insights": {
         "account_id": "VARCHAR", "date": "DATE", "campaign_id": "VARCHAR", "campaign_name": "VARCHAR", "adset_id": "VARCHAR", "adset_name": "VARCHAR",
         "ad_id": "VARCHAR", "ad_name": "VARCHAR", "spend": "DOUBLE", "impressions": "BIGINT", "reach": "BIGINT", "frequency": "DOUBLE", "clicks": "BIGINT",

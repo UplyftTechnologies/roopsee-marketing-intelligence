@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { inr, num, useApi, useFilters } from '../api'
-import { Card, Loading } from '../ui'
+import { Card, Loading, Table } from '../ui'
+import { loginCols } from './Logins'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/LazyMetricChart'
@@ -13,7 +14,7 @@ const GROUPS = [
   { key: 'know', title: 'Good to know', tones: ['info'], blurb: 'Context that helps you decide' },
 ]
 const ICON = { bad: '■', warn: '◆', good: '▲', info: '●' }
-const CARDS = ['sessions', 'cart_rate', 'orders', 'revenue']
+const CARDS = ['sessions', 'logins', 'cart_rate', 'orders', 'revenue']
 
 function Tip() {
   const [hide, setHide] = useState(() => { try { return localStorage.getItem('tip-dismissed') === '1' } catch { return false } })
@@ -56,6 +57,7 @@ export default function Home() {
   const chan = useApi('/report', { dimension: 'channel', limit: 6 })
   const city = useApi('/report', { dimension: 'city', limit: 8, min_sessions: 5 })
   const prod = useApi('/basket')
+  const lg = useApi('/logins', { summary: false, limit: 10 })
   const [metric, setMetric] = useState('sessions')
   return (
     <Loading state={ins}>
@@ -71,6 +73,13 @@ export default function Home() {
           </ScorecardStrip>
           <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
             {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} height={230} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 250 }} />}
+          </Card>
+
+          <Card title="Recent logins" sub="the latest people to log in, new accounts and returning customers"
+            right={<button className="btn small" onClick={() => f.go('logins')}>See all logins →</button>}>
+            {lg.error ? <div className="muted">Could not load</div> : !lg.data ? <div className="skeleton" style={{ height: 150 }} />
+              : !lg.data.ready ? <div className="muted">Press Refresh to build the login table.</div>
+                : <Table rows={lg.data.rows} onRow={(r) => f.go('person', { key: r.person_key })} empty="No logins in this range." cols={loginCols(false)} />}
           </Card>
 
           {GROUPS.map((g) => {

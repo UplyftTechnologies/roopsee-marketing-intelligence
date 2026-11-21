@@ -167,6 +167,15 @@ def session_detail(session_id: str):
     for e in events:
         r = raw.pop(e.pop("id"), None)
         e["details"] = _event_details(r["value"], r["x"], e.get("event_key") in ("add_to_cart", "view_cart", "checkout_view", "pay_started", "order_placed")) if r else []
+    from .chats import session_chats  # local import: chats.py imports nothing from here, but api.py loads both
+    chats = session_chats(session_id)
+    for c in chats:  # Roop chat messages are part of what the visitor did: show them in the timeline, in time order
+        events.append({"at": c["at"], "event_name": "assistant_chat", "event_key": "roop_chat", "page_type": None, "path": "Roop chat", "product_name": None, "brand": None, "amount": None,
+                       "search_term": str(c["question"] or "")[:100], "city_n": None, "ip": None,
+                       "details": [{"k": "Asked", "v": c["question"]}, {"k": "Roop replied" if not c["error"] else "No answer", "v": c["reply"] if not c["error"] else c["error"]}]
+                       + ([{"k": "Rated", "v": "helpful" if c["rating"] == 1 else "not helpful"}] if c["rating"] else [])})
+    if chats:
+        events.sort(key=lambda e: e["at"])
     pages = q("""SELECT path, max(page_type) AS page_type, min(timezone('Asia/Kolkata', ts)) AS first_at, count(*) AS events,
                  count(*) FILTER (WHERE is_pageview) AS views FROM events_clean WHERE session_id = ? AND NOT is_dup GROUP BY path ORDER BY first_at""", [session_id])
     types = q("""SELECT event_name, max(event_key) AS event_key, count(*) AS n FROM events_clean WHERE session_id = ? AND NOT is_dup
@@ -186,7 +195,7 @@ def session_detail(session_id: str):
     addresses = _addresses(s["user_id"], session_id)
     prev_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at < ? ORDER BY started_at DESC LIMIT 1", [pkey, s["started_at"]])
     next_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at > ? ORDER BY started_at ASC LIMIT 1", [pkey, s["started_at"]])
-    return {"session": s, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders, "addresses": addresses, "duplicates_hidden": hidden,
+    return {"session": s, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders, "addresses": addresses, "duplicates_hidden": hidden, "chats": chats,
             "person": {**person, "person_key": pkey} if person else {"person_key": pkey}, "prev": prev_s or None, "next": next_s or None}
 
 

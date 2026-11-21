@@ -287,3 +287,55 @@ class PainPoints(unittest.TestCase):
     def test_every_problem_event_is_known_to_the_stages(self):
         from mi import pain_defs
         self.assertTrue({r["problem_key"] for r in q("SELECT DISTINCT problem_key FROM pain_events")} <= set(pain_defs.PROBLEM_LABEL))
+
+
+class Logins(unittest.TestCase):
+    def test_daily_logins_add_up_to_the_total(self):
+        ts = api.timeseries(date_from="2026-10-01", date_to="2026-11-20")
+        self.assertEqual(sum(ts["current"]["logins"]), api.logins(date_from="2026-10-01", date_to="2026-11-20", summary=False, limit=1)["total"])
+
+    def test_overview_and_logins_page_agree(self):
+        k = api.overview(date_from="2026-10-01", date_to="2026-11-20")["kpis"]
+        self.assertEqual(k["logins"], api.logins(date_from="2026-10-01", date_to="2026-11-20", summary=False, limit=1)["total"])
+
+    def test_one_login_per_visit_and_never_more_than_sessions(self):
+        r = one("SELECT count(*) n, count(DISTINCT session_id) d FROM logins")
+        self.assertEqual(r["n"], r["d"])
+        self.assertLessEqual(r["n"], one("SELECT count(*) n FROM sessions")["n"])
+
+    def test_method_and_kind_filters_split_the_total(self):
+        every = api.logins(summary=False, limit=1)["total"]
+        self.assertEqual(sum(api.logins(method=m, summary=False, limit=1)["total"] for m in api.METHODS), every)
+        self.assertEqual(api.logins(kind="new", summary=False, limit=1)["total"] + api.logins(kind="returning", summary=False, limit=1)["total"], every)
+
+    def test_rows_page_without_repeats(self):
+        a = api.logins(summary=False, limit=20, offset=0)["rows"]
+        b = api.logins(summary=False, limit=20, offset=20)["rows"]
+        self.assertFalse({r["session_id"] for r in a} & {r["session_id"] for r in b})
+
+
+class RoopChats(unittest.TestCase):
+    def test_messages_add_up_across_conversations(self):
+        d = api.chats(include_excluded=True)
+        self.assertEqual(sum(c["messages"] for c in d["conversations"]) if d["conversations_total"] <= 300 else d["totals"]["messages"], d["totals"]["messages"])
+        self.assertEqual(sum(x["messages"] for x in d["daily"]), d["totals"]["messages"])
+        self.assertEqual(sum(x["count"] for x in d["topics"]), d["totals"]["messages"])
+
+    def test_answered_plus_failed_is_every_message(self):
+        t = api.chats()["totals"]
+        self.assertEqual(t["answered"] + t["failed"], t["messages"])
+
+    def test_one_row_per_message(self):
+        r = one("SELECT count(*) n, count(DISTINCT id) d FROM chat_messages")
+        self.assertEqual(r["n"], r["d"])
+        self.assertEqual(r["n"], one("SELECT count(*) n FROM raw_chat_logs")["n"])
+
+    def test_a_conversation_matches_the_list(self):
+        c = api.chats(include_excluded=True)["conversations"][0]
+        self.assertEqual(len(api.chat_conversation(c["key"])["turns"]), c["messages"])
+
+    def test_a_visit_with_chats_shows_them_in_its_timeline(self):
+        sid = one("SELECT session_id FROM chat_messages WHERE session_id IS NOT NULL LIMIT 1")["session_id"]
+        d = api.session_detail(sid)
+        self.assertTrue(d["chats"])
+        self.assertEqual(sum(1 for e in d["events"] if e["event_name"] == "assistant_chat"), len(d["chats"]))

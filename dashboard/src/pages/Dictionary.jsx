@@ -36,6 +36,22 @@ const SECTIONS = [
     ['Had event', 'A session that contains the named event at least once (part of a name is enough).'],
     ['Did / Did not / Any', 'Did: the session did it. Did not: it did not. Any: ignore it. Several Did choices can be combined as All or Any.'],
   ]],
+  ['Roop chats', [
+    ['Roop', 'The skin-care assistant on roopsee.com and in the app. Every question a shopper sends is a message; the messages of one chat window are a conversation (“New chat” starts another).'],
+    ['Shopper', 'A logged-in account, or an anonymous guest (a guest session). A conversation with no identity counts as one shopper.'],
+    ['Topic', 'Every question is sorted into the first topic whose words it contains (offers, delivery, routine, alternatives, does it suit me, ingredients, how to use, benefits, price, skin concerns), else Other.'],
+    ['No answer', 'A message that failed, for example when the AI service was busy or the key was rejected. The reason is shown with it.'],
+    ['Couldn’t answer', 'A reply where Roop says it cannot help (“we don’t stock it”, “not sure”): a gap in the shop or in Roop’s information.'],
+    ['Visit of a chat', 'The visit a message was sent in, found from the answer event the site records, else from the guest id, else from the logged-in person’s visit running at that time. A few messages cannot be tied to a visit.'],
+    ['Estimated AI cost', 'From the token counts saved with each answer at about ₹88 to the dollar, for the models we know the price of. An estimate, not your bill.'],
+    ['Hidden traffic', 'A conversation with any message from hidden internal traffic is left out whole, unless “All traffic shown” is on.'],
+  ]],
+  ['Logins', [
+    ['Login', 'A visit in which someone logged in, by phone OTP or Google. The several events of one login (OTP verified, login successful, existing user login) count once, so one visit with a login is one login.'],
+    ['People who logged in', 'Distinct people with at least one login in the dates. One person can log in on several visits.'],
+    ['New account', 'The login happened within an hour of the account being created: a sign-up. Every other login is returning.'],
+    ['How they logged in', 'Google when the login says so, Phone OTP when an OTP was verified, otherwise “Not recorded”.'],
+  ]],
   ['Pain points tab', [
     ['Pain point', 'Something that went wrong for a shopper on the way to buying: an OTP that failed, an address form with errors, an address we do not deliver to, a failed or cancelled payment, a slow page, a broken request. The tracker already sends each of these as an event.'],
     ['Stage', 'Log in, Address, Place order, Payment, and Speed & errors (slow or broken pages anywhere on the site).'],

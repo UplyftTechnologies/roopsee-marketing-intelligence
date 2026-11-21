@@ -12,7 +12,7 @@ export default function SessionPage() {
   const s = useApi(`/sessions/${encodeURIComponent(id || '')}`, {}, { scoped: false })
   if (s.error) return <div className="banner err">Could not load this session: {s.error} <button className="btn small" onClick={() => f.go('sessions')}>Back to Sessions</button></div>
   if (!s.data) return <div className="skeleton" style={{ height: 320 }} />
-  const { session: x, events, pages, event_types: types, extra, orders, addresses, duplicates_hidden: hiddenDups, person, prev, next } = s.data
+  const { session: x, events, pages, event_types: types, extra, orders, addresses, duplicates_hidden: hiddenDups, chats = [], person, prev, next } = s.data
   const who = person.name || (person.is_registered ? 'Registered user' : 'Anonymous browser')
   const maxType = Math.max(1, ...types.map((t) => t.n))
   const t0 = events.length ? new Date(events[0].at).getTime() : 0
@@ -53,6 +53,18 @@ export default function SessionPage() {
           <SessionTimeline events={events} max={600} query={evq} onQuery={setEvq} />
         </Card>
         <div className="grid" style={{ gap: 14 }}>
+          {chats.length > 0 && (
+            <Card title="Roop chat in this visit" sub="what they asked Roop, the skin-care assistant">
+              {chats.map((c) => (
+                <div key={c.id} style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>“{c.question}”</div>
+                  <div className="muted" style={{ fontSize: 12, whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{c.error ? `No answer: ${c.error}` : (c.reply || '').length > 220 ? `${c.reply.slice(0, 220)}…` : c.reply}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{tod(c.at)}{c.rating === 1 ? ' · 👍 helpful' : c.rating === -1 ? ' · 👎 not helpful' : ''}</div>
+                </div>
+              ))}
+              <button type="button" className="btn small" onClick={() => f.go('chats', { chat: chats[0].conversation })}>Read the whole chat →</button>
+            </Card>
+          )}
           <Card title="Who" right={person.person_key && <button type="button" className="btn small" onClick={() => f.go('person', { key: person.person_key })}>View full profile →</button>}>
             <Facts rows={[['Person', who], ['Phone', x.phone10], ['Email', person.email], ['Segment', person.segment], ['All sessions', person.sessions ? num(person.sessions) : null],
               ['Browser id', <span className="mono" key="b">{x.visitor_key}</span>], ['User id', x.user_id && <span className="mono" key="u">{x.user_id}</span>]]} />

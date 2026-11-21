@@ -773,6 +773,88 @@ FROM events_base e JOIN raw_event_log r ON r.id = e.id WHERE NOT e.is_dup AND e.
 """
 
 
+LOGIN_EVENTS = ("login_successful", "existing_user_login", "login_popup_logged_in", "otp_verified")
+
+
+def logins_sql() -> str:
+    """One row per visit in which someone logged in (the several events of one login count once).
+    A login is new when the account was created within an hour of it; the method is Google or phone OTP."""
+    evs = ", ".join(_q(x) for x in LOGIN_EVENTS)
+    return f"""
+CREATE OR REPLACE TABLE logins AS
+WITH ev AS (
+  SELECT e.session_id, e.ts, e.event_name, e.user_id, e.phone10, {jj('method')} AS method
+  FROM events_base e JOIN raw_event_log r ON r.id = e.id WHERE NOT e.is_dup AND e.event_name IN ({evs})),
+a AS (
+  SELECT session_id, min(ts) AS ts, max(user_id) AS user_id, max(phone10) AS phone10, count(*) AS events,
+    bool_or(lower(coalesce(method, '')) = 'google') AS g, bool_or(lower(coalesce(method, '')) = 'phone_otp' OR event_name = 'otp_verified') AS p
+  FROM ev GROUP BY 1)
+SELECT a.session_id, a.ts, timezone('Asia/Kolkata', a.ts) AS ts_ist, coalesce(a.user_id, s.user_id) AS user_id,
+  coalesce(coalesce(a.user_id, s.user_id), s.visitor_key) AS person_key, u.name,
+  coalesce(a.phone10, nullif(right(regexp_replace(coalesce(u.phone_no, ''), '[^0-9]', '', 'g'), 10), '')) AS phone10, lower(u.email) AS email,
+  CASE WHEN a.g THEN 'Google' WHEN a.p THEN 'Phone OTP' ELSE 'Not recorded' END AS method,
+  (u.created_at IS NOT NULL AND abs(epoch(a.ts) - epoch(u.created_at)) < 3600) AS is_new, a.events
+FROM a JOIN sessions s ON s.session_id = a.session_id LEFT JOIN raw_users u ON lower(u.id) = coalesce(a.user_id, s.user_id);
+"""
+
+
+# What a Roop question is about (the first that matches), as on the admin analytics of roopsee.com (backend/src/services/chatAnalytics.js)
+CHAT_TOPICS = [
+    ("Offers & coupons", r"\b(offers?|coupons?|discounts?|promo|sale|cashback|wallet|codes?)\b"),
+    ("Delivery & orders", r"\b(deliver\w*|shipping|pincode|pin code|my order|track\w*|cancel\w*|refund\w*|returns?|cod|payment)\b"),
+    ("Routine or kit", r"\b(routine|regimen|regime|kit|ritual)\b"),
+    ("Alternatives", r"\b(alternatives?|similar|cheaper|cheap|affordable|budget|premium|luxury|better|instead|other (brand|product)s?|options?|compare)\b"),
+    ("Does it suit me?", r"\b(suits?|suitable|right for|good for|work for|for me|my skin|should i|can i (not )?use|will it|chalega|mere|meri|mujhe)\b"),
+    ("Ingredients", r"\b(ingredients?|contains?|fragrance|parfum|alcohol|paraben|sulfate|silicone|allerg\w*|vegan|retinol|niacinamide|acids?|vitamin)\b"),
+    ("How to use", r"\b(how (do|should|can|to)|apply|when|morning|night|use it|usage|steps?)\b"),
+    ("Benefits", r"\b(benefits?|what does it do|what is this|results?|effective|works?)\b"),
+    ("Price & stock", r"\b(price|cost|mrp|stock|available|size|ml)\b"),
+    ("Skin concerns", r"\b(acne|pimples?|dark spots?|pigmentation|dull\w*|dry\w*|oily|wrinkles?|tan|pores?|redness|rash\w*)\b"),
+]
+# replies where Roop says it cannot help: where the catalogue, data or instructions fall short
+CHAT_COULD_NOT_ANSWER = r"\b(don'?t stock|do not stock|not sure|can'?t confirm|cannot confirm|isn'?t listed|not listed|don'?t have|couldn'?t put an answer|can'?t help|the team can help)\b"
+CHAT_FAILURES = [
+    ("AI service busy", r"AiBusyError|rate.?limit|\b429\b|\b529\b|overloaded"),
+    ("AI service too slow", r"timed out|timeout"),
+    ("API key rejected", r"AiNotConfigured|AuthenticationError|invalid x-api-key|\b401\b|rejected"),
+    ("AI credit ran out", r"credit balance|billing"),
+]
+CHAT_PRICES = {"claude-haiku-5-5": (0.1, 0.5)}  # $ per million tokens (input, output), for the cost estimate; other models count as free
+
+
+def chats_sql() -> str:
+    """Roop chats: one row per message with its topic, whether it failed or could not answer, its cost, and the visit it was sent in.
+    The visit is found three ways, in this order: the answer event that names the message (log_id), a guest chat keyed by the session id,
+    or the logged-in person's visit that was running at that time."""
+    topic = "CASE " + " ".join(f"WHEN regexp_matches(c.user_message, {_q(p)}, 'i') THEN {_q(n)}" for n, p in CHAT_TOPICS) + " ELSE 'Other' END"
+    fail = "CASE " + " ".join(f"WHEN regexp_matches(c.error, {_q(p)}, 'i') THEN {_q(n)}" for n, p in CHAT_FAILURES) + " ELSE 'Other error' END"
+    cost = " + ".join(f"CASE WHEN c.model = {_q(m)} THEN (coalesce(c.prompt_tokens, 0) * {i} + coalesce(c.completion_tokens, 0) * {o}) / 1e6 ELSE 0 END" for m, (i, o) in CHAT_PRICES.items())
+    return f"""
+CREATE OR REPLACE TABLE chat_messages AS
+WITH link AS (
+  SELECT lower({jj('log_id')}) AS log_id, arg_min(e.session_id, e.ts) AS session_id
+  FROM events_base e JOIN raw_event_log r ON r.id = e.id
+  WHERE e.event_name = 'assistant_answer_received' AND {jj('log_id')} IS NOT NULL GROUP BY 1),
+m AS (
+  SELECT lower(c.id) AS id, c.created_at AS ts, timezone('Asia/Kolkata', c.created_at) AS ts_ist, timezone('Asia/Kolkata', c.created_at)::DATE AS date_ist,
+    coalesce(nullif(c.conversation_id, ''), 'single:' || c.id) AS conversation, lower(c.user_id) AS user_id, nullif(c.guest_session_id, '') AS guest_session_id,
+    c.intent, c.user_message AS question, c.reply, c.product_ids, c.product_id, coalesce(c.has_profile, false) AS has_profile, c.model, c.latency_ms, c.error,
+    c.rating, c.prompt_tokens, c.completion_tokens,
+    {topic} AS topic,
+    (c.error IS NULL AND regexp_matches(coalesce(c.reply, ''), {_q(CHAT_COULD_NOT_ANSWER)}, 'i')) AS could_not_answer,
+    CASE WHEN c.error IS NOT NULL THEN {fail} END AS failure,
+    (coalesce(c.prompt_tokens, 0) > 0 OR coalesce(c.completion_tokens, 0) > 0) AS has_tokens,
+    {cost} AS cost_usd
+  FROM raw_chat_logs c)
+SELECT m.*, coalesce(l.session_id, g.session_id,
+  CASE WHEN w.session_id IS NOT NULL AND m.ts <= w.ended_at + INTERVAL 10 MINUTE THEN w.session_id END) AS session_id,
+  CASE WHEN l.session_id IS NOT NULL THEN 'answer event' WHEN g.session_id IS NOT NULL THEN 'guest id' WHEN w.session_id IS NOT NULL AND m.ts <= w.ended_at + INTERVAL 10 MINUTE THEN 'visit at that time' END AS session_link
+FROM m LEFT JOIN link l ON l.log_id = m.id
+LEFT JOIN sessions g ON g.session_id = m.guest_session_id
+ASOF LEFT JOIN (SELECT user_id, started_at, ended_at, session_id FROM sessions WHERE user_id IS NOT NULL) w ON w.user_id = m.user_id AND m.ts >= w.started_at;
+"""
+
+
 def _log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
@@ -814,11 +896,19 @@ def _run_steps(con, flags_only, note, t0) -> dict:
         _log(f"{name}: {time.time() - t:.1f}s")
     t = time.time(); note("rebuilding: exclusion hits"); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
     for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
-                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS), ("pain points", None)]:
+                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS), ("pain points", None), ("logins", None), ("roop chats", None)]:
         t = time.time()
         note(f"rebuilding: {name}")
         if name == "events_clean":
             _drop_any(con, "events_clean")  # older builds stored it as a table
+        if name == "roop chats":
+            if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'chat_messages'").fetchall()[0][0]:
+                continue  # exclusion edits never change this table (hidden traffic is applied when it is read)
+            sql = chats_sql()
+        if name == "logins":
+            if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'logins'").fetchall()[0][0]:
+                continue  # exclusion edits never change this table (it is joined to sessions when read)
+            sql = logins_sql()
         if name == "pain points":
             if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'pain_sessions'").fetchall()[0][0]:
                 continue  # exclusion edits never change these tables

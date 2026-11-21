@@ -10,12 +10,12 @@ The code is split by area; this file only wires the parts together and serves th
   meta_ads    Meta Ads spend joined to sessions and orders      alerts       what changed this week, and the weekly summary
 The API process owns the DuckDB file (single writer). Reads are not blocked by a rebuild (it is one transaction).
 """
-from . import acquisition, alerts, core, events, exclusions, meta_ads, orders, overview, pain, people, sessions, system
+from . import acquisition, alerts, chats, core, events, exclusions, logins, meta_ads, orders, overview, pain, people, sessions, system
 from .config import ROOT
 from .core import app
 
 # Everything stays reachable as `mi.api.<name>` (tests and scripts use it): copy each part's names into this module.
-for _part in (core, system, overview, acquisition, people, sessions, events, pain, orders, exclusions, meta_ads, alerts):
+for _part in (core, system, overview, acquisition, people, sessions, events, pain, logins, chats, orders, exclusions, meta_ads, alerts):
     globals().update({k: v for k, v in vars(_part).items() if not k.startswith("__")})
 
 # ------------------------------------------------------------------ static dashboard (after `npm run build`); mounted last so it never shadows an /api route

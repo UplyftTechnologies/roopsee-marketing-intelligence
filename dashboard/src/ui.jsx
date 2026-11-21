@@ -6,6 +6,7 @@ export const GLOSSARY = {
   sessions: 'One visit to the site or app (a unique session id). One person can have several sessions.',
   browsers: 'Distinct devices/browsers (visitor ids). Someone using phone and laptop counts twice here.',
   people: 'Distinct accounts, or anonymous browsers that never logged in. Browsers are merged into an account once the person logs in.',
+  logins: 'Visits in which someone logged in (phone OTP or Google). The several events of one login count once. A login is new when the account was created within an hour of it.',
   orders: 'Valid orders only: not cancelled / payment pending, not a ₹1 test order, and not excluded.',
   revenue: 'Order totals of valid, non-excluded orders (after discounts, before refunds).',
   aov: 'Average order value = revenue ÷ orders.',

@@ -6,6 +6,7 @@ import { inr, num, pct } from './api'
  *  kind   = 'count' (relative % change) | 'rate' (percentage-point change) */
 export const METRICS = {
   sessions: { label: 'Sessions', help: 'sessions', fmt: num, kpi: 'sessions', series: 'sessions', kind: 'count', goodWhen: 'up' },
+  logins: { label: 'Logins', help: 'logins', fmt: num, kpi: 'logins', series: 'logins', kind: 'count', goodWhen: 'up' },
   people: { label: 'People', help: 'people', fmt: num, kpi: 'people', series: 'people', kind: 'count', goodWhen: 'up' },
   cart_rate: { label: 'Add-to-cart rate', help: 'cartRate', fmt: (v) => pct(v, 1), kpi: 'cart_rate', series: 'cart_rate', kind: 'rate', goodWhen: 'up' },
   orders: { label: 'Orders', help: 'orders', fmt: num, kpi: 'orders', series: 'orders', kind: 'count', goodWhen: 'up' },

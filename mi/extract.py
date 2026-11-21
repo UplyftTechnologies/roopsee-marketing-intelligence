@@ -28,6 +28,7 @@ SMALL_TABLES = {  # raw table -> (supabase table, columns to select)
     "raw_visitor_links": ("visitor_identity_links", None),
     "raw_customer_address": ("customer_address", None),
     "raw_catalog_roopsee": ("roopsee_products", None),
+    "raw_chat_logs": ("assistant_chat_logs", None),  # optional: a key without access to it must not stop the refresh
     # master catalog has columns like "Product-id" / "Product Name": alias them to snake_case in the request
     "raw_catalog_master": ("master_products",
                            'product_id:"Product-id",product_name:"Product Name",brand:Brand,category_l1:"Category L1",'
@@ -59,7 +60,7 @@ def _insert(con, table: str, df: pd.DataFrame, ignore: bool) -> None:
     with DB_LOCK:
         con.register("_df", df)
         try:
-            con.execute(f"INSERT {'OR IGNORE ' if ignore else ''}INTO {table} SELECT {sel} FROM _df").fetchall()
+            con.execute(f"INSERT {'OR IGNORE ' if ignore else ''}INTO {table} ({', '.join(schema)}) SELECT {sel} FROM _df").fetchall()  # named columns: an extra column in the stored table never breaks a pull
         finally:
             con.unregister("_df")
 
@@ -121,6 +122,9 @@ def extract_events(con, progress=None) -> int:
     return n
 
 
+OPTIONAL = {"raw_chat_logs"}
+
+
 def extract_small(con, progress=None) -> None:
     sb = ReadOnlySupabase()
     for raw, (src, select_override) in SMALL_TABLES.items():
@@ -128,15 +132,23 @@ def extract_small(con, progress=None) -> None:
         if progress:
             progress(f"pulling {src}")
         rows, off = [], 0
-        while True:
-            params = {"select": select_override or ",".join(schema), "limit": PAGE, "offset": off}
-            if "id" in schema:  # stable paging
-                params["order"] = "id.asc"
-            page = sb.select(src, params)
-            rows.extend(page)
-            if len(page) < PAGE:
-                break
-            off += PAGE
+        t_start = datetime.now()
+        try:
+            while True:
+                params = {"select": select_override or ",".join(schema), "limit": PAGE, "offset": off}
+                if "id" in schema:  # stable paging
+                    params["order"] = "id.asc"
+                page = sb.select(src, params)
+                rows.extend(page)
+                if len(page) < PAGE:
+                    break
+                off += PAGE
+        except Exception as e:
+            if raw not in OPTIONAL:
+                raise
+            _log(f"{raw}: SKIPPED, could not read {src}: {str(e)[:120]}")
+            log_run(con, f"extract:{raw}", t_start, None, f"skipped: could not read {src} ({str(e)[:100]})")
+            continue
         t_start = datetime.now()
         prev = con.execute(f"SELECT count(*) FROM {raw}").fetchall()[0][0]
         if prev >= 20 and len(rows) < prev * 0.5:  # a pull that suddenly returns far fewer rows is a failed pull, not a real change

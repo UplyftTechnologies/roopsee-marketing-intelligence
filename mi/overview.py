@@ -4,6 +4,7 @@ from fastapi import HTTPException
 
 from .acquisition import campaigns
 from .core import app, one, prev_range, q, ratio, sess_where
+from .logins import login_kpis, login_series
 from .meta_ads import _meta_blended, _meta_rows, _meta_totals
 from .orders import basket
 from .people import audiences, loyalty
@@ -25,6 +26,7 @@ def _kpis(d_from, d_to, include_excluded) -> dict:
     k.update(orders=o["orders"], revenue=o["revenue"], aov=ratio(o["revenue"], o["orders"]),
              order_cvr=ratio(o["orders"], k["sessions"]), cart_rate=ratio(k["cart_sessions"], k["sessions"]),
              bounce_rate=ratio(k["bounced"], k["sessions"]))
+    k.update(login_kpis(d_from, d_to, include_excluded))  # logins (one per visit), people who logged in, new accounts
     return k
 
 
@@ -243,7 +245,8 @@ def _series(lo: str, hi: str, include_excluded: bool) -> dict:
         FROM sessions s WHERE {w} GROUP BY 1""", a)}
     orows = {str(r["d"]): r for r in q(f"SELECT date_ist AS d, count(*) orders, coalesce(sum(revenue),0) revenue FROM orders_clean WHERE {ow} GROUP BY 1", a)}
     d0, d1 = date.fromisoformat(lo), date.fromisoformat(hi)
-    dates, m = [], {k: [] for k in ("sessions", "people", "carts", "checkouts", "orders", "revenue", "cart_rate", "aov", "bounce_rate")}
+    dates, m = [], {k: [] for k in ("sessions", "people", "carts", "checkouts", "orders", "revenue", "cart_rate", "aov", "bounce_rate", "logins")}
+    lg = login_series(lo, hi, include_excluded).get("logins")
     d = d0
     while d <= d1:
         k = d.isoformat()
@@ -259,6 +262,7 @@ def _series(lo: str, hi: str, include_excluded: bool) -> dict:
         m["cart_rate"].append(round(car / ses, 4) if ses else 0)
         m["aov"].append(round(rev / orders, 2) if orders else 0)
         m["bounce_rate"].append(round(sr.get("bounced", 0) / ses, 4) if ses else 0)
+        m["logins"].append(lg[len(dates) - 1] if lg else 0)
         d += timedelta(days=1)
     return {"dates": dates, "m": m}
 

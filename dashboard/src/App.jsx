@@ -13,6 +13,8 @@ const Campaigns = lazy(() => import('./pages/Campaigns'))
 const Cohorts = lazy(() => import('./pages/Cohorts'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Events = lazy(() => import('./pages/Events'))
+const Logins = lazy(() => import('./pages/Logins'))
+const Chats = lazy(() => import('./pages/Chats'))
 const Users = lazy(() => import('./pages/Users'))
 const Exclusions = lazy(() => import('./pages/Exclusions'))
 const DataPage = lazy(() => import('./pages/Data'))
@@ -41,6 +43,8 @@ const NAV = [
   ['audiences', 'Audiences', 'target', 'Who you can reach, and with what', Audiences, 'Grow'],
   ['sessions', 'Sessions', 'list', 'Every visit, with a full event timeline', Sessions, 'Explore'],
   ['events', 'Events', 'list', 'Every tracked event, from event names down to payload fields', Events, 'Explore'],
+  ['logins', 'Logins', 'users', 'Every login: who, how, new or returning', Logins, 'Explore'],
+  ['chats', 'Roop chats', 'search', 'What shoppers ask Roop, and what it answers', Chats, 'Explore'],
   ['users', 'Users', 'users', 'People and where they are in the journey', Users, 'Explore'],
   ['exclusions', 'Exclusions', 'ban', 'Remove internal, test and bot traffic', Exclusions, 'Admin'],
   ['data', 'Data & ETL', 'database', 'Refresh data, tracking health', DataPage, 'Admin'],

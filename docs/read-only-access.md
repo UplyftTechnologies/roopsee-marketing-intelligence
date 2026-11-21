@@ -8,7 +8,7 @@ A **read-only key** limits the damage to "someone can read the eight tables the 
 
 ## What the dashboard reads
 
-`event_log`, `users`, `orders`, `quiz_results`, `visitor_identity_links`, `customer_address`, `roopsee_products`, `master_products`.
+`event_log`, `users`, `orders`, `quiz_results`, `visitor_identity_links`, `customer_address`, `roopsee_products`, `master_products` and, for the Roop chats page, `assistant_chat_logs` (only its question / answer columns; it holds personal skin details, so keep `data/` local). If a read-only key cannot read it, the refresh carries on and the Roop chats page just shows no data.
 
 ## Steps
 
@@ -20,7 +20,7 @@ create role mi_reader nologin noinherit;
 grant usage on schema public to mi_reader;
 grant select on public.event_log, public.users, public.orders, public.quiz_results,
                public.visitor_identity_links, public.customer_address,
-               public.roopsee_products, public.master_products to mi_reader;
+               public.roopsee_products, public.master_products, public.assistant_chat_logs to mi_reader;
 grant mi_reader to authenticator;   -- lets the API switch to this role
 
 -- only needed for tables that have Row Level Security switched on (check Table Editor → RLS):
@@ -32,6 +32,7 @@ create policy mi_reader_select on public.visitor_identity_links for select to mi
 create policy mi_reader_select on public.customer_address       for select to mi_reader using (true);
 create policy mi_reader_select on public.roopsee_products       for select to mi_reader using (true);
 create policy mi_reader_select on public.master_products        for select to mi_reader using (true);
+create policy mi_reader_select on public.assistant_chat_logs    for select to mi_reader using (true);
 ```
 
 (If a table has no RLS, its `create policy` line is harmless to skip. If it errors, skip that line.)
