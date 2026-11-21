@@ -77,8 +77,8 @@ def person_profile(key: str):
               "devices": len({(r["device"], r["platform"], r["is_app"]) for r in sess})}
     uid = key if re.fullmatch(r"[0-9a-fA-F-]{36}", key or "") else None
     labels = []
-    if q("SELECT 1 FROM information_schema.tables WHERE table_name = 'user_labels'"):  # the Deeper analysis labels (quiz user, makeup user, price range ...)
-        from .deeper import _label_meta
+    if q("SELECT 1 FROM information_schema.tables WHERE table_name = 'user_labels'"):  # the Audiences › Interest & behaviour group labels (quiz user, makeup user, price range ...)
+        from .segments import _label_meta
         meta = _label_meta()
         labels = [meta.get(r["label_key"], {}).get("title", r["label_key"]) for r in q("SELECT label_key FROM user_labels WHERE person_key = ? AND label_key NOT LIKE 'stage:%' ORDER BY label_key", [key])]
     return {"person_key": key, "labels": labels, "addresses": _addresses(uid), "profile": profile or None, "totals": totals, "sessions": sess, "browsers": sorted(browsers.values(), key=lambda b: b["last_seen"], reverse=True),

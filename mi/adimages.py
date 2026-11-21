@@ -1,6 +1,6 @@
 """Keep a copy of each Meta ad's picture on this computer (data/ad_images/<ad id>.jpg).
 
-Meta's picture links expire after a few days, so the Deeper analysis tab would lose its ad images. The copy is made right after a Meta sync,
+Meta's picture links expire after a few days, so the Ads & landing pages tab would lose its ad images. The copy is made right after a Meta sync,
 and only for ads that do not have one yet. Nothing is sent to Meta: the pictures are public files on Meta's content servers.
 """
 import re

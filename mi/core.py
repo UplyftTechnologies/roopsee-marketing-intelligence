@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI):
     CON = connect()
     with DB_LOCK:
         transform.seed_exclusions(CON)
+        from . import presets  # saved journey presets (user data, like the exclusion rules)
+        presets.init(CON)
     yield
     CON.close()
 
@@ -47,7 +49,7 @@ DEVICE: contextvars.ContextVar = contextvars.ContextVar("device_type", default=N
 SALES_BASIS = {"confirmed": ("confirmed",), "paid_or_cod": ("confirmed", "cod_pending")}
 SALES: contextvars.ContextVar = contextvars.ContextVar("sales_basis", default=None)
 DEVICE_SKIP = ("/api/meta", "/api/health", "/api/jobs", "/api/refresh", "/api/exclusions", "/api/lookup", "/api/performance", "/api/users", "/api/cohorts",
-               "/api/retention", "/api/loyalty", "/api/audiences", "/api/person", "/api/campaigns", "/api/utm-health", "/api/deeper/segments", "/api/ad-image", "/api/events/names", "/api/events/catalogue")
+               "/api/retention", "/api/loyalty", "/api/audiences", "/api/person", "/api/campaigns", "/api/utm-health", "/api/segments", "/api/ad-image", "/api/events/names", "/api/events/catalogue")
 SALES_SKIP = ("/api/meta", "/api/health", "/api/jobs", "/api/refresh", "/api/exclusions", "/api/lookup", "/api/staff-orders")
 # the columns that say app / device in each table
 _DEV_COLS = {"sessions": ("is_app", "device"), "events_clean": ("is_app", "device_n"), "orders_clean": ("is_app", "device")}

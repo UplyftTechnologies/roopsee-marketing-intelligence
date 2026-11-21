@@ -1,4 +1,4 @@
-"""Definitions for the Deeper analysis tab: which skin concern a product is about, and how people are labelled (segments).
+"""Definitions for Ads & landing pages (concerns) and the Audiences › Interest & behaviour groups (labels): which skin concern a product is about, and how people are labelled (segments).
 
 Everything a person might want to change lives here: add a label or a concern keyword and rebuild (Refresh), no page code to touch.
 A label's `sql` returns (person_key, n): the people who have it and a count of the evidence (events, products, orders ...).

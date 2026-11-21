@@ -3,6 +3,8 @@ import { KEY_LABEL, dt, dur, inr, num, pct, useApi, useFilters, usePersisted } f
 import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Pager, Search, Table, delta, nextSort } from '../ui'
 import { STAGE, STAGE_TONE } from '../shared'
 import { Bars, NotBuilt, hours } from './deeper/common'
+import JourneyPresets from './JourneyPresets'
+import JourneyDetail, { HAS_DETAIL } from './JourneyDetail'
 
 const label = (k) => KEY_LABEL[k] || k.replace(/_/g, ' ')
 const CART_JOURNEYS = ['purchase', 'checkout', 'quiz', 'search', 'chat']
@@ -104,6 +106,7 @@ function FunnelJourney({ spec, by, setBy, how, setHow }) {
               </Card>
             </div>
             {open && <Stopped journey={spec.key} step={open} stepLabel={stepLabel(open)} by={by} f={f} onClose={() => setOpen('')} />}
+            {HAS_DETAIL.includes(spec.key) && <JourneyDetail journey={spec.key} />}
           </>
         )
       }}
@@ -248,12 +251,13 @@ export default function Journeys() {
     <Loading state={m}>
       {(d) => {
         if (!d.ready) return <NotBuilt />
-        const tabs = [...d.journeys.map((j) => ({ value: j.key, label: j.label })), { value: 'explore', label: 'Every journey' }]
+        const tabs = [...d.journeys.map((j) => ({ value: j.key, label: j.label })), { value: 'explore', label: 'Every journey' }, { value: 'presets', label: '★ My presets' }]
         const spec = d.journeys.find((j) => j.key === tab)
         return (
           <>
             <div className="chip-row" role="tablist" aria-label="Journeys"><Chips value={tab} onChange={(v) => { setTab(v); setHow(false) }} options={tabs} /></div>
-            {tab === 'explore' ? <Explorer meta={d.journeys} />
+            {tab === 'presets' ? <JourneyPresets />
+              : tab === 'explore' ? <Explorer meta={d.journeys} />
               : tab === 'after_order' ? <AfterOrder spec={spec} how={how} setHow={setHow} />
                 : spec ? <FunnelJourney key={tab} spec={spec} by={by} setBy={setBy} how={how} setHow={setHow} /> : null}
           </>

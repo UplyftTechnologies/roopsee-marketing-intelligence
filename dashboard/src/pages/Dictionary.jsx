@@ -56,16 +56,26 @@ const SECTIONS = [
     ['Sales without a person', 'Customers whose orders were placed before tracking began, or that never had a tracked visit, are in the order totals but have no person, so Users, Cohorts and Segments show a note with their revenue.'],
     ['Campaign revenue', 'The Campaigns table credits an order to a visit. Orders with no visit are not in it (a note shows how many). First touch credits an order to the buyer’s first visit and its date, not to the order date.'],
   ]],
-  ['Deeper analysis', [
-    ['Pre-order journeys', 'The key actions of each visit in order (a path), how many visits and days it took from a customer’s first visit to their first order, and the first channel and landing page. Below it, one card per ad and per landing product with what happened to the visits it brought.'],
+  ['Ads & landing pages', [
     ['Ad card', 'Paid Meta visits grouped by the ad id in the link (utm_content). The picture is Meta’s, saved on this computer at the Meta sync. Notes compare the ad with all Paid Meta visits: bounce, add to cart, problems hit, and where the visits landed.'],
     ['Landing product', 'The product page a visit started on. Its picture comes from the product catalogue (products without one show a blank).'],
-    ['Product discovery', 'Searches, how many found nothing, what people clicked after searching, searches left half-way, and filters and sorting. “Searched for, not found” lists words the shop did not return anything for.'],
-    ['Quiz to purchase', 'Visits that answered quiz questions, the step each reached, those that finished, and what finishers did next. A person’s wait from finishing the quiz to their first order is shown in buckets.'],
-    ['Order to confirmation', 'The time from tapping pay to a confirmed order, the steps in between (payment started, payment window, paid, confirmed), and how long online payments take to be confirmed.'],
     ['Concern', 'Taken from the quiz answers when the visitor took the quiz; otherwise inferred from the products they looked at, using the keywords in mi/deeper_defs.py (acne, pigmentation, sun protection, hydration, anti-ageing, oil control, makeup).'],
-    ['Journey builder', 'Pick an event, then the event that most often came right after it, and so on. A step happens “any time after” the one before or “right after” it. Repeats of the same event in a row count once.'],
-    ['Segments (labels)', 'Every person can carry many labels: quiz users, makeup users, skincare users, price range (the median catalogue price of what they looked at: budget under ₹300, mid-range to ₹800, premium above), discount checkers (opened coupons, offers or the wallet), searchers, filter users, app users, skin concerns named in the quiz, and their journey stage. Edit the rules in mi/deeper_defs.py.'],
+    ['Ad → concern → products', 'For each ad: the skin concern of the visits it brought (from the quiz, or inferred from the products looked at), then the products those visits viewed, carted and ordered.'],
+  ]],
+  ['Journey presets (Journeys › My presets)', [
+    ['Preset', 'A saved list of actions, each “Did” or “Did not”: a key action (viewed a product, added to cart, checkout, search, quiz, Roop …), any tracked event name, or “Placed a real order”. It finds every visit in the dates that matches all of them. Saved in this dashboard; share with Export / Import.'],
+    ['In this order', 'The “Did” steps must happen one after the other in the visit. “Any time later”: other actions may come in between. “Directly after”: the next key action or named event (page views, clicks and scrolls are ignored; the same action several times in a row counts once). “Did not” steps and “Placed a real order” always look at the whole visit.'],
+    ['After each step', 'How many visits are left once the first step, then the first two steps, and so on, are applied. The last number is the preset’s total.'],
+    ['People', 'Each person once, if at least one of their visits matches.'],
+  ]],
+  ['Journeys › More detail', [
+    ['What led up to the first order (Purchase)', 'For every customer’s first valid order in the dates: how many visits and days it took from their first visit, the first channel and the first landing page.'],
+    ['Search detail (Search & discovery)', 'Every search run, searches that found nothing, the search terms with their results and orders, searches per day, where people searched, and the filters and sorting used. “Tapped a search result” counts the tap event itself; the funnel step “Clicked a result” also counts visits that went on further without it.'],
+    ['Quiz detail (Skin quiz)', 'The visits that reached each quiz question, the question people left on, the quiz result, concern and skin type with what those visits did, and the wait from finishing the quiz to the first order.'],
+    ['Payment timing (Checkout)', 'The time from tapping pay to a confirmed order (cash on delivery and online), the time spent in the payment window, and how long online payments take to be confirmed in the orders table.'],
+  ]],
+  ['Audiences', [
+    ['Interest & behaviour groups', 'Every person can carry many labels: quiz users, makeup users, skincare users, price range (the median catalogue price of what they looked at: budget under ₹300, mid-range to ₹800, premium above), discount checkers (opened coupons, offers or the wallet), searchers, filter users, app users, skin concerns named in the quiz, and their journey stage. Counted for all time, like the other audience lists. Edit the rules in mi/deeper_defs.py.'],
   ]],
   ['Roop chats', [
     ['Roop', 'The skin-care assistant on roopsee.com and in the app. Every question a shopper sends is a message; the messages of one chat window are a conversation (“New chat” starts another).'],
