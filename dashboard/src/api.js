@@ -3,7 +3,8 @@ import { createContext, useContext, useEffect, useState } from 'react'
 export async function api(path, { method = 'GET', params, body } = {}) {
   const qs = new URLSearchParams()
   Object.entries(params || {}).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') qs.set(k, v)
+    if (Array.isArray(v)) v.forEach((x) => qs.append(k, x))  // repeated parameter (e.g. several payload filters)
+    else if (v !== undefined && v !== null && v !== '') qs.set(k, v)
   })
   const res = await fetch(`/api${path}${qs.toString() ? `?${qs}` : ''}`, {
     method,

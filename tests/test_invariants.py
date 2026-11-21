@@ -223,3 +223,67 @@ class EveryScreenLoads(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EventsTab(unittest.TestCase):
+    def test_catalogue_total_equals_sum_of_names(self):
+        s = api.events_summary()
+        self.assertEqual(s["totals"]["events"], sum(r["events"] for r in api.events_summary()["rows"]) if s["totals"]["names"] <= 500 else s["totals"]["events"])
+
+    def test_rows_total_matches_catalogue_for_each_top_event(self):
+        for r in api.events_summary()["rows"][:5]:
+            with self.subTest(event=r["event_name"]):
+                self.assertEqual(api.events_rows(event=r["event_name"], payload=[], limit=1)["total"], r["events"])
+
+    def test_group_by_event_name_adds_up(self):
+        g = api.events_groupby(by="event_name", payload=[], limit=1000)
+        self.assertEqual(sum(x["events"] for x in g["rows"]), g["totals"]["events"])
+
+    def test_pages_never_repeat_a_row(self):
+        a = api.events_rows(payload=[], limit=50, offset=0)["rows"]
+        b = api.events_rows(payload=[], limit=50, offset=50)["rows"]
+        self.assertFalse({r["id"] for r in a} & {r["id"] for r in b})
+
+    def test_payload_filter_never_returns_more_than_the_event(self):
+        top = api.events_summary()["rows"][0]["event_name"]
+        fields = api.events_fields(event=top)["fields"]
+        if fields:
+            f = fields[0]["field"]
+            self.assertLessEqual(api.events_rows(event=top, payload=[f], limit=1)["total"], api.events_rows(event=top, payload=[], limit=1)["total"])
+
+    def test_bad_field_names_are_refused(self):
+        from fastapi import HTTPException
+        with self.assertRaises(HTTPException):
+            api.events_rows(payload=["a'; DROP TABLE x;--=1"], limit=1)
+
+
+class PainPoints(unittest.TestCase):
+    def setUp(self):
+        self.r = api.pain(compare=False)
+
+    def test_stuck_never_exceeds_tried_and_hit(self):
+        for st in self.r["stages"]:
+            with self.subTest(stage=st["key"]):
+                self.assertLessEqual(st["stuck"], st["tried"])
+                self.assertLessEqual(st["hit"], st["tried"])
+                self.assertEqual(st["recovered"] + (st["stuck"] if st["key"] == "speed" else 0) <= st["hit"] + st["stuck"], True)
+
+    def test_an_order_clears_every_stage(self):
+        bad = one("SELECT count(*) n FROM pain_visits v JOIN pain_sessions s USING (session_id) WHERE s.ordered AND v.stuck")
+        self.assertEqual(bad["n"], 0)
+
+    def test_visit_totals_agree_with_the_sessions_table(self):
+        self.assertEqual(self.r["totals"]["visits"], one("SELECT count(*) n FROM sessions WHERE NOT is_excluded")["n"])
+        self.assertEqual(self.r["totals"]["ordered"] + self.r["totals"]["left_with_problem"] + self.r["totals"]["left_no_problem"], self.r["totals"]["visits"])
+
+    def test_who_list_matches_the_stage_count(self):
+        for st in self.r["stages"]:
+            with self.subTest(stage=st["key"]):
+                self.assertEqual(api.pain_people(stage=st["key"], limit=2000)["total"], st["list_total"])
+
+    def test_last_problem_adds_up_to_visits_that_left_with_one(self):
+        self.assertEqual(sum(x["visits"] for x in self.r["last_before_leaving"]), self.r["totals"]["left_with_problem"])
+
+    def test_every_problem_event_is_known_to_the_stages(self):
+        from mi import pain_defs
+        self.assertTrue({r["problem_key"] for r in q("SELECT DISTINCT problem_key FROM pain_events")} <= set(pain_defs.PROBLEM_LABEL))

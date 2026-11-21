@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, dt, num, useApi, useFilters } from '../api'
-import { Badge, Card, Loading, Table } from '../ui'
+import { Badge, Card, CopyTable, Loading, Table } from '../ui'
 import { Inventory, ShareBar } from '../components/ExclusionTools'
 
 /** Manual, editable exclusion list. Every change re-applies automatically (a few seconds) and all tabs reload. */
@@ -135,12 +135,12 @@ export default function Exclusions() {
         {({ rows, kinds }) => (
           <Card title={`Exclusion list (${rows.length})`} sub="tick/untick to enable or disable a rule · edit or delete · every change re-applies automatically"
             right={<span className="chip-row"><select className="field" value={listSort} onChange={(e) => setListSort(e.target.value)} aria-label="Sort rules"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="az">Value A → Z</option><option value="za">Value Z → A</option><option value="kind">Type A → Z</option><option value="active">Active first</option></select><select className="field" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)} aria-label="Filter rules by type"><option value="">All types</option>{Object.keys(kinds).map((k) => <option key={k}>{k}</option>)}</select></span>}>
-            <div className="table-wrap">
+            <CopyTable cls="table-wrap">
               <table>
                 <thead><tr><th>On</th><th>Type</th><th>Value</th><th>Note</th><th>Source · updated</th><th /></tr></thead>
                 <tbody>{sortRules(rows.filter((r) => !kindFilter || r.kind === kindFilter), listSort).map((r) => <Row key={`${r.id}-${r.updated_at}`} r={r} onChange={reload} />)}</tbody>
               </table>
-            </div>
+            </CopyTable>
           </Card>
         )}
       </Loading>

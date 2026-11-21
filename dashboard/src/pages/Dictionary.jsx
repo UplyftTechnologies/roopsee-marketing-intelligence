@@ -36,6 +36,23 @@ const SECTIONS = [
     ['Had event', 'A session that contains the named event at least once (part of a name is enough).'],
     ['Did / Did not / Any', 'Did: the session did it. Did not: it did not. Any: ignore it. Several Did choices can be combined as All or Any.'],
   ]],
+  ['Pain points tab', [
+    ['Pain point', 'Something that went wrong for a shopper on the way to buying: an OTP that failed, an address form with errors, an address we do not deliver to, a failed or cancelled payment, a slow page, a broken request. The tracker already sends each of these as an event.'],
+    ['Stage', 'Log in, Address, Place order, Payment, and Speed & errors (slow or broken pages anywhere on the site).'],
+    ['Tried / Got stuck', 'A visit tried a stage when it did something there or hit a problem there. It got stuck when it never got through, or its last word there was a problem. Placing an order settles every stage.'],
+    ['Signs of struggle', 'Asking for the OTP again or closing a form. They explain why a visit got stuck but do not make it stuck on their own.'],
+    ['Left with a problem unsolved', 'A visit with no order that ended while a problem at a stage it got stuck in was still standing.'],
+    ['Sales lost', 'The biggest cart of people stuck at a stage (login to payment) who did not buy in any later visit in the dates. Speed & errors is not added, so no cart is counted twice.'],
+    ['Spike', 'An hour when one problem hit at least 5 visits and 4 times its usual hourly number. Often an outage.'],
+    ['Differences from roopsee.com admin', 'Repeated events within 2 seconds are ignored, people are matched with this dashboard’s own identity rules, and a page is shown by its path. Numbers can differ a little from the admin tab.'],
+  ]],
+  ['Events tab', [
+    ['Event catalogue', 'One row per event name: how many times it fired, in how many sessions, by how many people, and its trend by day. Repeated events and hidden internal traffic are left out unless switched on.'],
+    ['Event rows', 'One row per tracked event, newest first. Click a row to see everything it carries (its payload) and to jump to its session, person or order.'],
+    ['Payload field', 'An extra detail the tracker sends with an event, for example quiz_option, search_term or pincode. Filters match it ignoring capitals; “contains” matches part of the value; “has a value” means the field is present.'],
+    ['Slice the data', 'Counts the filtered events by a payload field or a dimension such as day, page, city or channel. Clicking a value (for a payload field, event name, group or channel) adds it as a filter.'],
+    ['Data as of the last refresh', 'Events come from the local copy of the tracking table, so they are as fresh as the last Refresh. Payload fields the dashboard treats as plumbing (device, ip, user agent...) are not stored.'],
+  ]],
   ['Place', [
     ['City and state (visitor)', 'Looked up from the visitor’s IP address. Mobile networks and VPNs can put someone in the wrong city.'],
     ['Delivery pincode, city and state', 'Where the person wants delivery: their saved address first, then their latest order, then the last pincode they typed. The place for a pincode is learned from saved addresses and orders.'],

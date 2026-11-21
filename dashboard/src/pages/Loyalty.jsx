@@ -1,6 +1,6 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { day, inr, num, pct, useApi } from '../api'
-import { Card, Kpi, Loading, Table, axis, chartTip } from '../ui'
+import { Card, CopyTable, Kpi, Loading, Table, axis, chartTip } from '../ui'
 
 const RAMP = ['var(--seq-100)', 'var(--seq-200)', 'var(--seq-300)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
 
@@ -12,7 +12,7 @@ function Cohorts({ cohorts, asOf }) {
   return (
     <Card title="Revenue per customer over time" sub="customers grouped by the month of their first order; each cell = cumulative revenue per customer, N months after that first order">
       {cohorts.length === 0 ? <div className="empty">No orders yet</div> : (
-        <div className="table-wrap">
+        <CopyTable cls="table-wrap">
           <table>
             <thead><tr><th>First order</th><th className="num">Customers</th>{cols.map((m) => <th key={m} className="num">Month {m}</th>)}</tr></thead>
             <tbody>
@@ -38,7 +38,7 @@ function Cohorts({ cohorts, asOf }) {
               })}
             </tbody>
           </table>
-        </div>
+        </CopyTable>
       )}
       <div className="muted" style={{ marginTop: 8 }}>Faded cells repeat the last known value: the customers placed no further orders that month. Months that have not happened yet are left blank. Cohorts of 2–6 people, so use as a shape, not a forecast.</div>
     </Card>

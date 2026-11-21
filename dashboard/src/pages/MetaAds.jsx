@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, day, dt, inr, num, pct, useApi, useFilters } from '../api'
-import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Table, verdictTone } from '../ui'
+import { Badge, Card, Chips, CopyTable, ExportBtn, Kpi, Loading, Table, verdictTone } from '../ui'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/MetricChart'
@@ -104,7 +104,7 @@ function Flow({ data, open, setOpen, q }) {
   const toggle = (id) => { const x = new Set(open); if (x.has(id)) x.delete(id); else x.add(id); setOpen(x) }
   if (!rows.length) return <div className="muted">Nothing matches.</div>
   return (
-    <div className="table-wrap">
+    <CopyTable cls="table-wrap">
       <table className="tree">
         <thead>
           <tr>
@@ -146,7 +146,7 @@ function Flow({ data, open, setOpen, q }) {
           })}
         </tbody>
       </table>
-    </div>
+    </CopyTable>
   )
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { day, inr, num, pct, useApi } from '../api'
-import { Card, Chips, Loading, RateBar, Table, axis, chartTip } from '../ui'
+import { Card, Chips, CopyTable, Loading, RateBar, Table, axis, chartTip } from '../ui'
 
 const DIMS = [['state', 'State'], ['city', 'City'], ['age', 'Age group'], ['gender', 'Gender'], ['channel', 'First channel'],
   ['campaign', 'First campaign'], ['device', 'Device'], ['skin_type', 'Skin type'], ['segment', 'Segment'], ['landing', 'Landing page']]
@@ -14,7 +14,7 @@ function Retention() {
       {({ cohorts, weeks }) => (
         <Card title="Weekly retention" sub="people grouped by the week they first visited; cells = share who came back N weeks later (any session)">
           {cohorts.length === 0 ? <div className="empty">No cohorts in this range</div> : (
-            <div className="table-wrap">
+            <CopyTable cls="table-wrap">
               <table>
                 <thead><tr><th>Cohort week</th><th className="num">People</th><th className="num">Buyers</th>{Array.from({ length: weeks + 1 }, (_, i) => <th key={i} className="num">Wk {i}</th>)}</tr></thead>
                 <tbody>
@@ -31,7 +31,7 @@ function Retention() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </CopyTable>
           )}
         </Card>
       )}

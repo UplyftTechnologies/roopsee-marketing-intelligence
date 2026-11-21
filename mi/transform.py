@@ -661,6 +661,118 @@ GROUP BY ALL;
 """
 
 
+def _q(v: str) -> str:
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+def pain_sql() -> str:
+    """Pain points (what went wrong from login to payment): the rules live in mi/pain_defs.py, mirroring the admin analytics on roopsee.com."""
+    from . import pain_defs as P
+    defs = ", ".join(f"({_q(k)}, {_q(st)}, {_q(lb)}, {str(soft).upper()}, {_q(ev)}, {_q(err) if err else 'NULL::VARCHAR'})"
+                     for k, st, lb, ev, errs, soft, _ in P.PROBLEMS for err in (errs or (None,)))
+    detail_of = {
+        "message": "x.msg", "stage_message": "coalesce(x.stg, x.msg)", "payment": "coalesce(nullif(x.value, ''), x.code, x.reason)", "value": "nullif(x.value, '')",
+        "page": "x.path", "error": "coalesce(x.errmsg, x.path)", "endpoint": "x.endpoint",
+        "endpoint_status": "nullif(trim(concat_ws(' ', x.endpoint, CASE WHEN x.status = '0' THEN 'network' WHEN x.status IS NOT NULL AND x.status <> '' THEN x.status END)), '')"}
+    cases = " ".join(f"WHEN {_q(k)} THEN {detail_of[d]}" for k, _, _, _, _, _, d in P.PROBLEMS if d)
+    sdefs = ", ".join(f"({_q(st)}, {_q(kind)}, {_q(ev)})" for kind, table in (("tried", P.TRIED), ("done", P.DONE)) for st, evs in table.items() for ev in evs)
+    sdefs += ", " + ", ".join(f"({_q(st)}, 'try', {_q(ev)})" for st, evs in P.RETRY.items() for ev in evs)
+    login_page = ", ".join(_q(x) for x in P.LOGIN_PAGE)
+    login_done = ", ".join(_q(x) for x in P.DONE["login"])
+    return f"""
+CREATE OR REPLACE TABLE pain_defs AS SELECT * FROM (VALUES {defs}) t(problem_key, stage, label, soft, event_name, error_name);
+CREATE OR REPLACE TABLE pain_stage_defs AS SELECT * FROM (VALUES {sdefs}) t(stage, kind, event_name);
+
+-- every problem event, tagged with its stage, label and detail (repeats within 2 s are left out, like everywhere)
+CREATE OR REPLACE TABLE pain_events AS
+WITH x AS (
+  SELECT e.id, e.session_id, e.ts, e.event_name, e.path, e.page_type, r.value,
+    {jj('error_name')} AS error_name, {jj('message')} AS msg, {jj('stage')} AS stg, {jj('endpoint')} AS endpoint, {jj('status')} AS status,
+    {jj('error_message')} AS errmsg, {jj('error_code')} AS code, {jj('reason')} AS reason, {jj('errorReason')} AS er, {jj('errorSource')} AS es, {jj('errorStep')} AS est,
+    try_cast(coalesce({jj('first_content_ms')}, {jj('load_ms')}) AS DOUBLE) AS ms
+  FROM events_base e JOIN raw_event_log r ON r.id = e.id
+  WHERE NOT e.is_dup AND e.event_name IN (SELECT DISTINCT event_name FROM pain_defs))
+SELECT x.id, x.session_id, x.ts, x.event_name, d.problem_key, d.stage, d.label, d.soft, NOT d.soft AS is_hard,
+  nullif(left(trim(regexp_replace(replace(CASE d.problem_key {cases} END, '_', ' '), '\\s+', ' ', 'g')), 80), '') AS detail,
+  x.path, x.page_type, x.ms, x.er AS reason, x.es AS source, x.est AS step, x.code
+FROM x JOIN pain_defs d ON d.event_name = x.event_name AND (d.error_name IS NULL OR d.error_name = x.error_name);
+
+CREATE OR REPLACE TABLE pain_stage_events AS
+SELECT e.session_id, e.ts, d.stage, d.kind, e.event_name FROM events_base e JOIN pain_stage_defs d ON d.event_name = e.event_name WHERE NOT e.is_dup;
+
+-- a visit that ordered got through every stage (a COD order needs no payment window)
+CREATE OR REPLACE TABLE pain_ordered AS
+SELECT s.session_id, (coalesce(s.f_order, false) OR coalesce(o.n_placed, 0) > 0 OR pd.session_id IS NOT NULL) AS ordered
+FROM sessions s LEFT JOIN session_orders o ON o.session_id = s.session_id
+LEFT JOIN (SELECT DISTINCT session_id FROM pain_stage_events WHERE stage = 'payment' AND kind = 'done') pd ON pd.session_id = s.session_id;
+
+-- one row per visit and stage it tried. stuck = tried and never got through, or its last word there was a problem
+CREATE OR REPLACE TABLE pain_visits AS
+WITH t AS (SELECT session_id, stage, min(ts) FILTER (WHERE kind = 'tried') AS first_try, max(ts) FILTER (WHERE kind = 'done') AS last_done,
+             count(*) FILTER (WHERE kind = 'try') AS tries FROM pain_stage_events GROUP BY 1, 2),
+p AS (SELECT session_id, stage, min(ts) AS first_problem, max(ts) FILTER (WHERE is_hard) AS last_hard, bool_or(is_hard) AS any_hard
+      FROM pain_events WHERE stage <> 'speed' GROUP BY 1, 2),
+pm AS (SELECT session_id, arg_max(m, ts) AS pay_method FROM (
+         SELECT e.session_id, e.ts, lower(coalesce(nullif({jj('paymentProvider')}, ''), nullif({jj('paymentMethod')}, ''))) AS m
+         FROM events_base e JOIN raw_event_log r ON r.id = e.id
+         WHERE e.event_name IN ('payment_started', 'clicked_payment_method', 'payment_failed', 'payment_cancelled', 'razorpay_opened', 'razorpay_open_failed'))
+       WHERE m IS NOT NULL GROUP BY 1),
+j AS (SELECT session_id, stage, t.first_try, t.last_done, t.tries, p.first_problem, p.last_hard, coalesce(p.any_hard, false) AS any_hard
+      FROM t FULL JOIN p USING (session_id, stage))
+SELECT j.session_id, j.stage, true AS tried, j.any_hard AS hit,
+  NOT (o.ordered OR (j.last_done IS NOT NULL AND (j.last_hard IS NULL OR j.last_done > j.last_hard))) AS stuck,
+  least(j.first_try, j.first_problem) AS start_ts, coalesce(j.tries, 0) AS tries, CASE WHEN j.stage = 'payment' THEN pm.pay_method END AS pay_method
+FROM j JOIN pain_ordered o ON o.session_id = j.session_id LEFT JOIN pm ON pm.session_id = j.session_id
+WHERE j.first_try IS NOT NULL OR j.any_hard
+UNION ALL
+SELECT e.session_id, 'speed', true, true, NOT o.ordered, min(e.ts), 0, NULL
+FROM pain_events e JOIN pain_ordered o ON o.session_id = e.session_id WHERE e.stage = 'speed' AND e.is_hard GROUP BY e.session_id, o.ordered;
+
+-- one row per visit: ordered?, biggest cart, the problems, the last problem still standing, and where it got to on each login path
+CREATE OR REPLACE TABLE pain_sessions AS
+WITH open_ev AS (
+  SELECT e.session_id, e.problem_key, e.stage, e.detail, row_number() OVER (PARTITION BY e.session_id ORDER BY e.is_hard DESC, e.ts DESC, e.id DESC) AS rn
+  FROM pain_events e JOIN pain_visits v ON v.session_id = e.session_id AND v.stage = e.stage AND v.stuck),
+hard AS (SELECT DISTINCT session_id FROM pain_events WHERE is_hard),
+cart AS (SELECT session_id, max(amount) FILTER (WHERE amount > 0) AS cart_value FROM events_base WHERE NOT is_dup GROUP BY 1),
+lg AS (
+  SELECT e.session_id,
+    bool_or(e.event_name IN ({login_page})) AS opened, bool_or(e.event_name = 'clicked_send_otp') AS sent, bool_or(e.event_name = 'clicked_verify_otp') AS entered,
+    bool_or(e.event_name = 'clicked_google_signin') AS g_click,
+    bool_or(e.event_name IN ({login_done}) AND NOT (e.event_name = 'login_successful' AND coalesce({jj('method')}, '') = 'google')) AS done_other,
+    bool_or(e.event_name IN ({login_done})) AS done_any,
+    bool_or(e.event_name = 'login_successful' AND coalesce({jj('method')}, '') = 'google') AS g_done_explicit
+  FROM events_base e JOIN raw_event_log r ON r.id = e.id
+  WHERE NOT e.is_dup AND (e.event_name IN ({login_page}) OR e.event_name IN ({login_done}) OR e.event_name IN ('clicked_send_otp', 'clicked_verify_otp', 'clicked_google_signin'))
+  GROUP BY 1)
+SELECT s.session_id, o.ordered, coalesce(c.cart_value, 0) AS cart_value, h.session_id IS NOT NULL AS with_problem,
+  oe.session_id IS NOT NULL AS has_open, (NOT o.ordered AND oe.session_id IS NOT NULL) AS left_with_problem,
+  oe.problem_key AS last_key, oe.stage AS last_stage, oe.detail AS last_detail,
+  coalesce(lg.opened, false) AS lp_opened, coalesce(lg.sent, false) AS lp_sent, coalesce(lg.entered, false) AS lp_entered,
+  coalesce((lg.sent OR lg.entered) AND lg.done_other, false) AS lp_phone_done, coalesce(lg.g_click, false) AS g_click,
+  coalesce(lg.g_done_explicit OR (lg.g_click AND NOT lg.sent AND lg.done_any), false) AS g_done
+FROM sessions s JOIN pain_ordered o ON o.session_id = s.session_id LEFT JOIN cart c ON c.session_id = s.session_id
+LEFT JOIN hard h ON h.session_id = s.session_id LEFT JOIN open_ev oe ON oe.session_id = s.session_id AND oe.rn = 1 LEFT JOIN lg ON lg.session_id = s.session_id;
+
+-- pincodes people wanted delivery to that we don't serve: checked while browsing, or saved / picked at checkout
+CREATE OR REPLACE TABLE pain_notserved AS
+WITH r AS (
+  SELECT e.session_id, e.ts, e.event_name, e.pincode_ev, e.addr_city_ev, {jj('serviceable')} AS serviceable, {jj('result')} AS result, {jj('city')} AS ev_city,
+    last_value(e.pincode_ev IGNORE NULLS) OVER (PARTITION BY e.session_id ORDER BY e.ts, e.id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS last_pin
+  FROM events_base e JOIN raw_event_log r ON r.id = e.id
+  WHERE NOT e.is_dup AND (e.pincode_ev IS NOT NULL OR e.event_name IN ('address_not_serviceable', 'delivery_pincode_checked')))
+SELECT session_id, ts, coalesce(pincode_ev, CASE WHEN event_name = 'address_not_serviceable' THEN last_pin END) AS pincode, coalesce(addr_city_ev, ev_city) AS city,
+  (event_name = 'address_not_serviceable' OR (event_name = 'address_saved' AND serviceable = 'false')) AS at_checkout
+FROM r WHERE event_name = 'address_not_serviceable' OR (event_name = 'address_saved' AND serviceable = 'false')
+   OR (event_name = 'delivery_location_set' AND serviceable = 'false') OR (event_name = 'delivery_pincode_checked' AND result = 'not_deliverable');
+
+-- out-of-stock products people looked at or tried to add
+CREATE OR REPLACE TABLE pain_stock AS
+SELECT e.session_id, e.ts, e.event_name, coalesce(nullif({jj('alt_product_name')}, ''), nullif(e.product_name, ''), nullif({jj('alt_product_id')}, '')) AS name, nullif(e.brand, '') AS brand
+FROM events_base e JOIN raw_event_log r ON r.id = e.id WHERE NOT e.is_dup AND e.event_name IN ('out_of_stock_viewed', 'out_of_stock_add_attempt');
+"""
+
+
 def _log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
@@ -702,11 +814,15 @@ def _run_steps(con, flags_only, note, t0) -> dict:
         _log(f"{name}: {time.time() - t:.1f}s")
     t = time.time(); note("rebuilding: exclusion hits"); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
     for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
-                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS)]:
+                      ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS), ("pain points", None)]:
         t = time.time()
         note(f"rebuilding: {name}")
         if name == "events_clean":
             _drop_any(con, "events_clean")  # older builds stored it as a table
+        if name == "pain points":
+            if flags_only and have_base and con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = 'pain_sessions'").fetchall()[0][0]:
+                continue  # exclusion edits never change these tables
+            sql = pain_sql()
         con.execute(sql)
         _log(f"{name}: {time.time() - t:.1f}s")
     con.execute("DROP TABLE IF EXISTS events_base_x")

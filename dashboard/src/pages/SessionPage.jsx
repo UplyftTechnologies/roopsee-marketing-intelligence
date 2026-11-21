@@ -73,7 +73,7 @@ export default function SessionPage() {
             ]} rows={pages.slice(0, 12)} />
             {pages.length > 12 && <div className="muted" style={{ marginTop: 6 }}>+ {pages.length - 12} more pages</div>}
           </Card>
-          <Card title="Event types">
+          <Card title="Event types" right={<button type="button" className="btn small" onClick={() => f.go('events', { session: id })} title="Open every event of this session in the Events tab">All events of this session →</button>}>
             <div className="mini-list">
               {types.slice(0, 10).map((t) => (
                 <div key={t.event_name} className="mini-row" style={{ cursor: 'pointer' }} role="button" tabIndex={0} title="Search the timeline for this event"

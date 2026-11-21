@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 /* ---------- metric glossary: shown as hover/focus help next to labels ---------- */
 export const GLOSSARY = {
@@ -98,6 +99,63 @@ export const verdictTone = { Winning: 'good', Converting: 'good', Promising: 'wa
 /** Next server-side sort state when a header is clicked: same key flips direction, a new key starts descending (ascending for text). */
 export const nextSort = (cur, key, textKeys = []) => (cur.key === key ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' })
 
+/** Plain text of a rendered <table> as tab-separated lines (pastes straight into Excel / Google Sheets). Checkbox columns, help icons and sort arrows are left out. */
+export function tableToTsv(table) {
+  const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
+  const cell = (el) => {
+    const c = el.cloneNode(true)
+    c.querySelectorAll('.help, .arrow, .sr-only').forEach((n) => n.remove())
+    return clean(c.textContent)
+  }
+  const lines = []
+  table.querySelectorAll('tr').forEach((tr) => {
+    const cells = [...tr.children].filter((c) => !c.classList.contains('sel'))
+    if (cells.length) lines.push(cells.map(cell).join('\t'))
+  })
+  return lines.join('\n')
+}
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const ta = document.createElement('textarea')  // fallback for non-secure contexts / blocked clipboard API
+    ta.value = text
+    ta.style.cssText = 'position:fixed;opacity:0'
+    document.body.appendChild(ta)
+    ta.select()
+    let ok = false
+    try { ok = document.execCommand('copy') } catch { ok = false }
+    ta.remove()
+    return ok
+  }
+}
+
+/** Copies a table to the clipboard. `getTable()` returns the <table> element; `prepare()` (optional) runs first, e.g. to draw rows that are not on screen yet. */
+export function CopyBtn({ getTable, prepare }) {
+  const [state, setState] = useState('')
+  const go = async () => {
+    if (prepare) await prepare()
+    const t = getTable()
+    const ok = t ? await writeClipboard(tableToTsv(t)) : false
+    setState(ok ? 'ok' : 'fail')
+    setTimeout(() => setState(''), 2000)
+  }
+  return <button type="button" className="btn small copy-btn" onClick={go} title="Copy this table to the clipboard (paste into Excel or Google Sheets)">{state === 'ok' ? 'Copied ✓' : state === 'fail' ? 'Copy failed' : 'Copy table'}</button>
+}
+
+/** Wraps any hand-written <table> so it gets a Copy button too. */
+export function CopyTable({ children, cls }) {
+  const box = useRef(null)
+  return (
+    <>
+      <div className="copy-row"><CopyBtn getTable={() => box.current?.querySelector('table')} /></div>
+      <div className={cls} ref={box}>{children}</div>
+    </>
+  )
+}
+
 const CHUNK = 200
 /** One table row. Large tables skip redrawing rows whose data and selection did not change (ticking one box no longer redraws thousands of rows). */
 const Row = memo(function Row({ r, id, cols, idOf, onRow, rowClass, selectable, isSel, onToggle }) {
@@ -171,7 +229,10 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
   const sig = cols.map(idOf).join('|')
   const ids = selectable ? data.map(rowId) : []
   const allOn = selectable && ids.length > 0 && ids.every((i) => selected.has(i))
+  const showAll = () => { flushSync(() => setShown(count)) }  // copy includes rows that are not drawn yet
   return (
+    <>
+    <div className="copy-row"><CopyBtn getTable={() => wrap.current?.querySelector('table')} prepare={shown < count ? showAll : undefined} /></div>
     <div className={`table-wrap${scroll ? ' scroll' : ''}`} ref={wrap}>
       <table>
         <thead>
@@ -199,6 +260,7 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
       </table>
       {shown < count && <div ref={tail} className="muted" style={{ padding: '10px 4px', fontSize: 12 }}>Showing {shown.toLocaleString('en-IN')} of {count.toLocaleString('en-IN')} rows, more as you scroll…</div>}
     </div>
+    </>
   )
 }
 

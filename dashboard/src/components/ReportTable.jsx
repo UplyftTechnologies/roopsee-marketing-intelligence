@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { dur, inr, num, pct, useApi, useFilters } from '../api'
-import { Card, ExportBtn, GLOSSARY, Search } from '../ui'
+import { Card, CopyTable, ExportBtn, GLOSSARY, Search } from '../ui'
 import Icon from './Icon'
 
 const DIMENSIONS = [['channel', 'Channel'], ['channel_split', 'Channel (Direct split new / returning)'], ['source_medium', 'Source / medium'], ['campaign', 'Campaign'], ['device', 'Device'],
@@ -56,7 +56,7 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
       {!d && !s.error && <div className="skeleton" style={{ height: 260 }} />}
       {d && (
         <>
-          <div className="table-wrap">
+          <CopyTable cls="table-wrap">
             <table className="rt">
               <thead>
                 <tr>
@@ -81,7 +81,7 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
                 ))}
               </tbody>
             </table>
-          </div>
+          </CopyTable>
           {d.reconcile && d.reconcile.orders_other > 0 && !search && (
             <div className="muted" style={{ fontSize: 12, margin: '8px 2px 0' }}>
               {d.reconcile.orders_other} of the {d.reconcile.orders_total} orders in this period {d.reconcile.orders_other === 1 ? 'is' : 'are'} not in the table: {d.reconcile.orders_other === 1 ? 'it' : 'they'} came from a visit that started before this period, or from before tracking began.

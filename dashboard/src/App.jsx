@@ -7,10 +7,12 @@ import DatePicker from './components/DatePicker'
 // pages load on demand, so the first screen downloads only what it needs
 const Home = lazy(() => import('./pages/Home'))
 const Overview = lazy(() => import('./pages/Overview'))
+const PainPoints = lazy(() => import('./pages/PainPoints'))
 const Funnel = lazy(() => import('./pages/Funnel'))
 const Campaigns = lazy(() => import('./pages/Campaigns'))
 const Cohorts = lazy(() => import('./pages/Cohorts'))
 const Sessions = lazy(() => import('./pages/Sessions'))
+const Events = lazy(() => import('./pages/Events'))
 const Users = lazy(() => import('./pages/Users'))
 const Exclusions = lazy(() => import('./pages/Exclusions'))
 const DataPage = lazy(() => import('./pages/Data'))
@@ -30,6 +32,7 @@ const NAV = [
   ['performance', 'Performance', 'chart', 'Traffic, orders and trends over time', Overview, 'Reports'],
   ['orders', 'Orders', 'receipt', 'Every order, payments, delivery and order analytics', Orders, 'Reports'],
   ['funnel', 'Funnel & checkout', 'funnel', 'Where people drop off, who to follow up', Funnel, 'Reports'],
+  ['painpoints', 'Pain points', 'info', 'What went wrong from login to payment, and who got stuck', PainPoints, 'Reports'],
   ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Reports'],
   ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Reports'],
   ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where from', Cohorts, 'Reports'],
@@ -37,6 +40,7 @@ const NAV = [
   ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],
   ['audiences', 'Audiences', 'target', 'Who you can reach, and with what', Audiences, 'Grow'],
   ['sessions', 'Sessions', 'list', 'Every visit, with a full event timeline', Sessions, 'Explore'],
+  ['events', 'Events', 'list', 'Every tracked event, from event names down to payload fields', Events, 'Explore'],
   ['users', 'Users', 'users', 'People and where they are in the journey', Users, 'Explore'],
   ['exclusions', 'Exclusions', 'ban', 'Remove internal, test and bot traffic', Exclusions, 'Admin'],
   ['data', 'Data & ETL', 'database', 'Refresh data, tracking health', DataPage, 'Admin'],
