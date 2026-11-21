@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 
 /* ---------- metric glossary: shown as hover/focus help next to labels ---------- */
 export const GLOSSARY = {
@@ -37,7 +37,7 @@ export const Card = ({ title, sub, right, children, style, help }) => (
           <h3>{title}{help && <> <Help id={help} /></>}</h3>
           {sub && <div className="sub">{sub}</div>}
         </div>
-        {right}
+        <div className="card-actions">{right}<span className="copy-slot" /></div>
       </div>
     )}
     {children}
@@ -143,18 +143,31 @@ export function CopyBtn({ getTable, prepare }) {
     setState(ok ? 'ok' : 'fail')
     setTimeout(() => setState(''), 2000)
   }
-  return <button type="button" className="btn small copy-btn" onClick={go} title="Copy this table to the clipboard (paste into Excel or Google Sheets)">{state === 'ok' ? 'Copied ✓' : state === 'fail' ? 'Copy failed' : 'Copy table'}</button>
+  return <button type="button" className="btn small copy-btn" onClick={go} title="Copy this table to the clipboard (paste into Excel or Google Sheets)">{state === 'ok' ? 'Copied ✓' : state === 'fail' ? 'Copy failed' : '⧉ Copy'}</button>
 }
 
 /** Wraps any hand-written <table> so it gets a Copy button too. */
 export function CopyTable({ children, cls }) {
   const box = useRef(null)
+  const slot = useCopySlot(box)
+  const btn = <CopyBtn getTable={() => box.current?.querySelector('table')} />
   return (
-    <>
-      <div className="copy-row"><CopyBtn getTable={() => box.current?.querySelector('table')} /></div>
+    <div className="tbl">
+      {slot ? createPortal(btn, slot) : <div className="copy-row">{btn}</div>}
       <div className={cls} ref={box}>{children}</div>
-    </>
+    </div>
   )
+}
+
+/** Where a table's Copy button goes: the header of the card it sits in (when it is that card's only table), else a slim row above the table. */
+function useCopySlot(box) {
+  const [slot, setSlot] = useState(null)
+  useEffect(() => {
+    const card = box.current?.closest('.card')
+    const target = card?.querySelector(':scope > .card-head .copy-slot')
+    setSlot(target && card.querySelectorAll('.tbl').length === 1 ? target : null)
+  })
+  return slot
 }
 
 const CHUNK = 200
@@ -183,6 +196,18 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
   const [shown, setShown] = useState(CHUNK)
   const wrap = useRef(null)
   const tail = useRef(null)
+  const slot = useCopySlot(wrap)
+  const [edge, setEdge] = useState('')  // 'l' / 'r': there are more columns to scroll to on that side (shown as a fade)
+  useEffect(() => {
+    const el = wrap.current
+    if (!el) return undefined
+    const upd = () => setEdge(`${el.scrollLeft > 2 ? 'l' : ''}${el.scrollLeft + el.clientWidth < el.scrollWidth - 2 ? 'r' : ''}`)
+    upd()
+    el.addEventListener('scroll', upd, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(upd) : null
+    ro?.observe(el)
+    return () => { el.removeEventListener('scroll', upd); ro?.disconnect() }
+  }, [rows, cols])
   const server = typeof onSort === 'function'
   const sortOf = (c) => c.sortBy ?? c.key
   const idOf = (c) => c.key || c.label
@@ -232,8 +257,11 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
   const allOn = selectable && ids.length > 0 && ids.every((i) => selected.has(i))
   const showAll = () => { flushSync(() => setShown(count)) }  // copy includes rows that are not drawn yet
   return (
-    <>
-    <div className="copy-row"><CopyBtn getTable={() => wrap.current?.querySelector('table')} prepare={shown < count ? showAll : undefined} /></div>
+    <div className="tbl" data-edge={edge}>
+    {(() => {
+      const btn = <CopyBtn getTable={() => wrap.current?.querySelector('table')} prepare={shown < count ? showAll : undefined} />
+      return slot ? createPortal(btn, slot) : <div className="copy-row">{btn}</div>
+    })()}
     <div className={`table-wrap${scroll ? ' scroll' : ''}`} ref={wrap}>
       <table>
         <thead>
@@ -261,7 +289,7 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
       </table>
       {shown < count && <div ref={tail} className="muted" style={{ padding: '10px 4px', fontSize: 12 }}>Showing {shown.toLocaleString('en-IN')} of {count.toLocaleString('en-IN')} rows, more as you scroll…</div>}
     </div>
-    </>
+    </div>
   )
 }
 
@@ -328,7 +356,7 @@ export function Chips({ options, value, onChange }) {
 export function Search({ value, onChange, placeholder }) {
   const [v, setV] = useState(value || '')
   return (
-    <input className="field" style={{ minWidth: 260 }} placeholder={placeholder} aria-label={placeholder} type="search" value={v}
+    <input className="field search-field" style={{ minWidth: 340 }} placeholder={placeholder} aria-label={placeholder} type="search" value={v}
       onChange={(e) => { setV(e.target.value); clearTimeout(Search.t); Search.t = setTimeout(() => onChange(e.target.value), 350) }} />
   )
 }

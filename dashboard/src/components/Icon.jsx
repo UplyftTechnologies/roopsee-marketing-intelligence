@@ -1,6 +1,14 @@
 // Small stroke icon set (24x24 grid). Paths are simple geometry, so no icon library is needed.
 const P = {
   home: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  route: 'M6 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 17V9.5A3.5 3.5 0 0 1 9.5 6H16M18 7v7.5a3.5 3.5 0 0 1-3.5 3.5H8',
+  alert: 'M12 3.5 2.5 20h19zM12 10v4.5M12 17.2h.01',
+  image: 'M4 5h16v14H4zM4 15.5l4.5-4.5 4 4 2.5-2.5 5 5M15.5 9.2h.01',
+  pulse: 'M3 12h4l2.5-6 5 12 2.5-6h4',
+  login: 'M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5M9.5 16l4-4-4-4M13.5 12H3',
+  chat: 'M4 5h16v11H10l-6 4.5z',
+  book: 'M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 21H19',
+  sliders: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   funnel: 'M3 4h18l-7 8.5V19l-4 2v-8.5z',
   megaphone: 'M3 10v4a1 1 0 0 0 1 1h2l8 4V5L6 9H4a1 1 0 0 0-1 1zM18 8.5a4.5 4.5 0 0 1 0 7',

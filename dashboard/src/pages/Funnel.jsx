@@ -56,7 +56,7 @@ export default function Funnel() {
               <Card right={<ExportBtn name="abandoned-checkouts" rows={d.abandoned} fields={[['When', 'checkout_at'], ['Name', 'name'], ['Phone', 'phone10'], ['Cart value', 'cart_value'], ['Stopped at', 'outcome'], ['Channel', 'channel'], ['City', 'city']]} />} title="Abandoned checkouts to follow up" sub="latest 40 with a known phone shown first by recency; phone = last 10 digits">
                 <Table cols={[
                   { label: 'When', sortBy: 'checkout_at', render: (r) => dt(r.checkout_at) },
-                  { label: 'Who', sortBy: 'name', render: (r) => r.name || <span className="muted">anonymous</span> },
+                  { label: 'Who', sortBy: 'name', render: (r) => r.name || <span className="muted" title="Never logged in on this browser">Guest</span> },
                   { label: 'Phone', sortBy: 'phone10', cls: 'mono', render: (r) => r.phone10 || '–' },
                   { label: 'Cart', sortBy: 'cart_value', num: true, render: (r) => inr(r.cart_value) },
                   { label: 'Stopped at', sortBy: 'outcome', render: (r) => <Badge tone={OUTCOME[r.outcome]?.[1]}>{OUTCOME[r.outcome]?.[0]}</Badge> },

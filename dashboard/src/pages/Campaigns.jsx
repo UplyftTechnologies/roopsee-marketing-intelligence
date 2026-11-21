@@ -16,7 +16,9 @@ export default function Campaigns() {
       {({ rows, baseline_cart_rate: base, reconcile: rec }) => {
         const shown = rows.filter((r) => channel === 'All' || r.channel === channel)
         const maxCart = Math.max(0.0001, ...shown.map((r) => r.cart_rate))
-        const chart = shown.filter((r) => r.sessions >= 100).slice(0, 12).map((r) => ({ name: r.campaign.slice(0, 28), cart_rate: +(r.cart_rate * 100).toFixed(2), sessions: r.sessions }))
+        // a campaign name alone is ambiguous ("(not set)" exists on every channel): label each bar with its channel too, full text on hover
+        const chart = shown.filter((r) => r.sessions >= 100).slice(0, 12).map((r) => ({ name: `${r.campaign} · ${r.channel}`, cart_rate: +(r.cart_rate * 100).toFixed(2), sessions: r.sessions }))
+        const short = (v) => (v.length > 34 ? `${v.slice(0, 33)}…` : v)
         return (
           <>
             <div className="chip-row" style={{ justifyContent: 'space-between' }}>
@@ -58,7 +60,7 @@ export default function Campaigns() {
                   <BarChart data={chart} layout="vertical" margin={{ left: 20, right: 20 }}>
                     <CartesianGrid stroke="var(--grid)" horizontal={false} />
                     <XAxis type="number" {...axis} unit="%" />
-                    <YAxis type="category" dataKey="name" {...axis} width={190} />
+                    <YAxis type="category" dataKey="name" {...axis} width={240} tickFormatter={short} interval={0} />
                     <Tooltip {...chartTip} formatter={(v, n, p) => [`${v}% (${num(p.payload.sessions)} sessions)`, 'Cart rate']} />
                     <Bar dataKey="cart_rate" fill="var(--series-1)" radius={[0, 4, 4, 0]} maxBarSize={16} isAnimationActive={false} />
                   </BarChart>

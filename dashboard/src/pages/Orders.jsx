@@ -9,6 +9,7 @@ import MetricChart from '../components/MetricChart'
 import ShareLink from '../components/ShareLink'
 
 export const STATUS_TONE = { placed: '', accepted: '', picked_up: '', out_for_delivery: 'warn', delivered: 'good', completed: 'good', payment_cancelled: 'bad', payment_pending: 'warn' }
+const ordinal = (n) => { const t = n % 100; return n + (t >= 11 && t <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th') }
 export const niceStatus = (s) => (s || '–').replace(/_/g, ' ')
 const SCOPES = [['sales', 'Sales', 'Orders that count as sales (paid or cash on delivery), excluding test and internal orders'], ['all', 'All orders', 'Every real order, including ones where payment was cancelled or is pending'],
   ['unpaid', 'Payment cancelled / pending', 'Orders that never completed payment'], ['internal', 'Internal & test', 'Test orders and orders from staff accounts or excluded customers']]
@@ -68,7 +69,7 @@ function OrdersTable() {
                 rowClass={(r) => (r.is_excluded || !r.is_valid ? 'excluded' : '')} empty="No orders match these filters." rows={rows} cols={[
                   { label: 'Order', cls: 'mono nw', render: (r) => r.order_id.slice(0, 8) },
                   { label: 'Placed', cls: 'nw', sortBy: 'ts', render: (r) => dt(r.ts) },
-                  { label: 'Customer', cls: 'nw', sortBy: 'customer_name', render: (r) => <>{r.customer_name || <span className="muted">no name</span>}{(r.phone10 || r.nth_order > 1) && <div className="muted mono" style={{ fontSize: 11.5 }}>{r.phone10}{r.nth_order > 1 ? `${r.phone10 ? ' · ' : ''}${r.nth_order}th order` : ''}</div>}</> },
+                  { label: 'Customer', cls: 'nw', sortBy: 'customer_name', render: (r) => <>{r.customer_name || <span className="muted">no name</span>}{(r.phone10 || r.nth_order > 1) && <div className="muted mono" style={{ fontSize: 11.5 }}>{r.phone10}{r.nth_order > 1 ? `${r.phone10 ? ' · ' : ''}${ordinal(r.nth_order)} order` : ''}</div>}</> },
                   { label: 'City', cls: 'nw', sortBy: 'city', render: (r) => r.city || '–' },
                   { label: 'Items', sortBy: 'items_count', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 190 }} title={r.items}>{r.items_count} · {r.items || '–'}</span> },
                   { label: 'Order value', num: true, sortBy: 'total', render: (r) => <b>{inr(r.total)}</b> },

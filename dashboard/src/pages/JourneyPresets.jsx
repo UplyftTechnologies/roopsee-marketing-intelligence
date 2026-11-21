@@ -137,7 +137,7 @@ function Matches({ preset, labels, onClose }) {
   const [offset, setOffset] = useState(0)
   useEffect(() => { setOffset(0) }, [preset.id, mode, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
   const s = useMatch(preset.definition, { mode, sort: sort.key, direction: sort.dir, limit, offset })
-  const who = (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>)
+  const who = (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>)
   return (
     <Loading state={s}>
       {(d) => {

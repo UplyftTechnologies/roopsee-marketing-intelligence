@@ -226,7 +226,7 @@ function Rows({ scope, names, setNames, payload, addPayload, by, setBy, cols, se
                 empty="No events match these filters. Try removing a filter or widening the date range." cols={[
                   { label: 'Time', cls: 'nw', sortBy: 'ts', render: (r) => <>{dt(r.at)}{r.is_dup && <div><Badge>repeat</Badge></div>}</> },
                   { label: 'Event', cls: 'mono', sortBy: 'event_name', render: (r) => r.event_name },
-                  { label: 'Who', cls: 'nw', sortBy: 'who', render: (r) => r.who || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+                  { label: 'Who', cls: 'nw', sortBy: 'who', render: (r) => r.who || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
                   { label: 'Session', cls: 'mono nw', sortBy: 'session_id', render: (r) => <a href={`#session/${encodeURIComponent(r.session_id)}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); f.go('session', { key: r.session_id }) }} title="Open the session">{r.session_id.slice(0, 12)}…</a> },
                   { label: 'Page', sortBy: 'page', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={r.path}>{r.path || '–'}</span> },
                   { label: 'Product', sortBy: 'product', render: (r) => (r.product_name ? <span className="trunc" style={{ display: 'block', maxWidth: 180 }} title={r.product_name}>{r.product_name}</span> : <span className="muted">–</span>) },

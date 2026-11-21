@@ -9,7 +9,7 @@ const hourLabel = (h) => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`
 /** Columns shared by the Home list and the Logins page. */
 export const loginCols = (full) => [
   { label: 'Time', cls: 'nw', sortBy: 'at', render: (r) => dt(r.at) },
-  { label: 'Who', cls: 'nw', sortBy: 'name', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+  { label: 'Who', cls: 'nw', sortBy: 'name', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
   ...(full ? [{ label: 'Phone', cls: 'mono nw', render: (r) => r.phone10 || <span className="muted">–</span> }, { label: 'Email', cls: 'nw', render: (r) => (r.email ? <span className="trunc" style={{ display: 'block', maxWidth: 180 }} title={r.email}>{r.email}</span> : <span className="muted">–</span>) }] : []),
   { label: 'How', cls: 'nw', sortBy: 'method', render: (r) => r.method },
   { label: 'Account', cls: 'nw', render: (r) => (r.is_new ? <Badge tone="good">New account</Badge> : <span className="muted">Returning</span>) },

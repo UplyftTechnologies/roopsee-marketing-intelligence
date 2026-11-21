@@ -131,7 +131,7 @@ export default function PainPoints() {
                     <XAxis dataKey="date" tickFormatter={day} {...axis} minTickGap={32} />
                     <YAxis {...axis} width={48} allowDecimals={false} />
                     <Tooltip {...chartTip} labelFormatter={day} formatter={(v) => [num(v), 'visits']} />
-                    <Bar dataKey="value" fill="var(--series-1)" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="value" fill="var(--series-1)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -252,7 +252,7 @@ function Who({ stage, f, channel }) {
               <ExportBtn name={`pain-${stage}-people`} rows={people} fields={[['Name', 'name'], ['Phone', 'phone10'], ['City', 'city'], ['Last seen', 'last_seen'], ['Cart value', 'cart_value'], ['What went wrong', 'why'], ['Visits', 'visits'], ['Session id', 'session_id']]} />
             </div>
             <Table scroll onRow={(r) => f.go('person', { key: r.person_key })} rows={people} empty="Nobody to follow up." cols={[
-              { label: 'Who', cls: 'nw', sortBy: 'name', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+              { label: 'Who', cls: 'nw', sortBy: 'name', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
               { label: 'Phone', cls: 'mono nw', sortBy: 'phone10', render: (r) => r.phone10 || <span className="muted">–</span> },
               { label: 'City', cls: 'nw', sortBy: 'city', render: (r) => r.city || '–' },
               { label: 'Last seen', cls: 'nw', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },

@@ -32,7 +32,7 @@ export function Heatmap({ hours, unit = 'sessions' }) {
           </Fragment>
         ))}
       </div>
-      <div className="legend">{unit === 'orders' ? 'Orders' : 'Sessions'} by hour of day (IST) · lighter = fewer, darker = more · peak {num(max)} in one hour</div>
+      <div className="legend">{unit === 'orders' ? 'Orders' : 'Sessions'} by hour of day (IST) · stronger colour = more · peak {num(max)} in one hour</div>
     </div>
   )
 }

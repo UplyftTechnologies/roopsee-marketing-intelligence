@@ -76,7 +76,7 @@ function Detail({ cur, d, f }) {
           {({ rows, total }) => (
             <>
               <Table scroll onRow={(r) => f.go('person', { key: r.person_key })} rows={rows} empty="Nobody matches." cols={[
-                { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+                { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
                 { label: 'Phone', cls: 'mono nw', render: (r) => r.phone10 || <span className="muted">–</span> },
                 { label: 'City', cls: 'nw', render: (r) => r.city || '–' },
                 { label: 'Labels', render: (r) => <span>{(r.labels || []).slice(0, 5).map((t) => <Badge key={t}>{t}</Badge>)}</span> },

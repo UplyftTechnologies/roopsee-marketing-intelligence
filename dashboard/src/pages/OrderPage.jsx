@@ -4,7 +4,7 @@ import { CopyBtn, Facts } from '../components/profile'
 import Icon from '../components/Icon'
 import { STATUS_TONE, niceStatus } from './Orders'
 
-const ord = (n) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`)
+const ord = (n) => { const t = n % 100; return n + (t >= 11 && t <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th') }
 
 export default function OrderPage() {
   const f = useFilters()

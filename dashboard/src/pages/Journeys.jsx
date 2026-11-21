@@ -13,23 +13,26 @@ const CART_JOURNEYS = ['purchase', 'checkout', 'quiz', 'search', 'chat']
 function FunnelBars({ funnel, prev, onStopped, active }) {
   const top = Math.max(funnel[0]?.count || 0, 1)
   const worst = funnel.reduce((w, x, i) => (i && funnel[i - 1].count >= 20 && (w === null || x.of_prev < funnel[w].of_prev) ? i : w), null)
+  const stops = !!onStopped && funnel.some((x) => x.stopped > 0)
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div className={`fbars ${stops ? 'with-stops' : ''}`}>
       {funnel.map((x, i) => {
         const d = prev ? delta(x.count, prev[i]) : null
         return (
-          <div key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 190px) 1fr auto', gap: 10, alignItems: 'center' }}>
-            <div>{i + 1}. {x.label}</div>
-            <div style={{ background: 'var(--surface-2)', borderRadius: 6, height: 22, position: 'relative' }} title={`${num(x.count)} · ${pct(x.of_first, 1)} of the first step`}>
-              <div style={{ width: `${Math.max(0.5, (x.count / top) * 100)}%`, height: '100%', borderRadius: 6, background: worst === i ? 'var(--warning)' : 'var(--series-1)', opacity: 0.85 }} />
+          <div key={x.key} className="fbar-row">
+            <div className="fbar-label">{i + 1}. {x.label}</div>
+            <div className="fbar-track" title={`${num(x.count)} · ${pct(x.of_first, 1)} of the first step`}>
+              <div className={`fbar-fill ${worst === i ? 'worst' : ''}`} style={{ width: `${Math.max(0.5, (x.count / top) * 100)}%` }} />
             </div>
-            <div style={{ textAlign: 'right', fontSize: 13, minWidth: 190 }}>
-              <b>{num(x.count)}</b> <span className="muted">· {pct(x.of_first, 1)}{i ? ` · ${pct(x.of_prev, 0)} of prev` : ''}</span>
-              {d && <span className="muted"> · {d.text}</span>}
-              {x.stopped > 0 && onStopped && (
-                <div><button type="button" className="btn small" aria-pressed={active === x.key} onClick={() => onStopped(x.key)}>{num(x.stopped)} stopped here →</button></div>
-              )}
+            <div className="fbar-num">
+              <b>{num(x.count)}</b> <span className="muted">{pct(x.of_first, 1)}</span>
+              <div className="muted fbar-sub">{i ? `${pct(x.of_prev, 0)} of prev` : 'start'}{d ? ` · ${d.text}` : ''}</div>
             </div>
+            {stops && (
+              <div className="fbar-stop">
+                {x.stopped > 0 && <button type="button" className="btn small" aria-pressed={active === x.key} onClick={() => onStopped(x.key)} title="People who got this far, went no further and never bought">{num(x.stopped)} stopped →</button>}
+              </div>
+            )}
           </div>
         )
       })}
@@ -51,7 +54,7 @@ function Stopped({ journey, step, stepLabel, by, f, onClose }) {
           <>
             <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{num(total)} {total === 1 ? 'person' : 'people'}{total > people.length ? ` · showing the latest ${num(people.length)}` : ''}{by === 'sessions' ? ' (lists always count people)' : ''}</div>
             <Table scroll onRow={(r) => f.go('person', { key: r.person_key })} rows={people} empty="Nobody stopped here." cols={[
-              { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+              { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
               { label: 'Phone', cls: 'mono nw', render: (r) => r.phone10 || <span className="muted">–</span> },
               { label: 'City', cls: 'nw', render: (r) => r.city || '–' },
               { label: 'Last seen', cls: 'nw', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },
@@ -96,7 +99,7 @@ function FunnelJourney({ spec, by, setBy, how, setHow }) {
               {CART_JOURNEYS.includes(spec.key) && <Kpi label="Cart value left behind" value={inr(d.cart_at_risk)} d={p ? delta(d.cart_at_risk, p.cart_at_risk) : null} goodWhen="down" note="carts of people who did not buy" />}
               {!CART_JOURNEYS.includes(spec.key) && <Kpi label="Stopped on the way" value={num(d.stopped_total)} note="did not go on, and did not buy" />}
             </div>
-            <div className="grid g2">
+            <div className="grid g-funnel">
               <Card title={`${spec.label}: the funnel`} sub={`${spec.blurb} · the orange bar is the biggest drop`}>
                 <FunnelBars funnel={d.funnel} prev={p?.reached} active={open} onStopped={by === 'people' ? setOpen : undefined} />
                 {by !== 'people' && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Switch to People to see who stopped at each step.</div>}
@@ -213,7 +216,7 @@ function Explorer({ meta }) {
                 <Table scroll sort={sort} onSort={(k) => setSort(nextSort(sort, k, ['channel', 'city']))} onRow={(r) => f.go('session', { key: r.session_id })} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} rows={d.rows}
                   empty="No visits match. Try clearing a filter or widening the dates." cols={[
                     { label: 'Started', cls: 'nw', sortBy: 'started_at', render: (r) => dt(r.started_at) },
-                    { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+                    { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
                     { label: 'Journey', render: (r) => <div style={{ minWidth: 240, maxWidth: 420 }}><PathStrip path={r.key_events} />{r.entered.length > 0 && <div className="muted" style={{ fontSize: 11 }}>also: {r.entered.join(', ')}{r.had_problem ? ' · hit a problem' : ''}</div>}</div> },
                     { label: 'Ended at', cls: 'nw', render: (r) => <Badge tone={STAGE_TONE[r.stage]}>{r.stage_name}</Badge> },
                     { label: 'Order', num: true, sortBy: 'order_value', render: (r) => (r.order_value ? inr(r.order_value) : <span className="muted">–</span>) },
@@ -222,7 +225,7 @@ function Explorer({ meta }) {
                     { label: 'Time', num: true, sortBy: 'duration', render: (r) => dur(r.duration_s) }]} />
               ) : (
                 <Table scroll sort={sort} onSort={(k) => setSort(nextSort(sort, k, []))} onRow={(r) => f.go('person', { key: r.person_key })} rows={d.rows} empty="Nobody matches." cols={[
-                  { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+                  { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
                   { label: 'Their visits, in order', render: (r) => (
                     <span>{r.stages.map((st, i) => <span key={i}>{i > 0 && <span className="muted"> → </span>}<span title={`${r.channels[i] || ''}`}><Badge tone={STAGE_TONE[st]}>{STAGE[st]}</Badge></span></span>)}{r.visits > r.stages.length ? <span className="muted"> … {num(r.visits)} visits</span> : null}</span>
                   ) },

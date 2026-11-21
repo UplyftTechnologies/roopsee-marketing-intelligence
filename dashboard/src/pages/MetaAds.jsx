@@ -26,7 +26,20 @@ function Status({ onSynced }) {
     <Card title="Connection" sub="read-only: this dashboard can only read your Meta data, never change your ads"
       right={<button type="button" className="btn primary small" disabled={busy || f.meta?.job?.running || !st.configured} onClick={sync}>{busy || f.meta?.job?.running ? 'Syncing…' : 'Sync Meta now'}</button>}>
       {!st.configured
-        ? <div className="banner err">Add <span className="mono">META_ACCESS_TOKEN=…</span> to the <span className="mono">.env</span> file, then restart.</div>
+        ? (
+          <div className="setup">
+            <div className="muted" style={{ marginBottom: 8 }}>Not connected yet. Three steps, about 10 minutes, once:</div>
+            <ol className="setup-steps">
+              <li><b>Make a token.</b> In Meta Business Settings → <i>System users</i>, add a system user with access to your ad account and generate a token with the <span className="mono">ads_read</span> permission. A system-user token does not expire.</li>
+              <li><b>Add it to <span className="mono">.env</span></b> in the dashboard folder (never share or commit this file):
+                <pre className="mono setup-code">{`META_ACCESS_TOKEN=<your token>
+META_AD_ACCOUNT_IDS=act_1234567890   # optional: default is every account with spend
+META_SINCE=2026-06-01               # optional: first day to pull`}</pre></li>
+              <li><b>Restart and sync.</b> Stop the dashboard (<span className="mono">python run.py --stop</span>), start it again (<span className="mono">python run.py</span>) and press <b>Sync Meta now</b>.</li>
+            </ol>
+            <div className="muted" style={{ fontSize: 12.5 }}>So that orders can be matched to each campaign and ad, put these URL parameters on every ad: <span className="mono" style={{ wordBreak: 'break-all' }}>{URL_PARAMS}</span> <CopyBtn text={URL_PARAMS} title="Copy URL parameters" /></div>
+          </div>
+        )
         : (
           <div className="chip-row">
             <Badge tone={st.token?.valid ? 'good' : 'bad'}>{st.token?.valid ? `Connected as ${st.user || 'user'}` : 'Token problem'}</Badge>
@@ -192,7 +205,7 @@ export default function MetaAds() {
       <Status onSynced={() => setTick(tick + 1)} key={tick} />
       <Loading state={s}>
         {(o) => {
-          if (!o.connected) return <div className="banner">No Meta data yet. Press <b>Sync Meta now</b> above.</div>
+          if (!o.connected) return <div className="empty">No Meta data yet. Once connected (steps above), press <b>Sync Meta now</b>: spend, clicks and what each campaign brought in show up here.</div>
           const ts = { dates: o.dates, current: o.current, previous: o.previous, prev_dates: o.prev_dates }
           const t = o.totals
           const cov = o.coverage
