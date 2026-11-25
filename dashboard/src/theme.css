@@ -342,3 +342,54 @@ tr.click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 /* Journeys: the funnel gets more of the row than "What went wrong" */
 .g-funnel { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
 .fbar-stop .btn { white-space: nowrap; }
+
+/* ---------- responsive layout: use the whole screen on big displays, stay readable on small ones ---------- */
+.page { width: 100%; max-width: 2560px; margin-left: auto; margin-right: auto; }
+@media (min-width: 1500px) {
+  .page { padding-left: 32px; padding-right: 32px; }
+  .kpis { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+}
+@media (min-width: 1800px) {
+  .page { padding-left: 40px; padding-right: 40px; }
+  .g-main { grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+  .filter-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+}
+@media (min-width: 2200px) {
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(640px, 1fr)); }
+}
+/* tablets: three columns are too narrow */
+@media (max-width: 1100px) and (min-width: 901px) {
+  .g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* phones: the key numbers stay in two columns, wide tables scroll sideways instead of widening the page */
+@media (max-width: 480px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .card { padding: 12px 14px; }
+}
+.table-wrap { max-width: 100%; overflow-x: auto; }
+
+/* ---------- column chooser ---------- */
+.cols-btn.on, .cols-btn:hover { background: var(--hover); }
+.cols-count { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; line-height: 16px; display: inline-block; }
+.cols-panel { display: grid; gap: 4px; min-width: 260px; }
+.cols-list { display: grid; gap: 1px; max-height: min(340px, 50vh); overflow: auto; border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid); padding: 4px 0; }
+.cols-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.cols-item:hover { background: var(--hover); }
+.cols-extra { font-size: 11px; margin-left: auto; }
+.cols-sets { display: grid; gap: 6px; padding-top: 6px; }
+.icon-x { border: 0; background: none; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0 4px; }
+.icon-x:hover { color: var(--text-primary); }
+.export-grp { display: inline-flex; align-items: center; gap: 8px; }
+.export-follow { font-size: 11.5px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+@media (max-width: 700px) {
+  .cols-panel { min-width: 0; }
+  .pop-panel[role='dialog'] .cols-list { max-height: 40vh; }
+}
+
+/* ---------- map page ---------- */
+.map-box { height: clamp(380px, 64vh, 780px); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); z-index: 0; position: relative; isolation: isolate; background: var(--surface-2); }
+.map-box .leaflet-container { font: inherit; }
+.map-box .leaflet-tooltip { font-size: 12.5px; line-height: 1.45; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .map-box .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.6); } }
+:root[data-theme='dark'] .map-box .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.6); }

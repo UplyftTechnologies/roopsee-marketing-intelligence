@@ -701,3 +701,108 @@ class JourneyPresets(unittest.TestCase):
             with self.subTest(definition=str(d)[:60]):
                 with self.assertRaises(HTTPException):
                     api.preset_match(api.Definition(**d), **self.R)
+
+
+class AdAttribution(unittest.TestCase):
+    """Which Meta ad a visit came from: by id, by name, probably, or not at all."""
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def test_every_paid_meta_visit_has_exactly_one_kind(self):
+        d = api.meta_attribution(**self.R)
+        self.assertEqual(sum(d["by_match"].values()), d["visits"])
+        self.assertEqual(d["visits"], api.sessions(limit=1, channel="Paid Meta", **self.R)["total"])
+        self.assertEqual(d["tied"], d["by_match"]["id"] + d["by_match"]["name"] + d["by_match"]["probable"])
+
+    def test_the_sessions_filter_equals_the_health_card(self):
+        d = api.meta_attribution(**self.R)
+        for kind, n in d["by_match"].items():
+            with self.subTest(kind=kind):
+                self.assertEqual(api.sessions(limit=1, channel="Paid Meta", ad_match=kind, **self.R)["total"], n)
+
+    def test_a_resolved_ad_is_a_real_meta_ad(self):
+        bad = one("""SELECT count(*) AS n FROM session_attrib sa WHERE sa.ad_match IN ('id', 'name', 'probable')
+                     AND sa.ad_id NOT IN (SELECT ad_id FROM meta_ad_dim)""")["n"]
+        self.assertEqual(bad, 0)
+
+    def test_an_exact_id_is_never_replaced_and_the_raw_value_is_kept(self):
+        self.assertEqual(one("SELECT count(*) AS n FROM session_attrib WHERE ad_match = 'id' AND ad_id <> ad_raw")["n"], 0)
+        self.assertEqual(one("SELECT count(*) AS n FROM session_attrib WHERE ad_raw IS NULL")["n"], 0)
+
+    def test_a_campaign_is_tied_to_a_visit_at_most_once(self):
+        d = one("SELECT count(*) AS n, count(DISTINCT session_id) AS u FROM session_meta")
+        self.assertEqual(d["n"], d["u"])
+
+    def test_a_visit_tied_through_its_ad_is_listed_under_its_campaign(self):
+        r = one("""SELECT sm.meta_campaign_id AS c, count(*) AS n FROM session_meta sm JOIN sessions s USING (session_id)
+                   WHERE s.date_ist BETWEEN ? AND ? AND NOT s.is_excluded GROUP BY 1 ORDER BY 2 DESC LIMIT 1""", [self.R["date_from"], self.R["date_to"]])
+        self.assertEqual(api.sessions(limit=1, campaign_id=r["c"], **self.R)["total"], r["n"] + one(
+            "SELECT count(*) AS n FROM sessions s LEFT JOIN session_meta sm USING (session_id) WHERE s.date_ist BETWEEN ? AND ? AND NOT s.is_excluded AND s.campaign = ? AND sm.session_id IS NULL",
+            [self.R["date_from"], self.R["date_to"], r["c"]])["n"])
+
+    def test_unknown_kinds_are_ignored(self):
+        self.assertEqual(api.sessions(limit=1, ad_match="nope", **self.R)["total"], api.sessions(limit=1, **self.R)["total"])
+
+
+class GeoMap(unittest.TestCase):
+    """The map: visits, checkouts started and orders by area."""
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def total(self, d, k):
+        return sum(a[k] for a in d["areas"]) + d["unplaced"][k]
+
+    def test_visitor_view_adds_up_to_the_whole_range(self):
+        kp = api.overview(**self.R)["kpis"]
+        for level in ("state", "city"):
+            d = api.geo_areas(level=level, basis="visitor", limit=5000, **self.R)
+            with self.subTest(level=level):
+                self.assertEqual(self.total(d, "visits"), kp["sessions"])
+                self.assertEqual(self.total(d, "visits"), d["totals"]["visits"])
+                self.assertEqual(self.total(d, "checkouts"), d["totals"]["checkouts"])
+                self.assertEqual(self.total(d, "orders"), d["totals"]["orders"])
+
+    def test_orders_match_the_visits_that_ordered(self):
+        d = api.geo_areas(level="state", basis="visitor", **self.R)
+        self.assertEqual(d["totals"]["orders"], api.sessions(limit=1, has="order", **self.R)["total"])
+
+    def test_delivery_view_counts_every_order_of_the_orders_page(self):
+        n = api.orders_list(scope="sales", limit=1, **self.R)["total"]
+        for level in ("state", "city", "pincode"):
+            d = api.geo_areas(level=level, basis="delivery", limit=5000, **self.R)
+            with self.subTest(level=level):
+                self.assertEqual(self.total(d, "orders"), n)
+                self.assertEqual(d["totals"]["orders"], n)
+
+    def test_a_state_opens_exactly_its_visits(self):
+        d = api.geo_areas(level="state", basis="visitor", **self.R)
+        for a in d["areas"][:5]:
+            regions = ",".join(sorted({f["region"] for f in a["filters"]}))
+            with self.subTest(state=a["name"]):
+                self.assertEqual(api.sessions(limit=1, region=regions, **self.R)["total"], a["visits"])
+
+    def test_a_city_opens_exactly_its_visits(self):
+        d = api.geo_areas(level="city", basis="visitor", **self.R)
+        for a in [x for x in d["areas"] if len(x["filters"]) == 1][:5]:
+            f = a["filters"][0]
+            with self.subTest(city=a["name"]):
+                self.assertEqual(api.sessions(limit=1, city=f["city"], region=f["region"], **self.R)["total"], a["visits"])
+
+    def test_every_area_is_a_point_in_india(self):
+        for level, basis in (("state", "visitor"), ("city", "visitor"), ("pincode", "delivery")):
+            for a in api.geo_areas(level=level, basis=basis, limit=5000, **self.R)["areas"]:
+                self.assertTrue(6 <= a["lat"] <= 38 and 67 <= a["lon"] <= 98.5, (level, a["name"]))
+
+    def test_state_names_match_the_outlines(self):
+        from mi import geo
+        names = set(geo._data()["centres"])
+        for r in q("SELECT DISTINCT region AS n FROM sessions WHERE region IS NOT NULL"):
+            c = geo.canon_state(r["n"])
+            self.assertTrue(c is None or c in names, r["n"])
+        self.assertEqual(geo.canon_state("National Capital Territory Of Delhi"), "Delhi")
+        self.assertEqual(geo.canon_state("Jammu And Kashmir"), "Jammu & Kashmir")
+        self.assertIsNone(geo.canon_state("Harare"))
+
+    def test_bad_input_is_refused(self):
+        from fastapi import HTTPException
+        for kw in (dict(level="country"), dict(basis="nope")):
+            with self.assertRaises(HTTPException):
+                api.geo_areas(**kw, **self.R)

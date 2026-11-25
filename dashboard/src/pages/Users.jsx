@@ -65,6 +65,14 @@ export default function Users() {
                     { label: 'Carts', num: true, sortBy: 'cart_sessions', render: (r) => r.cart_sessions }, { label: 'Orders', num: true, sortBy: 'orders', render: (r) => r.orders },
                     { label: 'Revenue', num: true, sortBy: 'revenue', render: (r) => (r.revenue ? inr(r.revenue) : '–') },
                     { label: 'Last seen', cls: 'nw', sortBy: 'last_seen', render: (r) => dt(r.last_seen) },
+                    { label: 'First seen', hidden: true, cls: 'nw', sortBy: 'first_seen', render: (r) => dt(r.first_seen) },
+                    { label: 'First campaign', hidden: true, render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 190 }} title={r.first_campaign}>{r.first_campaign && r.first_campaign !== '(not set)' ? r.first_campaign : '–'}</span> },
+                    { label: 'Checkouts', hidden: true, num: true, sortBy: 'checkout_sessions', render: (r) => r.checkout_sessions },
+                    { label: 'Device', hidden: true, cls: 'nw', render: (r) => `${r.device || '–'}${r.uses_app ? ' · app' : ''}` },
+                    { label: 'Gender', hidden: true, render: (r) => r.gender || '–' },
+                    { label: 'Skin type', hidden: true, render: (r) => r.skin_type || '–' },
+                    { label: 'Age', hidden: true, render: (r) => r.age_bucket || '–' },
+                    { label: 'User id', hidden: true, cls: 'mono nw', render: (r) => r.user_id || '–' },
                     { label: '', render: (r) => (r.is_excluded ? <Badge tone="bad">excluded</Badge> : null) },
                   ]} rows={rows} empty="Nobody matches these filters." />
                 <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />

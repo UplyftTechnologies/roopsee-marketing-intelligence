@@ -104,7 +104,7 @@ def deeper_ads(date_from: str | None = None, date_to: str | None = None, include
     ads_raw = q(f"""SELECT sa.ad_id, {agg} {SESS} JOIN session_attrib sa ON sa.session_id = s.session_id {ps} WHERE {w} AND s.channel = 'Paid Meta' GROUP BY 1
                     HAVING count(*) >= 5 ORDER BY sessions DESC LIMIT 36""", a)
     ids = [r["ad_id"] for r in ads_raw]
-    info = {r["entity_id"]: r for r in q("SELECT entity_id, name, effective_status, campaign_id FROM raw_meta_entities WHERE entity_type = 'ad'")}
+    info = {r["entity_id"]: r for r in q("SELECT ad_id AS entity_id, name, status AS effective_status, campaign_id FROM meta_ad_dim")}
     spend = {r["ad_id"]: r for r in q("SELECT ad_id, sum(spend) AS spend, sum(link_clicks) AS clicks, sum(impressions) AS impressions FROM raw_meta_insights WHERE date BETWEEN ? AND ? GROUP BY 1",
                                       [date_from or "2000-01-01", date_to or "2999-12-31"])}
     land_mix: dict = {}
@@ -153,7 +153,7 @@ def deeper_flow(date_from: str | None = None, date_to: str | None = None, includ
     ids = [r["ad_id"] for r in ads]
     if not ids:
         return {"ready": True, "ads": [], "concerns": [], "edges": [], "products": []}
-    info = {r["entity_id"]: r["name"] for r in q("SELECT entity_id, name FROM raw_meta_entities WHERE entity_type = 'ad'")}
+    info = {r["ad_id"]: r["name"] for r in q("SELECT ad_id, name FROM meta_ad_dim")}
     for r in ads:
         r["name"], r["image"] = info.get(r["ad_id"]), ad_image_url(r["ad_id"])
     ad_c = q(f"""{base} SELECT b.ad_id, c.concern, c.source, count(DISTINCT b.session_id) AS sessions, count(DISTINCT b.session_id) FILTER (WHERE b.ordered) AS orders

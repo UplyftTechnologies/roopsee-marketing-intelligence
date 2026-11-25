@@ -76,6 +76,18 @@ function OrdersTable() {
                   { label: 'Coupon', cls: 'nw', sortBy: 'coupon_code', render: (r) => (r.coupon_code ? <span title={r.coupon_discount ? `${inr(r.coupon_discount)} off` : ''}>{r.coupon_code.split(',')[0]}</span> : <span className="muted">–</span>) },
                   { label: 'Payment', cls: 'nw', sortBy: 'payment_method', render: (r) => r.payment_method || <span className="muted">–</span> },
                   { label: 'Status', cls: 'nw', sortBy: 'status', render: (r) => <span title={r.payment_failed_reason || ''}><Badge tone={STATUS_TONE[r.status]}>{niceStatus(r.status)}</Badge>{r.is_valid && (r.payment_state === 'unconfirmed' || r.payment_state === 'conflicting') ? <> <Badge tone="warn">{r.payment_state === 'conflicting' ? 'payment conflict' : 'payment unconfirmed'}</Badge></> : null}</span> },
+                  { label: 'Email', hidden: true, render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 190 }} title={r.email}>{r.email || '–'}</span> },
+                  { label: 'Order id', hidden: true, cls: 'mono nw', render: (r) => r.order_id },
+                  { label: 'State · pincode', hidden: true, cls: 'nw', render: (r) => [r.state, r.pincode].filter(Boolean).join(' · ') || '–' },
+                  { label: 'Items total', hidden: true, num: true, render: (r) => (r.products_total ? inr(r.products_total) : '–') },
+                  { label: 'Coupon discount', hidden: true, num: true, render: (r) => (r.coupon_discount ? inr(r.coupon_discount) : '–') },
+                  { label: 'Delivery fee', hidden: true, num: true, render: (r) => (r.delivery_fee ? inr(r.delivery_fee) : '–') },
+                  { label: 'Wallet used', hidden: true, num: true, render: (r) => (r.wallet_amount_used ? inr(r.wallet_amount_used) : '–') },
+                  { label: 'Credited to', hidden: true, cls: 'nw', render: (r) => r.credit_channel || r.channel || '–' },
+                  { label: 'Campaign', hidden: true, render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 190 }} title={r.campaign}>{r.campaign && r.campaign !== '(not set)' ? r.campaign : '–'}</span> },
+                  { label: 'Device', hidden: true, cls: 'nw', render: (r) => r.device || '–' },
+                  { label: 'Rider', hidden: true, cls: 'nw', render: (r) => r.rider_name || '–' },
+                  { label: 'Delivered', hidden: true, cls: 'nw', render: (r) => (r.delivered_at ? dt(r.delivered_at) : '–') },
                   { label: '', render: (r) => (r.is_test ? <Badge>test</Badge> : r.is_staff_order ? <Badge tone="warn">staff</Badge> : r.is_excluded ? <Badge tone="bad">excluded</Badge> : null) },
                 ]} />
               <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />

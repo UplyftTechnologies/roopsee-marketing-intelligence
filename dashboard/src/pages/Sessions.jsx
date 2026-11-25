@@ -46,24 +46,31 @@ function OrderValue({ r }) {
   return <span className="muted">–</span>
 }
 
+const AD_MATCH = { id: 'Exact ad id', name: 'Matched by name', probable: 'Probable (name shared by several ads)', unmatched: 'No ad matches', none: 'No ad in the link' }
+
 export default function Sessions() {
   const f = useFilters()
   const pre = f.prefill || {}
   // filters are remembered while you open a session / person and come back; a drill-down from another tab starts fresh
   const sh = pre.share || null  // opened from a shared link
-  const fresh = Boolean(pre.search || pre.channel || pre.ad || pre.adset || pre.campaign_id || pre.landing_product || pre.has || sh)
+  const fresh = Boolean(pre.search || pre.channel || pre.ad || pre.adset || pre.campaign_id || pre.landing_product || pre.ad_match || pre.region || pre.city || pre.delivery_state || pre.delivery_city || pre.pincode || pre.has || sh)
   const [search, setSearch] = usePersisted('sessions.search', sh?.search ?? (pre.search || ''), fresh)
   const [channel, setChannel] = usePersisted('sessions.channel', sh?.channel ?? (pre.channel || 'All'), fresh)
   const [has, setHas] = usePersisted('sessions.has', sh?.has ?? pre.has ?? [], fresh)
   const [lacks, setLacks] = usePersisted('sessions.lacks', sh?.lacks ?? [], fresh)
   const [match, setMatch] = usePersisted('sessions.match2', sh?.match ?? 'all', fresh)
   const [only, setOnly] = usePersisted('sessions.only', sh?.only ?? 'counted', fresh)
-  const [pincode, setPincode] = usePersisted('sessions.pincode', sh?.pincode ?? '', fresh)
+  const [pincode, setPincode] = usePersisted('sessions.pincode', sh?.pincode ?? pre.pincode ?? '', fresh)
   const [event, setEvent] = usePersisted('sessions.event', sh?.event ?? '', fresh)
   const [ad, setAd] = usePersisted('sessions.ad', sh?.ad ?? pre.ad ?? '', fresh)
   const [adset, setAdset] = usePersisted('sessions.adset', sh?.adset ?? pre.adset ?? '', fresh)
   const [campaignId, setCampaignId] = usePersisted('sessions.campaign_id', sh?.campaignId ?? pre.campaign_id ?? '', fresh)
   const [landing, setLanding] = usePersisted('sessions.landing', sh?.landing ?? pre.landing_product ?? '', fresh)
+  const [region, setRegion] = usePersisted('sessions.region', sh?.region ?? pre.region ?? '', fresh)
+  const [city, setCity] = usePersisted('sessions.city', sh?.city ?? pre.city ?? '', fresh)
+  const [dState, setDState] = usePersisted('sessions.dstate', sh?.dState ?? pre.delivery_state ?? '', fresh)
+  const [dCity, setDCity] = usePersisted('sessions.dcity', sh?.dCity ?? pre.delivery_city ?? '', fresh)
+  const [adMatch, setAdMatch] = usePersisted('sessions.ad_match', sh?.adMatch ?? pre.ad_match ?? '', fresh)
   const adList = useApi('/sessions/ads')
   const evNames = useApi('/events/names', {}, { scoped: false })
   const [sort, setSort] = usePersisted('sessions.sort', sh?.sort ?? { key: 'started_at', dir: 'desc' }, fresh)
@@ -75,16 +82,16 @@ export default function Sessions() {
   const counts = useApi('/sessions/counts')
   const s = useApi('/sessions', {
     search, channel: channel === 'All' ? undefined : channel, has: has.join(',') || undefined, lacks: lacks.join(',') || undefined, match,
-    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, ad: ad || undefined, adset: adset || undefined, campaign_id: campaignId || undefined, landing_product: landing || undefined, sort: sort.key, direction: sort.dir, limit, offset,
+    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, ad: ad || undefined, adset: adset || undefined, campaign_id: campaignId || undefined, landing_product: landing || undefined, ad_match: adMatch || undefined, region: region || undefined, city: city || undefined, delivery_state: dState || undefined, delivery_city: dCity || undefined, sort: sort.key, direction: sort.dir, limit, offset,
   })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, ad, adset, campaignId, landing, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
+  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, ad, adset, campaignId, landing, adMatch, region, city, dState, dCity, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
   const activePreset = PRESETS.find(([, , h, l, m]) => same(h, has) && same(l, lacks) && (h.length < 2 || m === match))?.[0]
   const stateOf = (k) => (has.includes(k) ? 'did' : lacks.includes(k) ? 'not' : 'any')
   const setFlag = (k, st) => {
     setHas((h) => (st === 'did' ? [...h.filter((x) => x !== k), k] : h.filter((x) => x !== k)))
     setLacks((l) => (st === 'not' ? [...l.filter((x) => x !== k), k] : l.filter((x) => x !== k)))
   }
-  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setEvent(''); setAd(''); setAdset(''); setCampaignId(''); setLanding(''); setChannel('All'); setSearch(''); setOnly('counted') }
+  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setEvent(''); setAd(''); setAdset(''); setCampaignId(''); setLanding(''); setAdMatch(''); setRegion(''); setCity(''); setDState(''); setDCity(''); setChannel('All'); setSearch(''); setOnly('counted') }
   const activeChips = [
     ...has.map((k) => ({ id: `d-${k}`, text: `Did: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
     ...lacks.map((k) => ({ id: `n-${k}`, text: `Did not: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
@@ -92,6 +99,11 @@ export default function Sessions() {
     ...(ad ? [{ id: 'ad', text: `Ad: ${(adList.data || []).find((x) => x.ad_id === ad)?.name || ad}`, off: () => setAd('') }] : []),
     ...(adset ? [{ id: 'adset', text: `Ad set: ${adset}`, off: () => setAdset('') }] : []),
     ...(campaignId ? [{ id: 'cid', text: `Campaign: ${campaignId}`, off: () => setCampaignId('') }] : []),
+    ...(region ? [{ id: 'reg', text: `Browsing from: ${region.split(',').join(' / ')}`, off: () => setRegion('') }] : []),
+    ...(city ? [{ id: 'cty', text: `City: ${city.split(',').join(' / ')}`, off: () => setCity('') }] : []),
+    ...(dState ? [{ id: 'dst', text: `Delivery state: ${dState.split(',').join(' / ')}`, off: () => setDState('') }] : []),
+    ...(dCity ? [{ id: 'dct', text: `Delivery city: ${dCity.split(',').join(' / ')}`, off: () => setDCity('') }] : []),
+    ...(adMatch ? [{ id: 'adm', text: `Ad link: ${AD_MATCH[adMatch]}`, off: () => setAdMatch('') }] : []),
     ...(landing ? [{ id: 'lp', text: `Landed on product: ${landing}`, off: () => setLanding('') }] : []),
     ...(pins ? [{ id: 'pin', text: `Pincode: ${pins.split(',').join(', ')}`, off: () => setPincode('') }] : []),
     ...(channel !== 'All' ? [{ id: 'ch', text: `Channel: ${channel}`, off: () => setChannel('All') }] : []),
@@ -110,7 +122,7 @@ export default function Sessions() {
           Filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
         </button>
         {(nFilters > 0 || search) && <button type="button" className="btn" onClick={clearAll}>Clear all</button>}
-        <ShareLink tab="sessions" state={{ search, channel, has, lacks, match, only, pincode, event, ad, adset, campaignId, landing, sort }} />
+        <ShareLink tab="sessions" state={{ search, channel, has, lacks, match, only, pincode, event, ad, adset, campaignId, landing, adMatch, region, city, dState, dCity, sort }} />
       </div>
       <div className="chip-row" role="group" aria-label="Quick views">
         <span className="muted" style={{ fontSize: 12 }}>Quick views</span>
@@ -153,6 +165,12 @@ export default function Sessions() {
                   {(adList.data || []).map((x) => <option key={x.ad_id} value={x.ad_id}>{`${x.name || x.ad_id} (${num(x.sessions)})`}</option>)}
                 </select>
               </label>
+              <label className="flag-row" title="How sure we are about the ad: the link held the ad's id, held the name of one ad, held a name several ads share (the likeliest is chosen), or matched no ad"><span className="flag-name">Ad link</span>
+                <select className="field" value={adMatch} onChange={(e) => setAdMatch(e.target.value)} aria-label="Ad link" style={{ maxWidth: 220 }}>
+                  <option value="">Any</option>
+                  {Object.entries(AD_MATCH).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
               <label className="flag-row" title="The pincode the visitor typed or picked as their delivery location"><span className="flag-name">Pincode</span>
                 <input className="field" value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="400001, 560001" aria-label="Pincode" style={{ width: 150 }} />
               </label>
@@ -191,10 +209,22 @@ export default function Sessions() {
                   { label: 'Stage', cls: 'nw', sortBy: 'stage', render: (r) => <span title={STAGE[r.stage]}><Badge tone={STAGE_TONE[r.stage]}>{STAGE_SHORT[r.stage]}</Badge></span> },
                   { label: 'Order value', num: true, sortBy: 'order_value', render: (r) => <OrderValue r={r} /> },
                   { label: 'Channel', cls: 'nw', sortBy: 'channel', render: (r) => <span title={`${r.source} / ${r.medium} / ${r.campaign}`}>{r.channel}</span> },
-                  { label: 'Ad', cls: 'nw', render: (r) => (r.ad_id ? <span title={r.ad_id}><span className="trunc" style={{ display: 'inline-block', maxWidth: 150, verticalAlign: 'bottom' }}>{r.ad_name || r.ad_id}</span>{r.roop_opened ? <> <Badge tone="good">Roop</Badge></> : null}</span> : (r.roop_opened ? <Badge tone="good">Roop</Badge> : <span className="muted">–</span>)) },
+                  { label: 'Ad', cls: 'nw', render: (r) => (r.ad_id ? <span title={r.ad_id}><span className="trunc" style={{ display: 'inline-block', maxWidth: 150, verticalAlign: 'bottom' }}>{r.ad_name || r.ad_id}</span>{r.ad_match === 'name' || r.ad_match === 'probable' ? <> <Badge tone={r.ad_match === 'probable' ? 'warn' : ''}>{r.ad_match === 'probable' ? 'probable' : 'by name'}</Badge></> : null}{r.roop_opened ? <> <Badge tone="good">Roop</Badge></> : null}</span> : (r.roop_opened ? <Badge tone="good">Roop</Badge> : <span className="muted">–</span>)) },
                   { label: 'Place · device', cls: 'nw', sortBy: 'city', render: (r) => `${r.city || r.region || '–'} · ${r.is_app ? 'App' : r.device || '–'}` },
                   { label: 'Pincode', cls: 'mono nw', sortBy: 'pincode', render: (r) => r.pincode || <span className="muted">–</span> },
                   { label: 'Events', num: true, sortBy: 'events', render: (r) => r.events }, { label: 'Time', num: true, sortBy: 'duration_s', render: (r) => dur(r.duration_s) },
+                  { label: 'Phone', hidden: true, cls: 'mono nw', render: (r) => r.phone10 || <span className="muted">–</span> },
+                  { label: 'Source / medium', hidden: true, cls: 'nw', render: (r) => `${r.source || '–'} / ${r.medium || '–'}` },
+                  { label: 'Campaign', hidden: true, render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={r.campaign}>{r.campaign && r.campaign !== '(not set)' ? r.campaign : '–'}</span> },
+                  { label: 'Ad id', hidden: true, cls: 'mono nw', render: (r) => r.ad_id || <span className="muted">–</span> },
+                  { label: 'Ad set id', hidden: true, cls: 'mono nw', render: (r) => r.adset_id || <span className="muted">–</span> },
+                  { label: 'Landing page', hidden: true, render: (r) => <span className="mono trunc" style={{ display: 'block', maxWidth: 220 }} title={r.landing_path}>{r.landing_path || '–'}</span> },
+                  { label: 'Page views', hidden: true, num: true, sortBy: 'pageviews', render: (r) => r.pageviews },
+                  { label: 'Region · country', hidden: true, cls: 'nw', render: (r) => [r.region, r.country].filter(Boolean).join(', ') || '–' },
+                  { label: 'Platform', hidden: true, cls: 'nw', render: (r) => r.platform || '–' },
+                  { label: 'IP address', hidden: true, cls: 'mono nw', render: (r) => r.ip || <span className="muted">–</span> },
+                  { label: 'Visitor id', hidden: true, cls: 'mono nw', render: (r) => r.visitor_key },
+                  { label: 'Session id', hidden: true, cls: 'mono nw', render: (r) => r.session_id },
                 ]} rows={rows} empty="No sessions match these filters. Try clearing a filter or widening the date range." />
               <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
             </Card>

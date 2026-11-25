@@ -43,6 +43,25 @@ const SECTIONS = [
     ['Sessions filters', 'Ad, ad set, campaign and landing product narrow the Sessions list to the visits behind a row; Roop (opened / asked) joins the Did / Did not choices. Searching an ad id or name also finds its visits.'],
     ['Bracketed rows', 'Visits with no ad id, ad set or campaign tag in their link (shown as “(no ad)” and so on) cannot be listed by it.'],
   ]],
+  ['Map', [
+    ['What the circles are', 'Blue: visits. Amber: visits that started a checkout. Green: orders. They are drawn on top of each other, all on one scale, so the green and amber circles sit inside the blue one. Click a circle or a state to list those visits.'],
+    ['Where visitors browse from', 'Visits, checkouts and orders of the same visits, placed by the visitor’s IP address (state and city). It is where they were, not where the order goes, and about one visit in eight has no IP location. Orders here are visits that ordered.'],
+    ['Where orders are delivered', 'Every valid order by its delivery address, the same orders as the Orders page. Visits and checkouts only exist for the few visitors who typed a pincode or saved an address, so they are a small part of the total. Pincode is always this view.'],
+    ['Not on the map', 'Places we could not find (no IP location, or a name that is not in the place list) are counted under the map, so the areas plus this line always equal the whole. Shading by a rate skips states with fewer than 30 visits.'],
+    ['Place data', 'State outlines, pincode centres and place-name centres come from public files stored in mi/geo_data (GeoNames, CC BY 4.0). Outlines are simplified, for orientation only. The background map (OpenStreetMap) needs an internet connection.'],
+  ]],
+  ['Choosing table columns', [
+    ['Columns button', 'Every table with more than four columns has a Columns button next to Copy. Tick the columns to show; the first column (it names the row) always stays. All shows every column, Essentials the main ones, Reset goes back to the default.'],
+    ['Extra columns', 'Some tables offer columns that are off until you tick them (marked “extra”): for example IP address and visitor id on Sessions, delivery fee on Orders, CPM and cost per order on Meta Ads.'],
+    ['Saved views', 'Type a name under the list and press Save to keep the current set of columns; click its name later to bring it back. Everything is remembered in this browser, per table.'],
+    ['Copy and Export CSV', 'Copy table copies the columns you can see. Export CSV includes every column unless you tick “shown columns only” next to it.'],
+  ]],
+  ['Which ad brought a visit', [
+    ['How the ad is found', 'The link a visitor arrives with holds the ad in utm_content and the ad set in utm_term. Exact id: it is a Meta ad id (the synced list or the spend report, which also knows archived ads). By name: it is the name of exactly one ad. Probable: several ads share that name (or the value was cut short), so the likeliest is chosen: same ad set, same campaign, spent money that day, spent most. No ad matches / No ad in the link: nothing to tie it to.'],
+    ['Why it matters', 'Names and cut-off values are matched so visits are not lost, but a probable match can be wrong. Campaign-level orders and ROAS use a visit’s ad only when it is exact, by name, or every ad it could be sits in the same campaign.'],
+    ['Fixing the source', 'Put the URL parameters shown on Meta Ads in every ad (they fill in the real ids). “Ads with spend but no visit tied to them” lists the ads to check; app-install ads rarely bring site visits.'],
+    ['Where to see it', 'Meta Ads → “Which ad brought each visit”; the Sessions Ad link filter; the Ad column and the session page show when an ad was matched by name or probably.'],
+  ]],
   ['Journeys tab', [
     ['Journey', 'A series of steps a shopper takes towards a goal: Purchase, Checkout, Login & sign-up, Skin quiz, Search & discovery, Roop chat, and After the order (delivery). Every journey is a funnel with the same layout.'],
     ['Reached a step', 'Did that step, or any LATER step of the same journey: a saved address or a default payment method can skip a click, so a later step counts for the earlier ones.'],

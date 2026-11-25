@@ -10,6 +10,7 @@ and exclusions can be edited and re-applied at any time.
 import time
 from datetime import datetime
 
+from .attrib_sql import ATTRIB_SQL
 from .db import TRANSFORM_LOCK, log_run
 
 # ---------------------------------------------------------------- exclusions (editable user data)
@@ -902,7 +903,7 @@ def _run_steps(con, flags_only, note, t0) -> dict:
         con.execute(sql)
         _log(f"{name}: {time.time() - t:.1f}s")
     t = time.time(); note("rebuilding: exclusion hits"); step_hits(con); _log(f"exclusion hits: {time.time() - t:.1f}s")
-    for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META),
+    for name, sql in [("sessions", STEP_SESSIONS), ("events_clean", STEP_EVENTS_CLEAN), ("orders_clean", STEP_ORDERS), ("products / order lines", STEP_PRODUCTS), ("meta links", STEP_META), ("ad attribution", ATTRIB_SQL),
                       ("checkout", STEP_CHECKOUT), ("users_360 / cohorts / campaigns", STEP_USERS), ("pain points", None), ("logins", None), ("roop chats", None), ("deeper analysis", None), ("journeys", None)]:
         t = time.time()
         note(f"rebuilding: {name}")

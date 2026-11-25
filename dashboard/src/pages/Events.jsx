@@ -237,6 +237,12 @@ function Rows({ scope, names, setNames, payload, addPayload, by, setBy, cols, se
                   ...autoCols.map((c) => ({ label: c, cls: 'mono', render: (r) => r.params.find((p) => p.k === c)?.v ?? <span className="muted">–</span> })),
                   ...pcols.map((c) => ({ label: c, cls: 'mono', render: (r) => r.payload[c] ?? <span className="muted">–</span> })),
                   { label: 'Parameters', render: (r) => <Params params={r.params.filter((p) => !autoCols.includes(p.k))} /> },
+                  { label: 'Phone', hidden: true, cls: 'mono nw', render: (r) => r.phone10 || '–' },
+                  { label: 'Event group', hidden: true, cls: 'nw', render: (r) => r.event_key || '–' },
+                  { label: 'Page type', hidden: true, cls: 'nw', render: (r) => r.page_type || '–' },
+                  { label: 'Order id', hidden: true, cls: 'mono nw', render: (r) => r.order_id || '–' },
+                  { label: 'Channel', hidden: true, cls: 'nw', render: (r) => r.channel || '–' },
+                  { label: 'Campaign', hidden: true, render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 180 }} title={r.campaign}>{r.campaign && r.campaign !== '(not set)' ? r.campaign : '–'}</span> },
                   { label: 'City · device', cls: 'nw', sortBy: 'city', render: (r) => `${r.city || '–'} · ${r.is_app ? 'App' : r.device || '–'}` },
                 ]} />
               <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />

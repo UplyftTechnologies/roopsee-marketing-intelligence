@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from .core import app, q, ratio, sess_where
 
 LEVELS = {
-    "campaign": "s.campaign",
+    "campaign": "coalesce(sm.meta_campaign_id, s.campaign)",
     "adset": "coalesce(sa.adset_id, '(no ad set)')",
     "ad": "coalesce(sa.ad_id, '(no ad)')",
     "channel": "s.channel",
@@ -31,7 +31,7 @@ def roop_usage(level: str = "campaign", date_from: str | None = None, date_to: s
         return {"ready": False}
     key = LEVELS[level]
     w, a = sess_where(date_from, date_to, include_excluded)
-    base = ("FROM sessions s JOIN journey_sessions j ON j.session_id = s.session_id LEFT JOIN session_attrib sa ON sa.session_id = s.session_id "
+    base = ("FROM sessions s JOIN journey_sessions j ON j.session_id = s.session_id LEFT JOIN session_attrib sa ON sa.session_id = s.session_id LEFT JOIN session_meta sm ON sm.session_id = s.session_id "
             f"WHERE {w}")
     rows = q(f"""SELECT {key} AS key, max(s.channel) AS channel, count(*) AS sessions, count(*) FILTER (WHERE j.chat_opened) AS opened, count(*) FILTER (WHERE j.chat_asked) AS asked,
                  count(*) FILTER (WHERE j.chat_answered) AS answered, count(*) FILTER (WHERE j.chat_clicked) AS clicked,
@@ -42,12 +42,14 @@ def roop_usage(level: str = "campaign", date_from: str | None = None, date_to: s
              [*a, max(1, int(min_sessions)), max(1, min(int(limit), 1000))])
     names = {}
     if level in ENTITY:
-        names = {r["entity_id"]: r["name"] for r in q("SELECT entity_id, any_value(name) AS name FROM raw_meta_entities WHERE entity_type = ? GROUP BY 1", [ENTITY[level]])}
+        src = {"ad": "SELECT ad_id AS entity_id, name FROM meta_ad_dim", "adset": "SELECT adset_id AS entity_id, name FROM meta_adset_dim",
+               "campaign": "SELECT entity_id, any_value(name) AS name FROM raw_meta_entities WHERE entity_type = 'campaign' GROUP BY 1"}[level]
+        names = {r["entity_id"]: r["name"] for r in q(src)}
     topics: dict = {}
     keys = [r["key"] for r in rows]
     if keys and q("SELECT 1 FROM information_schema.tables WHERE table_name = 'chat_messages'"):
         for r in q(f"""SELECT {key} AS key, c.topic, count(*) AS n FROM chat_messages c JOIN sessions s ON s.session_id = c.session_id
-                       LEFT JOIN session_attrib sa ON sa.session_id = c.session_id WHERE {w} AND {key} IN (SELECT unnest(?::VARCHAR[])) GROUP BY 1, 2 ORDER BY 3 DESC""", [*a, keys]):
+                       LEFT JOIN session_attrib sa ON sa.session_id = c.session_id LEFT JOIN session_meta sm ON sm.session_id = c.session_id WHERE {w} AND {key} IN (SELECT unnest(?::VARCHAR[])) GROUP BY 1, 2 ORDER BY 3 DESC""", [*a, keys]):
             topics.setdefault(r["key"], []).append({"name": r["topic"], "count": r["n"]})
     for r in rows:
         r["name"] = names.get(r["key"]) or r["key"]

@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
+import Popover from './components/Popover'
 
 /* ---------- metric glossary: shown as hover/focus help next to labels ---------- */
 export const GLOSSARY = {
@@ -147,12 +148,12 @@ export function CopyBtn({ getTable, prepare }) {
 }
 
 /** Wraps any hand-written <table> so it gets a Copy button too. */
-export function CopyTable({ children, cls }) {
+export function CopyTable({ children, cls, menu, hiddenLabels }) {
   const box = useRef(null)
   const slot = useCopySlot(box)
-  const btn = <CopyBtn getTable={() => box.current?.querySelector('table')} />
+  const btn = <>{menu}<CopyBtn getTable={() => box.current?.querySelector('table')} /></>
   return (
-    <div className="tbl">
+    <div className="tbl" data-hidden={hiddenLabels && hiddenLabels.length ? JSON.stringify(hiddenLabels) : undefined}>
       {slot ? createPortal(btn, slot) : <div className="copy-row">{btn}</div>}
       <div className={cls} ref={box}>{children}</div>
     </div>
@@ -168,6 +169,88 @@ function useCopySlot(box) {
     setSlot(target && card.querySelectorAll('.tbl').length === 1 ? target : null)
   })
   return slot
+}
+
+/* ---------- choosing which columns of a table to show (remembered per table in this browser) ---------- */
+const colId = (c) => c.key || c.label
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)) } catch { return null } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* private window: the choice just is not kept */ } },
+  del(k) { try { localStorage.removeItem(k) } catch { /* ignore */ } },
+}
+
+/** Which columns of a table are shown. A column can be marked `hidden` (off until chosen) or `essential` (kept by "Essentials"); columns with no label (pictures) always show,
+ *  and so does the first labelled column (it names the row). The choice and any saved views are kept per table key. */
+export function useColumns(key, cols) {
+  const k = `mi.cols.${key}`
+  const sk = `mi.colsets.${key}`
+  const [saved, setSaved] = useState(() => store.get(k))
+  const [sets, setSets] = useState(() => store.get(sk) || [])
+  const pickable = cols.filter((c) => c.label)
+  const locked = pickable.length ? colId(pickable[0]) : null
+  const isOn = (c) => {
+    if (!c.label || colId(c) === locked) return true
+    if (!saved || !saved.known || !saved.known.includes(colId(c))) return !c.hidden  // never chosen, or a column added later: its default
+    return saved.on.includes(colId(c))
+  }
+  const visible = cols.filter(isOn)
+  const defaults = pickable.filter((c) => !c.hidden).map(colId)
+  const essentials = (pickable.some((c) => c.essential) ? pickable.filter((c) => c.essential) : pickable.filter((c) => !c.hidden).slice(0, 6)).map(colId)
+  const setOn = (ids) => { const v = { on: [...new Set([locked, ...ids].filter(Boolean))], known: pickable.map(colId) }; setSaved(v); store.set(k, v) }
+  const reset = () => { setSaved(null); store.del(k) }
+  const saveSet = (name) => {
+    const n = name.trim().slice(0, 40)
+    if (!n) return
+    const next = [...sets.filter((x) => x.name !== n), { name: n, on: pickable.filter(isOn).map(colId) }]
+    setSets(next); store.set(sk, next)
+  }
+  const dropSet = (name) => { const next = sets.filter((x) => x.name !== name); setSets(next); store.set(sk, next) }
+  const shown = pickable.filter(isOn).length
+  return { visible, pickable, isOn, locked, setOn, reset, defaults, essentials, sets, saveSet, dropSet, shown, total: pickable.length, changed: Boolean(saved),
+    worth: pickable.length > 4 || pickable.some((c) => c.hidden), hiddenLabels: pickable.filter((c) => !isOn(c)).map((c) => String(c.label)) }
+}
+
+/** The "Columns" button of a table: tick what to show, jump to All / Essentials, keep named views. */
+export function ColumnsMenu({ cc }) {
+  const [name, setName] = useState('')
+  if (!cc.worth) return null
+  return (
+    <Popover width={300} trigger={({ open, toggle }) => (
+      <button type="button" className={`btn small cols-btn${open ? ' on' : ''}`} onClick={toggle} aria-expanded={open} title="Choose which columns to show in this table">
+        ▦ Columns{cc.changed || cc.pickable.some((c) => c.hidden) ? <span className="cols-count">{cc.shown}/{cc.total}</span> : null}
+      </button>
+    )}>
+      <div className="cols-panel">
+        <div className="chip-row" style={{ marginBottom: 6 }}>
+          <button type="button" className="btn small" onClick={() => cc.setOn(cc.pickable.map(colId))}>All</button>
+          <button type="button" className="btn small" onClick={() => cc.setOn(cc.essentials)}>Essentials</button>
+          <button type="button" className="btn small" onClick={cc.reset} disabled={!cc.changed}>Reset</button>
+          <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>{cc.shown} of {cc.total}</span>
+        </div>
+        <div className="cols-list">
+          {cc.pickable.map((c) => (
+            <label key={colId(c)} className="cols-item" title={colId(c) === cc.locked ? 'This column names the row, so it always shows' : undefined}>
+              <input type="checkbox" checked={cc.isOn(c)} disabled={colId(c) === cc.locked}
+                onChange={(e) => cc.setOn(e.target.checked ? [...cc.pickable.filter(cc.isOn).map(colId), colId(c)] : cc.pickable.filter((x) => cc.isOn(x) && colId(x) !== colId(c)).map(colId))} />
+              <span>{c.label}</span>{c.hidden && <span className="muted cols-extra">extra</span>}
+            </label>
+          ))}
+        </div>
+        <div className="cols-sets">
+          {cc.sets.map((v) => (
+            <span key={v.name} className="chip-row" style={{ gap: 2 }}>
+              <button type="button" className="chip" onClick={() => cc.setOn(v.on)} title="Show this saved set of columns">{v.name}</button>
+              <button type="button" className="icon-x" onClick={() => cc.dropSet(v.name)} aria-label={`Delete the view ${v.name}`} title="Delete this view">✕</button>
+            </span>
+          ))}
+          <form className="chip-row" onSubmit={(e) => { e.preventDefault(); cc.saveSet(name); setName('') }}>
+            <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Save these columns as…" aria-label="Name for this set of columns" style={{ flex: 1, minWidth: 0 }} />
+            <button type="submit" className="btn small" disabled={!name.trim()}>Save</button>
+          </form>
+        </div>
+      </div>
+    </Popover>
+  )
 }
 
 const CHUNK = 200
@@ -191,8 +274,10 @@ const Row = memo(function Row({ r, id, cols, idOf, onRow, rowClass, selectable, 
  *  `scroll`: the table scrolls inside a box (both ways) with the column headings pinned; rows are added as you scroll down.
  *  Columns: { label, key?, sortBy? (field name or fn), num?, render?, cls? }  - sortable when key or sortBy is set.
  *  Client sort by default; pass `sort` ({key, dir}) + `onSort(key)` for server-side sorting of paginated data. */
-export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll }) {
+export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll, id: tableId }) {
   const [local, setLocal] = useState(null)
+  const cc = useColumns(tableId || cols.filter((c) => c.label).map((c) => c.label).join('|').slice(0, 160), cols)
+  const vis = cc.visible
   const [shown, setShown] = useState(CHUNK)
   const wrap = useRef(null)
   const tail = useRef(null)
@@ -252,14 +337,14 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
     if (server) return sort && sort.key === (typeof sb === 'function' ? idOf(c) : sb) ? sort.dir : null
     return local && local.id === idOf(c) ? local.dir : null
   }
-  const sig = cols.map(idOf).join('|')
+  const sig = vis.map(idOf).join('|')
   const ids = selectable ? data.map(rowId) : []
   const allOn = selectable && ids.length > 0 && ids.every((i) => selected.has(i))
   const showAll = () => { flushSync(() => setShown(count)) }  // copy includes rows that are not drawn yet
   return (
-    <div className="tbl" data-edge={edge}>
+    <div className="tbl" data-edge={edge} data-hidden={cc.hiddenLabels.length ? JSON.stringify(cc.hiddenLabels) : undefined}>
     {(() => {
-      const btn = <CopyBtn getTable={() => wrap.current?.querySelector('table')} prepare={shown < count ? showAll : undefined} />
+      const btn = <><ColumnsMenu cc={cc} /><CopyBtn getTable={() => wrap.current?.querySelector('table')} prepare={shown < count ? showAll : undefined} /></>
       return slot ? createPortal(btn, slot) : <div className="copy-row">{btn}</div>
     })()}
     <div className={`table-wrap${scroll ? ' scroll' : ''}`} ref={wrap}>
@@ -267,7 +352,7 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
         <thead>
           <tr>
             {selectable && <th className="sel"><input type="checkbox" aria-label="Select all rows" checked={allOn} onChange={(e) => onToggleAll(ids, e.target.checked)} /></th>}
-            {cols.map((c) => {
+            {vis.map((c) => {
               const d = dirOf(c)
               const can = !!sortOf(c)
               return (
@@ -282,7 +367,7 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
         <tbody>
           {data.slice(0, shown).map((r, i) => {
             const id = selectable ? rowId(r) : i
-            return <Row key={id} r={r} id={id} cols={cols} idOf={idOf} onRow={onRow} rowClass={rowClass} selectable={selectable} isSel={selectable ? selected.has(id) : false}
+            return <Row key={id} r={r} id={id} cols={vis} idOf={idOf} onRow={onRow} rowClass={rowClass} selectable={selectable} isSel={selectable ? selected.has(id) : false}
               onToggle={onToggle} big={count > 150} sig={sig} />
           })}
         </tbody>
@@ -294,9 +379,17 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
 }
 
 /** Download the rows as CSV. fields = [[header, key | fn(row)], ...] */
-export function ExportBtn({ rows, fields, name }) {
+export function ExportBtn({ rows, fields: allFields, name }) {
+  const ref = useRef(null)
+  const [follow, setFollow] = useState(() => store.get('mi.exportShown') === true)
   if (!rows || !rows.length) return null
   const go = () => {
+    let fields = allFields
+    if (follow) {  // only what is on screen: drop the fields named like a column hidden in a table of this card
+      const hidden = new Set()
+      ref.current?.closest('.card')?.querySelectorAll('.tbl[data-hidden]').forEach((t) => { try { JSON.parse(t.dataset.hidden).forEach((l) => hidden.add(l.toLowerCase())) } catch { /* ignore */ } })
+      if (hidden.size) fields = allFields.filter(([h]) => !hidden.has(String(h).toLowerCase()))
+    }
     const esc = (v) => (v === null || v === undefined ? '' : `"${String(v).replace(/"/g, '""')}"`)
     const lines = [fields.map(([h]) => esc(h)).join(',')]
     rows.forEach((r) => lines.push(fields.map(([, k]) => esc(typeof k === 'function' ? k(r) : r[k])).join(',')))
@@ -307,7 +400,12 @@ export function ExportBtn({ rows, fields, name }) {
     a.click()
     URL.revokeObjectURL(url)
   }
-  return <button className="btn small" onClick={go} title="Download the rows loaded on this screen as a CSV file">Export CSV ({rows.length.toLocaleString('en-IN')} rows)</button>
+  return (
+    <span className="export-grp" ref={ref}>
+      <button className="btn small" onClick={go} title="Download the rows loaded on this screen as a CSV file">Export CSV ({rows.length.toLocaleString('en-IN')} rows)</button>
+      <label className="muted export-follow" title="When ticked, the CSV leaves out the columns you hid with the Columns button"><input type="checkbox" checked={follow} onChange={(e) => { setFollow(e.target.checked); store.set('mi.exportShown', e.target.checked) }} /> shown columns only</label>
+    </span>
+  )
 }
 
 /** Horizontal rate bar used inside table cells (single hue, thin, anchored left). */
@@ -346,7 +444,7 @@ export function Chips({ options, value, onChange }) {
       {options.map((o) => {
         const v = typeof o === 'string' ? o : o.value
         const l = typeof o === 'string' ? o : o.label
-        return <button key={v} className={`chip ${value === v ? 'on' : ''}`} onClick={() => onChange(v)}>{l}</button>
+        return <button key={v} className={`chip ${value === v ? 'on' : ''}`} disabled={typeof o !== 'string' && o.disabled} onClick={() => onChange(v)}>{l}</button>
       })}
     </div>
   )

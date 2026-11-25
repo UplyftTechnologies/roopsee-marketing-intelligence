@@ -76,6 +76,11 @@ export default function SessionPage() {
                     <span className="mono">{s.data.ad.ad_id}</span>{s.data.ad.status ? ` · ${String(s.data.ad.status).toLowerCase().replace(/_/g, ' ')}` : ''}
                     {s.data.ad.spend > 0 ? ` · ₹${Math.round(s.data.ad.spend).toLocaleString('en-IN')} spent in all` : ''}{!s.data.ad.name ? ' · not in the synced Meta accounts' : ''}
                   </div>
+                  {s.data.ad.ad_match && s.data.ad.ad_match !== 'id' && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                      {s.data.ad.ad_match === 'name' ? 'Found by the ad name in the link' : 'Probably this ad: the link only said'} “{s.data.ad.ad_raw}”{s.data.ad.ad_match === 'probable' ? ', which several ads share, so the likeliest one is shown (same ad set or campaign, spending that day).' : '.'}
+                    </div>
+                  )}
                   <button type="button" className="btn small" style={{ marginTop: 6 }} onClick={() => f.go('sessions', { ad: s.data.ad.ad_id })}>All {num(s.data.ad.visits)} visits from this ad →</button>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, day, dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
-import { Badge, Card, Chips, CopyTable, ExportBtn, Kpi, Loading, Table, verdictTone } from '../ui'
+import { Badge, Card, Chips, ColumnsMenu, CopyTable, ExportBtn, Kpi, Loading, Table, useColumns, verdictTone } from '../ui'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
 import MetricChart from '../components/MetricChart'
@@ -89,6 +89,20 @@ function Levels({ campaigns, active }) {
           { label: 'Clicks', num: true, sortBy: 'link_clicks', render: (r) => num(r.link_clicks) },
           { label: 'CTR', num: true, sortBy: 'ctr', render: (r) => pct(r.ctr, 2) },
           { label: 'CPC', num: true, sortBy: 'cpc', render: (r) => rupee(r.cpc) },
+          { label: 'Impressions', hidden: true, num: true, sortBy: 'impressions', render: (r) => num(r.impressions) },
+          { label: 'CPM', hidden: true, num: true, sortBy: 'cpm', render: (r) => rupee(r.cpm) },
+          { label: 'Daily budget', hidden: true, num: true, sortBy: 'daily_budget', render: (r) => (r.daily_budget ? inr(r.daily_budget) : '–') },
+          { label: 'Objective', hidden: true, cls: 'nw', render: (r) => (r.objective ? r.objective.toLowerCase().replace(/_/g, ' ') : '–') },
+          { label: 'Our visitors', hidden: true, num: true, sortBy: 'visitors', render: (r) => num(r.visitors) },
+          { label: 'Checkouts', hidden: true, num: true, sortBy: 'checkouts', render: (r) => num(r.checkouts) },
+          { label: 'Cost / visit', hidden: true, num: true, sortBy: 'cost_per_session', render: (r) => rupee(r.cost_per_session) },
+          { label: 'Cost / order', hidden: true, num: true, sortBy: 'cost_per_order', render: (r) => rupee(r.cost_per_order) },
+          { label: 'Our revenue', hidden: true, num: true, sortBy: 'revenue', render: (r) => inr(r.revenue) },
+          { label: 'Meta: carts', hidden: true, num: true, sortBy: 'meta_atc', render: (r) => num(r.meta_atc) },
+          { label: 'Meta: checkouts', hidden: true, num: true, sortBy: 'meta_checkout', render: (r) => num(r.meta_checkout) },
+          { label: 'Meta ROAS', hidden: true, num: true, sortBy: 'meta_roas', render: (r) => (r.meta_roas == null ? '–' : `${r.meta_roas.toFixed(2)}×`) },
+          { label: 'First day', hidden: true, cls: 'nw', render: (r) => (r.first_day ? day(r.first_day) : '–') },
+          { label: 'Last day', hidden: true, cls: 'nw', render: (r) => (r.last_day ? day(r.last_day) : '–') },
           { label: 'Meta says', num: true, sortBy: 'meta_purchases', render: (r) => <span title={`Meta reports ${num(r.meta_purchases)} purchases worth ${inr(r.meta_value)}`}>{num(r.meta_purchases)} bought</span> },
         ]} />
       ) : (
@@ -109,6 +123,11 @@ function Levels({ campaigns, active }) {
               { label: 'Clicks', num: true, sortBy: 'link_clicks', render: (r) => num(r.link_clicks) }, { label: 'CTR', num: true, sortBy: 'ctr', render: (r) => pct(r.ctr, 2) },
               { label: 'CPC', num: true, sortBy: 'cpc', render: (r) => rupee(r.cpc) }, { label: 'Meta: carts', num: true, sortBy: 'meta_atc', render: (r) => num(r.meta_atc) },
               { label: 'Meta: purchases', num: true, sortBy: 'meta_purchases', render: (r) => num(r.meta_purchases) },
+              { label: 'CPM', hidden: true, num: true, render: (r) => (r.impressions ? rupee((r.spend / r.impressions) * 1000) : '–') },
+              { label: 'Clicks (all)', hidden: true, num: true, sortBy: 'clicks', render: (r) => num(r.clicks) },
+              { label: 'Meta: checkouts', hidden: true, num: true, sortBy: 'meta_checkout', render: (r) => num(r.meta_checkout) },
+              { label: 'Meta purchase value', hidden: true, num: true, sortBy: 'meta_value', render: (r) => inr(r.meta_value) },
+              { label: 'Meta ROAS', hidden: true, num: true, sortBy: 'meta_roas', render: (r) => (r.meta_roas == null ? '–' : `${r.meta_roas.toFixed(2)}×`) },
             ]} />
             )
           }}
@@ -119,7 +138,11 @@ function Levels({ campaigns, active }) {
 }
 
 /** Campaign -> ad set -> ad as one expandable tree, with spend and results at every level. */
+const TREE_COLS = ['Status', 'Budget / day', 'Spend', 'Impressions', 'Clicks', 'CTR', 'CPC', 'Meta: carts', 'Meta: purchases', 'Meta ROAS', 'Matched orders', 'ROAS (matched)']
+
 function Flow({ data, open, setOpen, q }) {
+  const cc = useColumns('meta-tree', [{ label: 'Campaign → ad set → ad' }, ...TREE_COLS.map((label) => ({ label }))])
+  const on = (label) => cc.isOn({ label })
   const ql = q.trim().toLowerCase()
   const m = (n) => !ql || n.name.toLowerCase().includes(ql) || String(n.id).includes(ql)
   const has = (n) => m(n) || (n.children || []).some(has)
@@ -133,12 +156,12 @@ function Flow({ data, open, setOpen, q }) {
   const toggle = (id) => { const x = new Set(open); if (x.has(id)) x.delete(id); else x.add(id); setOpen(x) }
   if (!rows.length) return <div className="muted">Nothing matches.</div>
   return (
-    <CopyTable cls="table-wrap">
+    <CopyTable cls="table-wrap" menu={<ColumnsMenu cc={cc} />} hiddenLabels={cc.hiddenLabels}>
       <table className="tree">
         <thead>
           <tr>
-            <th>Campaign → ad set → ad</th><th>Status</th><th className="num">Budget / day</th><th className="num">Spend</th><th className="num">Impressions</th><th className="num">Clicks</th>
-            <th className="num">CTR</th><th className="num">CPC</th><th className="num">Meta: carts</th><th className="num">Meta: purchases</th><th className="num">Meta ROAS</th><th className="num" title="Orders tied to this campaign by its id or name">Matched orders</th><th className="num" title="Revenue of the matched orders divided by spend">ROAS (matched)</th>
+            <th>Campaign → ad set → ad</th>{on('Status') && <th>Status</th>}{on('Budget / day') && <th className="num">Budget / day</th>}{on('Spend') && <th className="num">Spend</th>}{on('Impressions') && <th className="num">Impressions</th>}{on('Clicks') && <th className="num">Clicks</th>}
+            {on('CTR') && <th className="num">CTR</th>}{on('CPC') && <th className="num">CPC</th>}{on('Meta: carts') && <th className="num">Meta: carts</th>}{on('Meta: purchases') && <th className="num">Meta: purchases</th>}{on('Meta ROAS') && <th className="num">Meta ROAS</th>}{on('Matched orders') && <th className="num" title="Orders tied to this campaign by its id or name">Matched orders</th>}{on('ROAS (matched)') && <th className="num" title="Revenue of the matched orders divided by spend">ROAS (matched)</th>}
           </tr>
         </thead>
         <tbody>
@@ -159,18 +182,18 @@ function Flow({ data, open, setOpen, q }) {
                     {kids > 0 && <span className="muted" style={{ fontSize: 12 }}>{kids}</span>}
                   </div>
                 </td>
-                <td className="nw">{n.status ? <Badge tone={STATUS_TONE[n.status]}>{n.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–'}</td>
-                <td className="num">{n.daily_budget ? inr(n.daily_budget) : '–'}</td>
-                <td className="num"><b>{inr(n.spend)}</b>{share != null && <div className="share" style={{ width: `${Math.max(share, 2)}%` }} title={`${share.toFixed(0)}% of the parent's spend`} />}</td>
-                <td className="num">{num(n.impressions)}</td>
-                <td className="num">{num(n.link_clicks)}</td>
-                <td className="num">{pct(n.ctr, 2)}</td>
-                <td className="num">{rupee(n.cpc)}</td>
-                <td className="num">{num(n.meta_atc)}</td>
-                <td className="num">{num(n.meta_purchases)}</td>
-                <td className="num">{n.meta_roas == null ? '–' : `${n.meta_roas.toFixed(2)}×`}</td>
-                <td className="num">{camp ? num(n.orders) : <span className="muted" title="Our sessions and orders are matched to campaigns only">–</span>}</td>
-                <td className="num">{camp ? (n.our_roas == null ? '–' : `${n.our_roas.toFixed(2)}×`) : <span className="muted">–</span>}</td>
+                {on('Status') && <td className="nw">{n.status ? <Badge tone={STATUS_TONE[n.status]}>{n.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–'}</td>}
+                {on('Budget / day') && <td className="num">{n.daily_budget ? inr(n.daily_budget) : '–'}</td>}
+                {on('Spend') && <td className="num"><b>{inr(n.spend)}</b>{share != null && <div className="share" style={{ width: `${Math.max(share, 2)}%` }} title={`${share.toFixed(0)}% of the parent's spend`} />}</td>}
+                {on('Impressions') && <td className="num">{num(n.impressions)}</td>}
+                {on('Clicks') && <td className="num">{num(n.link_clicks)}</td>}
+                {on('CTR') && <td className="num">{pct(n.ctr, 2)}</td>}
+                {on('CPC') && <td className="num">{rupee(n.cpc)}</td>}
+                {on('Meta: carts') && <td className="num">{num(n.meta_atc)}</td>}
+                {on('Meta: purchases') && <td className="num">{num(n.meta_purchases)}</td>}
+                {on('Meta ROAS') && <td className="num">{n.meta_roas == null ? '–' : `${n.meta_roas.toFixed(2)}×`}</td>}
+                {on('Matched orders') && <td className="num">{camp ? num(n.orders) : <span className="muted" title="Our sessions and orders are matched to campaigns only">–</span>}</td>}
+                {on('ROAS (matched)') && <td className="num">{camp ? (n.our_roas == null ? '–' : `${n.our_roas.toFixed(2)}×`) : <span className="muted">–</span>}</td>}
               </tr>
             )
           })}
@@ -218,6 +241,67 @@ function Hierarchy({ active }) {
 
 import MetaReconcile from '../components/MetaReconcile'
 
+const MATCH_ROWS = [
+  ['id', 'The link held the ad id', 'good'], ['name', 'The link held the name of one ad', 'good'], ['probable', 'The name is shared by several ads: the likeliest is used', 'warn'],
+  ['unmatched', 'The link held something that matches no ad', 'bad'], ['none', 'The link had no ad at all', 'bad'],
+]
+
+/** How well Paid Meta visits are tied to the ad that brought them, and which ads spend money with no visit tied to them. */
+function AttributionHealth() {
+  const f = useFilters()
+  const s = useApi('/meta/attribution', {}, { scoped: true })
+  return (
+    <Card title="Which ad brought each visit" sub="every Paid Meta visit carries its ad in the link; this shows how many we can tie to an ad, and which ads we cannot see">
+      <Loading state={s}>
+        {(d) => {
+          if (!d.ready) return <div className="muted">Needs Meta data and a refresh to be built.</div>
+          const share = (n) => (d.visits ? n / d.visits : 0)
+          return (
+            <>
+              <div className="kpis">
+                <Kpi label="Paid Meta visits" value={num(d.visits)} note={`${pct(share(d.campaign_matched), 0)} tied to a campaign`} />
+                <Kpi label="Tied to an ad" value={pct(share(d.tied), 0)} note={`${num(d.tied)} visits · ${num(d.by_match.id + d.by_match.name)} for sure`} />
+                <Kpi label="Not tied to any ad" value={num(d.by_match.unmatched + d.by_match.none)} note={`${pct(share(d.by_match.unmatched + d.by_match.none), 0)} of visits`} />
+                <Kpi label="Spend on ads with visits" value={pct(d.spend ? d.spend_tied / d.spend : 0, 0)} note={`${inr(d.spend_tied)} of ${inr(d.spend)} · ${d.ads_with_visits} of ${d.ads_with_spend} ads`} />
+              </div>
+              <Table rows={MATCH_ROWS.map(([k, label, tone]) => ({ k, label, tone, n: d.by_match[k] }))} onRow={(r) => f.go('sessions', { channel: 'Paid Meta', ad_match: r.k })} cols={[
+                { label: 'How the ad was found', render: (r) => <Badge tone={r.tone}>{r.label}</Badge> },
+                { label: 'Visits', num: true, sortBy: 'n', render: (r) => num(r.n) },
+                { label: 'Share', num: true, render: (r) => pct(share(r.n), 1) },
+              ]} />
+              {d.silent_ads.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <b>Ads with spend but no visit tied to them</b> <span className="muted" style={{ fontSize: 12 }}>{inr(d.silent_spend)} in all · usually the link of the ad has no <span className="mono">{'{{ad.id}}'}</span>, or the ad sends people somewhere else (an app install, Instagram profile)</span>
+                  <Table rows={d.silent_ads} cols={[
+                    { label: 'Ad', sortBy: 'name', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 320 }} title={r.name}>{r.name || r.ad_id}</span> },
+                    { label: 'Id', render: (r) => <Id v={r.ad_id} /> },
+                    { label: 'Status', cls: 'nw', render: (r) => (r.status ? <Badge tone={STATUS_TONE[r.status]}>{r.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–') },
+                    { label: 'Spend', num: true, sortBy: 'spend', render: (r) => <b>{inr(r.spend)}</b> },
+                    { label: 'Clicks', num: true, sortBy: 'clicks', render: (r) => num(r.clicks) },
+                  ]} />
+                </div>
+              )}
+              {d.unmatched_values.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <b>What the unmatched links said</b>
+                  <Table rows={d.unmatched_values} onRow={(r) => f.go('sessions', { channel: 'Paid Meta', ad_match: 'unmatched', search: r.value })} cols={[
+                    { label: 'Value in the link', render: (r) => <span className="mono trunc" style={{ display: 'block', maxWidth: 360 }} title={r.value}>{r.value}</span> },
+                    { label: 'Visits', num: true, render: (r) => num(r.visits) },
+                    { label: 'What it looks like', render: (r) => <span className="muted">{r.hint}</span> },
+                  ]} />
+                </div>
+              )}
+              <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+                To tie every visit to its exact ad, put this in the URL parameters of each ad (it fills in the real ids): <span className="mono">{URL_PARAMS}</span> <CopyBtn text={URL_PARAMS} title="Copy URL parameters" />
+              </div>
+            </>
+          )
+        }}
+      </Loading>
+    </Card>
+  )
+}
+
 export default function MetaAds() {
   const f = useFilters()
   const [metric, setMetric] = useState('m_spend')
@@ -260,6 +344,8 @@ export default function MetaAds() {
               </Card>
 
               <MetaReconcile />
+
+              <AttributionHealth />
 
               {covPct < 0.9 && (
                 <div className="banner">

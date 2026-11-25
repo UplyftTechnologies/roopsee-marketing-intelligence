@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { dur, inr, num, pct, useApi, useFilters } from '../api'
-import { Card, CopyTable, ExportBtn, GLOSSARY, Search } from '../ui'
+import { Card, ColumnsMenu, CopyTable, ExportBtn, GLOSSARY, Search, useColumns } from '../ui'
 import Icon from './Icon'
 
 const DIMENSIONS = [['channel', 'Channel'], ['channel_split', 'Channel (Direct split new / returning)'], ['source_medium', 'Source / medium'], ['campaign', 'Campaign'], ['device', 'Device'],
@@ -39,6 +39,8 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
   const drill = DRILL[dimension]
   const max = d ? Math.max(1, ...d.rows.map((r) => r.sessions)) : 1
   const exportFields = [[dimLabel, 'dim'], ...COLS.map(([k, label]) => [label, k])]
+  const cc = useColumns('report', [{ label: dimLabel || 'Group', key: 'dim' }, ...COLS.map(([k, label]) => ({ label, key: k }))])
+  const cols = COLS.filter(([k]) => cc.isOn({ label: true, key: k }))
 
   return (
     <Card title={title} sub={sub} right={d ? <ExportBtn name={`report-${dimension}`} rows={d.rows} fields={exportFields} /> : null}>
@@ -56,12 +58,12 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
       {!d && !s.error && <div className="skeleton" style={{ height: 260 }} />}
       {d && (
         <>
-          <CopyTable cls="table-wrap">
+          <CopyTable cls="table-wrap" menu={<ColumnsMenu cc={cc} />} hiddenLabels={cc.hiddenLabels}>
             <table className="rt">
               <thead>
                 <tr>
                   <th className={`sortable ${sort === 'dim' ? 'sorted' : ''}`} onClick={() => onHead('dim')}>{dimLabel}{arrow('dim')}</th>
-                  {COLS.map(([k, label, help]) => (
+                  {cols.map(([k, label, help]) => (
                     <th key={k} className={`num sortable ${sort === k ? 'sorted' : ''}`} onClick={() => onHead(k)} title={GLOSSARY[help]}>{label}{arrow(k)}</th>
                   ))}
                 </tr>
@@ -69,14 +71,14 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
               <tbody>
                 {d.totals && (
                   <tr className="total">
-                    <td>Total</td>{COLS.map(([k, , , cell]) => <td key={k} className="num">{k === 'sessions' ? num(d.totals.sessions) : cell(d.totals, max)}</td>)}
+                    <td>Total</td>{cols.map(([k, , , cell]) => <td key={k} className="num">{k === 'sessions' ? num(d.totals.sessions) : cell(d.totals, max)}</td>)}
                   </tr>
                 )}
-                {d.rows.length === 0 && <tr><td colSpan={COLS.length + 1}><div className="empty">No rows match. Try a wider date range, a lower minimum, or clear the search.</div></td></tr>}
+                {d.rows.length === 0 && <tr><td colSpan={cols.length + 1}><div className="empty">No rows match. Try a wider date range, a lower minimum, or clear the search.</div></td></tr>}
                 {d.rows.map((r) => (
                   <tr key={r.dim} className={drill ? 'click' : ''} onClick={drill ? () => f.go('sessions', drill(r.dim)) : undefined} title={drill ? 'Open these sessions' : undefined}>
                     <td className="dimcell" title={r.dim}>{r.dim}</td>
-                    {COLS.map(([k, , , cell]) => <td key={k} className="num">{cell(r, max)}</td>)}
+                    {cols.map(([k, , , cell]) => <td key={k} className="num">{cell(r, max)}</td>)}
                   </tr>
                 ))}
               </tbody>

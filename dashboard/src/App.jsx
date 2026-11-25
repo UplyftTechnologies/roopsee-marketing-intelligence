@@ -14,6 +14,7 @@ const Campaigns = lazy(() => import('./pages/Campaigns'))
 const Cohorts = lazy(() => import('./pages/Cohorts'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Deeper = lazy(() => import('./pages/Deeper'))
+const MapPage = lazy(() => import('./pages/MapPage'))
 const Events = lazy(() => import('./pages/Events'))
 const Logins = lazy(() => import('./pages/Logins'))
 const Chats = lazy(() => import('./pages/Chats'))
@@ -41,6 +42,7 @@ const NAV = [
   ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Reports'],
   ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Reports'],
   ['deeper', 'Ads & landing pages', 'image', 'What the visits each ad and landing product brought did, and ad → skin concern → products', Deeper, 'Reports'],
+  ['map', 'Map', 'map', 'Visits, checkouts started and orders on a map, by state, city and pincode', MapPage, 'Reports'],
   ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where from', Cohorts, 'Reports'],
   ['basket', 'Basket & AOV', 'basket', 'What people buy and how to raise order value', Basket, 'Reports'],
   ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],

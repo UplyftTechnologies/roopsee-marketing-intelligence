@@ -33,12 +33,12 @@ ORD_CTE = "WITH o AS (SELECT * FROM session_orders)"  # built once by the transf
 
 SESS_FROM = (" FROM sessions s LEFT JOIN o ON o.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key)"
              " LEFT JOIN journey_sessions jy ON jy.session_id = s.session_id LEFT JOIN session_attrib sa ON sa.session_id = s.session_id"
-             " LEFT JOIN (SELECT entity_id, any_value(name) AS name FROM raw_meta_entities WHERE entity_type = 'ad' GROUP BY 1) ae ON ae.entity_id = sa.ad_id"
+             " LEFT JOIN meta_ad_dim ae ON ae.ad_id = sa.ad_id LEFT JOIN session_meta sm ON sm.session_id = s.session_id"
              " LEFT JOIN session_landing_product lp ON lp.session_id = s.session_id")
 
 
 def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any", pincode=None, event=None,
-                    ad=None, adset=None, campaign_id=None, landing_product=None):
+                    ad=None, adset=None, campaign_id=None, landing_product=None, ad_match=None, region=None, city=None, delivery_state=None, delivery_city=None):
     w, a = sess_where(d_from, d_to, include_excluded or only_excluded)  # "only hidden" must not be combined with "hide hidden"
     if only_excluded:
         w += " AND s.is_excluded"
@@ -54,10 +54,23 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
     for k in _csv(lacks):
         if k in SESSION_FLAGS:
             w += f" AND NOT {SESSION_FLAGS[k]}"
-    for col, val in (("sa.ad_id", ad), ("sa.adset_id", adset), ("s.campaign", campaign_id), ("lp.product_id", landing_product)):  # the ad / ad set / campaign / product page a visit came from
+    for col, val in (("sa.ad_id", ad), ("sa.adset_id", adset), ("lp.product_id", landing_product)):  # the ad / ad set / product page a visit came from
         if val:
             w += f" AND {col} = ?"
             a.append(val)
+    if campaign_id:  # the campaign tag in the link, or the campaign the visit was tied to through its tag or its ad
+        w += " AND (s.campaign = ? OR sm.meta_campaign_id = ?)"
+        a += [campaign_id, campaign_id]
+    for col, val in (("s.region", region), ("s.city", city), ("s.delivery_state", delivery_state), ("s.delivery_city", delivery_city)):  # where the visit came from / where it is delivered (exact names, comma list)
+        names = _csv(val)
+        if names:
+            w += f" AND {col} IN ({','.join('?' * len(names))})"
+            a += names
+    if ad_match:
+        kinds = [k for k in _csv(ad_match) if k in ("id", "name", "probable", "unmatched", "none")]
+        if kinds:
+            w += " AND (" + " OR ".join(["sa.session_id IS NULL" if k == "none" else "sa.ad_match = ?" for k in kinds]) + ")"
+            a += [k for k in kinds if k != "none"]
     pins = _csv(pincode)
     if pins:
         w += " AND s.pincode IN (" + ",".join("?" * len(pins)) + ")"
@@ -84,16 +97,17 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
 def sessions(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
              min_stage: int = 0, channel: str | None = None, only_excluded: bool = False, has: str | None = None, lacks: str | None = None,
              match: str = "any", pincode: str | None = None, event: str | None = None, ad: str | None = None, adset: str | None = None, campaign_id: str | None = None,
-             landing_product: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
+             landing_product: str | None = None, ad_match: str | None = None, region: str | None = None, city: str | None = None,
+             delivery_state: str | None = None, delivery_city: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
     """ad / adset / campaign_id / landing_product = only visits that came from that Meta ad, ad set, campaign (exact id or name) or started on that product page.
     has / lacks = comma lists of: product, cart, checkout, pay, order, login (known user), login_now (logged in during the session), quiz, search, roop (opened the Roop assistant), roop_asked (asked it a question), address (saved a proper address), location (only picked a pincode / location). pincode = comma list of 6-digit pincodes given in the session. match=any|all applies to `has`."""
-    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode, event, ad, adset, campaign_id, landing_product)
+    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode, event, ad, adset, campaign_id, landing_product, ad_match, region, city, delivery_state, delivery_city)
     order = SESSION_SORTS.get(sort, SESSION_SORTS["started_at"])
     d = "ASC" if direction.lower() == "asc" else "DESC"
     total = one(f"{ORD_CTE} SELECT count(*) n {SESS_FROM} WHERE {w}", a)["n"]
     rows = q(f"""{ORD_CTE} SELECT s.session_id, s.started_at, s.duration_s, s.events, s.pageviews, s.channel, s.source, s.medium, s.campaign, s.landing_path,
         s.city, s.region, s.country, s.device, s.platform, s.is_app, s.user_id, u.name, {EMAIL} AS email, s.phone10, s.pincode, s.ip, s.visitor_key, s.key_events, CASE WHEN {FLAG_ORDER} THEN 5 ELSE s.stage END AS stage,
-        s.is_excluded, s.excl_reason, sa.ad_id, ae.name AS ad_name, sa.adset_id, coalesce(jy.chat_opened, false) AS roop_opened, coalesce(jy.chat_asked, false) AS roop_asked, coalesce(o.n_orders, 0) AS order_count, o.order_value, o.other_value AS order_other_value, o.statuses AS order_statuses
+        s.is_excluded, s.excl_reason, sa.ad_id, ae.name AS ad_name, sa.adset_id, sa.ad_match, sa.ad_raw, coalesce(jy.chat_opened, false) AS roop_opened, coalesce(jy.chat_asked, false) AS roop_asked, coalesce(o.n_orders, 0) AS order_count, o.order_value, o.other_value AS order_other_value, o.statuses AS order_statuses
         {SESS_FROM} WHERE {w} ORDER BY {order} {d} NULLS LAST, s.started_at DESC, s.session_id LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     return {"total": total, "rows": rows}
 
@@ -103,7 +117,7 @@ def session_ads(date_from: str | None = None, date_to: str | None = None, includ
     """The Meta ads that brought visits in these dates (for the Ad filter of the Sessions tab), with their names where Meta is synced."""
     w, a = sess_where(date_from, date_to, include_excluded)
     return q(f"""SELECT sa.ad_id, ae.name, count(*) AS sessions, count(*) FILTER (WHERE jy.chat_opened) AS roop FROM sessions s JOIN session_attrib sa ON sa.session_id = s.session_id
-                 LEFT JOIN (SELECT entity_id, any_value(name) AS name FROM raw_meta_entities WHERE entity_type = 'ad' GROUP BY 1) ae ON ae.entity_id = sa.ad_id
+                 LEFT JOIN meta_ad_dim ae ON ae.ad_id = sa.ad_id
                  LEFT JOIN journey_sessions jy ON jy.session_id = s.session_id WHERE {w} AND s.channel = 'Paid Meta' GROUP BY 1, 2 ORDER BY sessions DESC, 1 LIMIT ?""", [*a, max(1, min(int(limit), 300))])
 
 
@@ -230,9 +244,8 @@ def session_detail(session_id: str):
     addresses = _addresses(s["user_id"], session_id)
     prev_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at < ? ORDER BY started_at DESC LIMIT 1", [pkey, s["started_at"]])
     next_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at > ? ORDER BY started_at ASC LIMIT 1", [pkey, s["started_at"]])
-    ad = one("""SELECT sa.ad_id, sa.adset_id, ae.name, ae.effective_status AS status, ae.campaign_id FROM session_attrib sa
-                LEFT JOIN (SELECT entity_id, any_value(name) AS name, any_value(effective_status) AS effective_status, any_value(campaign_id) AS campaign_id FROM raw_meta_entities WHERE entity_type = 'ad' GROUP BY 1) ae
-                ON ae.entity_id = sa.ad_id WHERE sa.session_id = ?""", [session_id])
+    ad = one("""SELECT sa.ad_id, sa.adset_id, sa.ad_match, sa.ad_raw, ae.name, ae.status, ae.campaign_id FROM session_attrib sa
+                LEFT JOIN meta_ad_dim ae ON ae.ad_id = sa.ad_id WHERE sa.session_id = ?""", [session_id])
     if ad:
         from .deeper import ad_image_url
         sp = one("SELECT coalesce(sum(spend), 0) AS spend, coalesce(sum(link_clicks), 0) AS clicks FROM raw_meta_insights WHERE ad_id = ?", [ad["ad_id"]])

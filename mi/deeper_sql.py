@@ -28,10 +28,7 @@ def deeper_sql() -> str:
     return f"""
 CREATE OR REPLACE TABLE sessions_person AS SELECT session_id, coalesce(user_id, visitor_key) AS person_key FROM sessions;
 
--- the ad (Meta ad id in utm_content, ad set in utm_term) a visit came from
-CREATE OR REPLACE TABLE session_attrib AS
-SELECT session_id, first(utm_content ORDER BY ts) FILTER (WHERE utm_content IS NOT NULL) AS ad_id, first(utm_term ORDER BY ts) FILTER (WHERE utm_term IS NOT NULL) AS adset_id
-FROM events_base GROUP BY 1 HAVING count(utm_content) > 0;
+-- (the ad a visit came from, session_attrib, is built by the 'ad attribution' step: see mi/attrib_sql.py)
 
 -- the product page a visit landed on (the path holds the product id, or a slug that ends with it)
 CREATE OR REPLACE TABLE session_landing_product AS

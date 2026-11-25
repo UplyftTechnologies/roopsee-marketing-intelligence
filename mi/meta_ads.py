@@ -1,10 +1,11 @@
 """Meta Ads: spend joined to your own sessions and orders."""
 import json
+import re
 from datetime import date, timedelta
 from fastapi import HTTPException
 
 from . import core, meta as meta_mod, transform
-from .core import JOB, _run_job, app, one, prev_range, q, ratio
+from .core import JOB, _run_job, app, one, prev_range, q, ratio, sess_where
 
 
 def _meta_rows(d_from, d_to, include_excluded) -> list[dict]:
@@ -217,6 +218,36 @@ def meta_breakdown(level: str = "adset", campaign_id: str | None = None, date_fr
         r["cpc"] = round(r["spend"] / r["clicks"], 2) if r["clicks"] else None
         r["meta_roas"] = round((r["meta_value"] or 0) / r["spend"], 2) if r["spend"] else None
     return {"level": level, "rows": rows}
+
+
+@app.get("/api/meta/attribution")
+def meta_attribution(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False):
+    """How well Paid Meta visits are tied to the ad that brought them, and which ads spend money without any visit tied to them (usually a missing {{ad.id}} in the link)."""
+    if not q("SELECT 1 FROM information_schema.tables WHERE table_name = 'session_attrib'") or not one("SELECT count(*) AS n FROM raw_meta_insights")["n"]:
+        return {"ready": False}
+    w, a = sess_where(date_from, date_to, include_excluded)
+    by = {r["m"]: r["n"] for r in q(f"""SELECT coalesce(sa.ad_match, 'none') AS m, count(*) AS n FROM sessions s LEFT JOIN session_attrib sa ON sa.session_id = s.session_id
+                                       WHERE {w} AND s.channel = 'Paid Meta' GROUP BY 1""", a)}
+    visits = sum(by.values())
+    camp = one(f"SELECT count(sm.session_id) AS matched FROM sessions s LEFT JOIN session_meta sm ON sm.session_id = s.session_id WHERE {w} AND s.channel = 'Paid Meta'", a)["matched"]
+    lo, hi = date_from or "2000-01-01", date_to or "2999-12-31"
+    ads = q(f"""WITH sp AS (SELECT ad_id, max(ad_name) AS name, sum(spend) AS spend, sum(link_clicks) AS clicks FROM raw_meta_insights WHERE date BETWEEN ? AND ? AND ad_id IS NOT NULL GROUP BY 1 HAVING sum(spend) > 0),
+                vs AS (SELECT sa.ad_id, count(*) AS n FROM sessions s JOIN session_attrib sa ON sa.session_id = s.session_id
+                       WHERE {w} AND s.channel = 'Paid Meta' AND sa.ad_match IN ('id', 'name', 'probable') GROUP BY 1)
+                SELECT sp.ad_id, coalesce(d.name, sp.name) AS name, d.status, sp.spend, sp.clicks, coalesce(vs.n, 0) AS visits
+                FROM sp LEFT JOIN vs ON vs.ad_id = sp.ad_id LEFT JOIN meta_ad_dim d ON d.ad_id = sp.ad_id ORDER BY sp.spend DESC""", [lo, hi, *a])
+    spend = sum(float(r["spend"] or 0) for r in ads)
+    tied = sum(float(r["spend"] or 0) for r in ads if r["visits"])
+    silent = [r for r in ads if not r["visits"]]
+    unmatched = q(f"""SELECT sa.ad_raw AS value, count(*) AS visits FROM sessions s JOIN session_attrib sa ON sa.session_id = s.session_id
+                     WHERE {w} AND s.channel = 'Paid Meta' AND sa.ad_match = 'unmatched' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8""", a)
+    for u in unmatched:
+        v = str(u["value"] or "")
+        u["hint"] = ("a number Meta does not list as an ad: a deleted ad, or an id cut short" if re.fullmatch(r"\d{10,}", v)
+                     else "text that is not the name of any ad Meta reported spend for (a campaign or ad set name, or a link you tagged by hand)")
+    return {"ready": True, "visits": visits, "by_match": {k: by.get(k, 0) for k in ("id", "name", "probable", "unmatched", "none")}, "tied": sum(by.get(k, 0) for k in ("id", "name", "probable")),
+            "campaign_matched": camp, "ads_with_spend": len(ads), "ads_with_visits": len(ads) - len(silent), "spend": spend, "spend_tied": tied,
+            "silent_ads": [{**r, "spend": float(r["spend"] or 0)} for r in silent[:15]], "silent_spend": spend - tied, "unmatched_values": unmatched}
 
 
 def _meta_lite(r: dict) -> dict:
