@@ -103,6 +103,19 @@ const SECTIONS = [
   ['Audiences', [
     ['Interest & behaviour groups', 'Every person can carry many labels: quiz users, makeup users, skincare users, price range (the median catalogue price of what they looked at: budget under ₹300, mid-range to ₹800, premium above), discount checkers (opened coupons, offers or the wallet), searchers, filter users, app users, skin concerns named in the quiz, and their journey stage. Counted for all time, like the other audience lists. Edit the rules in mi/deeper_defs.py.'],
   ]],
+  ['Price intelligence', [
+    ['Our price', 'The Selling Price and MRP of each product in the product sheet (master_products). The sheet is the only product list this tab uses. The competitor prices typed into the sheet by hand are not used.'],
+    ['Competitor price', 'The REGULAR price on the product page of Nykaa, Tira or Purplle at the last refresh. Nykaa also shows an offer price for some customers (for example a first order): it is shown as a note, never compared.'],
+    ['Refresh prices', 'Reads every matched product page, one page at a time per site with a 3-4 second pause, the three sites side by side (about 15-20 minutes for the whole sheet). Only public product pages and the sitemaps each site publishes are read: no search pages, no logins. Every reading is kept, so price history builds up with each refresh.'],
+    ['How a product is found on a site', 'First the product link in the sheet (Nykaa and Tira links; nykaaman.com links are read on nykaa.com, which has the same products). Otherwise the site’s own product list (its sitemap) is searched: same brand, the size must not differ, and the name must match. On Purplle the page carries the barcode, so a Purplle match is automatic only when it equals the barcode in the sheet. On Nykaa and Tira a name match of 85% or more with the same size is automatic; anything less sure waits in Review matches.'],
+    ['Review matches', 'Matches we are not sure about. Confirm the right page, reject it (it is never proposed again), or paste the right link. Not found: no page of the same brand, name and size; it is looked for again after a week.'],
+    ['Our gap', 'Our price against the cheapest IN-STOCK competitor: +10% means we are 10% dearer. Dearer / cheapest / same use a 1% margin.'],
+    ['Price index', 'For a brand or category: 100 = the same as the cheapest competitor, 110 = we are 10% dearer (the median of its products).'],
+    ['Discount', '(MRP − price) ÷ MRP, ours and each site’s, on the same products.'],
+    ['Revenue at risk', 'Products that sell or get views (in the dates at the top) while a competitor is cheaper; “cut to match” is how much lower our price would have to be.'],
+    ['Price-sensitive products', 'Viewed 20 or more times, added to cart less often than our average, and dearer than a competitor: the clearest repricing candidates.'],
+    ['When a site changes its pages', 'Its pages fail with “layout not recognised” in the Refresh log. The page reader of each site is in mi/price_sites.py; tests/test_prices.py checks them on saved pages.'],
+  ]],
   ['Roop chats', [
     ['Roop', 'The skin-care assistant on roopsee.com and in the app. Every question a shopper sends is a message; the messages of one chat window are a conversation (“New chat” starts another).'],
     ['Shopper', 'A logged-in account, or an anonymous guest (a guest session). A conversation with no identity counts as one shopper.'],

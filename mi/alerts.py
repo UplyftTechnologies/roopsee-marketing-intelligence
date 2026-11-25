@@ -109,6 +109,18 @@ def alerts():
     if wait["n"]:
         out.append(_alert("info", f"{wait['n']} people reached checkout in the last 2 days and did not buy", "They left a phone number, so you can follow up while the interest is fresh.", "audiences"))
 
+    # a competitor cut the price of one of our sellers (between its last two price readings), and is now cheaper than us
+    try:
+        from .prices import _changes, price_catalogue
+        sold = {r["product_id"] for r in q("""SELECT DISTINCT product_id FROM order_lines WHERE is_valid AND NOT is_excluded AND date_ist >= ?::DATE - 30""", [c1])} \
+            if q("SELECT 1 FROM information_schema.tables WHERE table_name = 'order_lines'") else set()
+        cuts = [c for c in _changes(200) if c["change"] is not None and c["change"] <= -0.05 and c["product_id"] in sold and c["our_price"] and c["now_price"] < c["our_price"]]
+        if cuts and price_catalogue():
+            top = cuts[0]
+            out.append(_alert("warn", f"{top['site_label']} cut the price of {top['name']}" + (f" and {len(cuts) - 1} more of our sellers" if len(cuts) > 1 else ""),
+                              f"Now {_money(top['now_price'])} (was {_money(top['before_price'])}, {top['change'] * 100:.0f}%), against our {_money(top['our_price'])}.", "prices"))
+    except Exception:  # price tables not built yet, or the sheet still has the old columns: no price alert
+        pass
     out.sort(key=lambda a: LEVEL_ORDER[a["level"]])
     return {"alerts": out, "range": {"from": c0, "to": c1}, "previous": {"from": p0, "to": p1}}
 

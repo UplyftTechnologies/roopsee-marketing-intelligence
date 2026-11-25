@@ -43,6 +43,7 @@ RAW_SCHEMAS = {
     "raw_catalog_master": {
         "product_id": "VARCHAR", "product_name": "VARCHAR", "brand": "VARCHAR", "category_l1": "VARCHAR",
         "category_l2": "VARCHAR", "mrp": "DOUBLE", "selling_price": "DOUBLE",
+        "sku_size": "VARCHAR", "product_link": "VARCHAR", "bar_code": "VARCHAR", "images": "VARCHAR",
     },
     # Roop (the skin assistant) chats. Only the columns the dashboard needs: prompt_messages / raw_response (fine-tuning data) are never pulled.
     "raw_chat_logs": {

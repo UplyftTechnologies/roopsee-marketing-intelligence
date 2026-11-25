@@ -8,6 +8,7 @@ access     say which Supabase key is in use and what it can do (never prints the
 slim       one-off: remove duplicated fields and tracking plumbing from stored event payloads, then shrink the file (stop the dashboard first)
 compact    shrink the database file after deleting data (stop the dashboard first)
 purge      python -m mi.cli purge 365 [--yes]   delete raw events older than N days (dry run unless --yes)
+prices     python -m mi.cli prices [nykaa|tira|purplle]   refresh competitor prices (same as the button on the Price intelligence tab)
 
 NOTE: DuckDB allows a single writer. Stop `serve` before running extract/transform from the CLI,
 or just use the "Refresh data" button in the dashboard, which runs the same code inside the server.
@@ -84,6 +85,18 @@ def main(argv: list[str]) -> int:
             extract.purge_old_events(con, days, "--yes" in argv)
         finally:
             con.close()
+        return 0
+    if cmd == "prices":
+        from . import core, prices
+        core.CON = connect()
+        try:
+            prices.price_init(core.CON)
+            sites = [a for a in argv[1:] if a in ("nykaa", "tira", "purplle")] or None
+            prices.start_price_run(sites, wait=True)
+            for site, st in prices.PRICE_JOB["sites"].items():
+                print(f"{site:8s} {st.get('phase')}: {st.get('ok', 0)} prices read, {st.get('failed', 0)} failed" + (f"  ({st['error']})" if st.get("error") else ""))
+        finally:
+            core.CON.close()
         return 0
     if cmd not in ("extract", "transform", "all"):
         print(__doc__)

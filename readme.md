@@ -105,6 +105,25 @@ META_SINCE=2026-06-01                               # optional first day to pull
 - An ad account can be readable without appearing in the token's account list (for example a boosted-Instagram-post account). If a campaign id in your UTM tags is not matched, look it up in the Graph API and add its account to `META_AD_ACCOUNT_IDS`.
 - Campaign matching uses the id in `utm_campaign` (or the ad-set / ad id). Put this in each ad's URL parameters so every click carries real ids: `utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.id}}&utm_content={{ad.id}}&utm_term={{adset.id}}`
 
+## Price intelligence (competitor prices)
+
+The **Price intelligence** tab compares every product in the product sheet (`master_products`) with its live **regular** price on
+**Nykaa, Tira and Purplle**: where we are dearer or cheapest, by brand and category, revenue at risk, price-sensitive products, competitors
+out of stock, price changes and history. **Refresh prices** (on the tab) reads the latest prices; from a terminal:
+`.venv/Scripts/python -m mi.cli prices [nykaa|tira|purplle]` (stop the dashboard first, DuckDB has one writer).
+
+- **What is read:** only public product pages and the sitemaps each site lists in its robots.txt (no search pages, no logins), one page at a
+  time per site with a 3-4 s pause. A full refresh takes about 15-20 minutes; the first one also loads each site's product list (refreshed weekly).
+- **Matching:** the link in the sheet when it points at the site (nykaaman.com links are read on nykaa.com); else brand + name + size from the
+  site's product list. Purplle pages carry the barcode, so a Purplle match is automatic only when it equals `bar_code` in the sheet.
+  Anything uncertain waits in **Review matches** (confirm, reject or paste the link); decisions are kept.
+- **Our price** is the sheet's Selling Price / MRP. The hand-typed `Nykaa Price` / `Tira Price` / `Broadway Price` columns are not used.
+- **Nothing is written to Supabase**: prices are stored in `data/mi.duckdb` (`price_matches`, `price_snapshots`, `price_runs`, `price_index`),
+  which a data rebuild never drops.
+- Pages are fetched with [Scrapling](https://github.com/D4Vinci/Scrapling) (`pip install -r requirements.txt`; no browser download is needed).
+  When a site changes its pages, its pages fail with "layout not recognised" in the Refresh log: the readers are in `mi/price_sites.py`,
+  and `tests/test_prices.py` checks them on saved pages (`tests/fixtures/prices`).
+
 ## Sharing exclusions
 
 **Exclusions → Share your exclusion list** downloads your rules as JSON or CSV; a teammate opens **Import a list…** on their dashboard and only the missing rules are added. The file contains staff phone numbers, emails and IPs: send it privately.

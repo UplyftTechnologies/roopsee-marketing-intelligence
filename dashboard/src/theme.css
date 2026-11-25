@@ -393,3 +393,18 @@ tr.click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 .map-box .leaflet-tooltip { font-size: 12.5px; line-height: 1.45; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .map-box .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.6); } }
 :root[data-theme='dark'] .map-box .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.6); }
+
+/* Price intelligence */
+.price-sites { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.price-site { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.price-progress { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.price-progress i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.review-list { display: grid; }
+.review-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 14px; padding: 12px 4px; border-top: 1px solid var(--grid); }
+.review-row:first-child { border-top: 0; }
+.review-cands { display: grid; gap: 6px; }
+.review-cand { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+
+/* card headers: the title keeps room when the card has several buttons on its right (Export, Columns, Copy) */
+.card-head { flex-wrap: wrap; }
+.card-head > div:first-child { flex: 1 1 240px; min-width: 0; }

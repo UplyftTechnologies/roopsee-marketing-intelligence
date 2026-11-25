@@ -32,7 +32,8 @@ SMALL_TABLES = {  # raw table -> (supabase table, columns to select)
     # master catalog has columns like "Product-id" / "Product Name": alias them to snake_case in the request
     "raw_catalog_master": ("master_products",
                            'product_id:"Product-id",product_name:"Product Name",brand:Brand,category_l1:"Category L1",'
-                           'category_l2:"Category L2",mrp:MRP,selling_price:"Selling Price"'),
+                           'category_l2:"Category L2",mrp:MRP,selling_price:"Selling Price",sku_size:"SKU Size",product_link:"Product Link",'
+                           'bar_code,images:Images'),  # size / link / barcode feed the Price intelligence tab; the sheet's hand-typed competitor prices are not pulled
 }
 
 

@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
         transform.seed_exclusions(CON)
         from . import presets  # saved journey presets (user data, like the exclusion rules)
         presets.init(CON)
+        from . import prices  # competitor price tables (user data, never dropped by a rebuild)
+        prices.price_init(CON)
     yield
     CON.close()
 

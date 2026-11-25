@@ -15,6 +15,7 @@ const Cohorts = lazy(() => import('./pages/Cohorts'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Deeper = lazy(() => import('./pages/Deeper'))
 const MapPage = lazy(() => import('./pages/MapPage'))
+const Prices = lazy(() => import('./pages/Prices'))
 const Events = lazy(() => import('./pages/Events'))
 const Logins = lazy(() => import('./pages/Logins'))
 const Chats = lazy(() => import('./pages/Chats'))
@@ -45,6 +46,7 @@ const NAV = [
   ['map', 'Map', 'map', 'Visits, checkouts started and orders on a map, by state, city and pincode', MapPage, 'Reports'],
   ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where from', Cohorts, 'Reports'],
   ['basket', 'Basket & AOV', 'basket', 'What people buy and how to raise order value', Basket, 'Reports'],
+  ['prices', 'Price intelligence', 'tag', 'Our prices against Nykaa, Tira and Purplle, and what to reprice', Prices, 'Reports'],
   ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],
   ['audiences', 'Audiences', 'target', 'Who you can reach, and with what', Audiences, 'Grow'],
   ['sessions', 'Sessions', 'list', 'Every visit, with a full event timeline', Sessions, 'Explore'],

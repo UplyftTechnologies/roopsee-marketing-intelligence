@@ -157,7 +157,7 @@ def ensure_venv_and_deps() -> None:
     if not VENV_PY.exists():
         say("Creating the Python environment (one time)...")
         run([sys.executable, "-m", "venv", str(ROOT / ".venv")])
-    ok = subprocess.run([str(VENV_PY), "-c", "import duckdb, fastapi, uvicorn, pytz, requests, pandas"],
+    ok = subprocess.run([str(VENV_PY), "-c", "import duckdb, fastapi, uvicorn, pytz, requests, pandas, scrapling"],
                         capture_output=True).returncode == 0
     if not ok:
         say("Installing Python packages (one time, about a minute)...")
@@ -183,8 +183,10 @@ def ensure_ui(force: bool) -> None:
             return
         hint = "brew install node" if IS_MAC else "https://nodejs.org/"
         die(f"Node.js is required once to build the dashboard UI. Install the LTS version ({hint}) and run again.")
-    if not (DASH / "node_modules").exists():
-        say("Installing dashboard packages (one time, about a minute)...")
+    marker = DASH / "node_modules" / ".package-lock.json"  # npm rewrites this on every install
+    stale = marker.exists() and any(p.exists() and p.stat().st_mtime > marker.stat().st_mtime for p in (DASH / "package.json", DASH / "package-lock.json"))
+    if not (DASH / "node_modules").exists() or stale:  # first run, or a pulled change added a package (e.g. the map's leaflet)
+        say("Installing dashboard packages (about a minute)...")
         run("npm install --no-audit --no-fund", cwd=DASH, shell=True)
     say("Building the dashboard UI...")
     run("npm run build", cwd=DASH, shell=True)

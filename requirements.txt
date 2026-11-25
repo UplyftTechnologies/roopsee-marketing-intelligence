@@ -6,3 +6,5 @@ requests==2.34.2
 fastapi==0.163.1
 uvicorn[standard]==0.54.0
 pytz==2026.6
+# competitor price reading (Price intelligence tab): public product pages, fetched with a browser-like connection
+scrapling[fetchers]==0.5.1

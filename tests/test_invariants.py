@@ -707,6 +707,11 @@ class AdAttribution(unittest.TestCase):
     """Which Meta ad a visit came from: by id, by name, probably, or not at all."""
     R = dict(date_from="2026-10-22", date_to="2026-11-20")
 
+    @classmethod
+    def setUpClass(cls):
+        if not one("SELECT count(*) AS n FROM raw_meta_insights")["n"]:
+            raise unittest.SkipTest("Meta Ads is not synced on this computer (no META_ACCESS_TOKEN): nothing to tie visits to")
+
     def test_every_paid_meta_visit_has_exactly_one_kind(self):
         d = api.meta_attribution(**self.R)
         self.assertEqual(sum(d["by_match"].values()), d["visits"])
@@ -806,3 +811,55 @@ class GeoMap(unittest.TestCase):
         for kw in (dict(level="country"), dict(basis="nope")):
             with self.assertRaises(HTTPException):
                 api.geo_areas(**kw, **self.R)
+
+
+class PriceTab(unittest.TestCase):
+    """Price intelligence: the comparison and the analysis agree with each other and with the product sheet."""
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    @classmethod
+    def setUpClass(cls):
+        if not q("SELECT 1 FROM information_schema.tables WHERE table_name = 'price_matches'"):
+            raise unittest.SkipTest("price tables not built yet (start the dashboard once)")
+
+    def test_every_sheet_product_has_one_row(self):
+        rows = api.prices_compare(**self.R)["rows"]
+        self.assertEqual(len(rows), len(api.price_catalogue()))
+        self.assertEqual(len({r["product_id"] for r in rows}), len(rows))
+
+    def test_the_gap_is_against_the_cheapest_in_stock_competitor(self):
+        for r in api.prices_compare(**self.R)["rows"]:
+            live = [v["price"] for v in r["sites"].values() if v["price"] and v["in_stock"]]
+            with self.subTest(product=r["product_id"]):
+                if not live or not r["our_price"]:
+                    self.assertIsNone(r["gap"])
+                    continue
+                self.assertEqual(r["cheapest_price"], min(live))
+                self.assertAlmostEqual(r["gap"], r["our_price"] / min(live) - 1, places=3)
+
+    def test_positions_add_up_to_the_products_compared(self):
+        k = api.prices_analysis(**self.R)["kpis"]
+        self.assertEqual(k["cheaper"] + k["same"] + k["dearer"], k["compared"])
+        self.assertLessEqual(k["dearer_10"], k["dearer"])
+
+    def test_matches_have_known_states(self):
+        bad = one("SELECT count(*) AS n FROM price_matches WHERE status NOT IN ('matched', 'review', 'none', 'rejected') OR site NOT IN ('nykaa', 'tira', 'purplle')")
+        self.assertEqual(bad["n"], 0)
+        self.assertEqual(one("SELECT count(*) AS n FROM price_matches WHERE status = 'matched' AND url IS NULL")["n"], 0)
+
+    def test_readings_are_positive_and_never_compare_the_nykaa_offer(self):
+        self.assertEqual(one("SELECT count(*) AS n FROM price_snapshots WHERE ok AND (price <= 0 OR mrp <= 0)")["n"], 0)
+        for r in api.prices_compare(**self.R)["rows"]:
+            v = r["sites"].get("nykaa")
+            if v and v["offer_price"] and v["in_stock"] and r["cheapest_site"] == "nykaa":
+                self.assertEqual(r["cheapest_price"], v["price"])
+
+    def test_bad_decisions_are_refused(self):
+        from fastapi import HTTPException
+        pid = api.price_catalogue()[0]["product_id"]
+        for body in (dict(product_id=pid, site="amazon", action="confirm", url="https://www.amazon.in/x"),
+                     dict(product_id=pid, site="tira", action="link", url="https://www.nykaa.com/x/p/1"),
+                     dict(product_id="nope", site="tira", action="clear"),
+                     dict(product_id=pid, site="tira", action="delete-everything")):
+            with self.subTest(body=body), self.assertRaises(HTTPException):
+                api.prices_match(api.MatchIn(**body))
