@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, day, dt, inr, num, pct, useApi, useFilters } from '../api'
+import { api, day, dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, CopyTable, ExportBtn, Kpi, Loading, Table, verdictTone } from '../ui'
 import { METRICS } from '../metrics'
 import { Scorecard, ScorecardStrip } from '../components/Scorecard'
@@ -46,16 +46,24 @@ function Status({ onSynced }) {
   )
 }
 
-function Levels({ campaigns }) {
+const isActive = (st) => st === 'ACTIVE'
+/** A Meta id in small type with a copy button. */
+function Id({ v }) {
+  return v ? <span className="mono nw" style={{ fontSize: 12 }}>{v} <CopyBtn text={String(v)} title="Copy id" /></span> : <span className="muted">–</span>
+}
+
+function Levels({ campaigns, active }) {
   const f = useFilters()
   const [level, setLevel] = useState('campaign')
   const s = useApi('/meta/breakdown', { level: level === 'campaign' ? 'adset' : level }, { scoped: true })
+  const camps = active ? campaigns.filter((r) => isActive(r.status)) : campaigns
   return (
     <Card title="Campaigns, ad sets and ads" sub="click a column title to sort · our sessions and orders are matched at campaign level"
       right={<Chips value={level} onChange={setLevel} options={[{ value: 'campaign', label: 'Campaigns' }, { value: 'adset', label: 'Ad sets' }, { value: 'ad', label: 'Ads' }]} />}>
       {level === 'campaign' ? (
-        <Table rows={campaigns} empty="No Meta spend in this range" onRow={(r) => f.go('sessions', { channel: 'Paid Meta', search: r.campaign_id })} cols={[
+        <Table rows={camps} empty={active ? 'No active campaigns with spend in this range' : 'No Meta spend in this range'} onRow={(r) => f.go('sessions', { channel: 'Paid Meta', search: r.campaign_id })} cols={[
           { label: 'Campaign', sortBy: 'name', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={`${r.name} (${r.campaign_id})`}>{r.name}</span> },
+          { label: 'Campaign id', render: (r) => <Id v={r.campaign_id} /> },
           { label: 'Status', cls: 'nw', sortBy: 'status', render: (r) => (r.status ? <Badge tone={STATUS_TONE[r.status]}>{r.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–') },
           { label: 'Spend', num: true, sortBy: 'spend', render: (r) => <b>{inr(r.spend)}</b> },
           { label: 'Verdict', cls: 'nw', sortBy: 'verdict', render: (r) => <Badge tone={VERDICT[r.verdict]}>{r.verdict}</Badge> },
@@ -72,17 +80,25 @@ function Levels({ campaigns }) {
         ]} />
       ) : (
         <Loading state={s}>
-          {({ rows }) => (
-            <Table rows={rows} empty="Nothing in this range" cols={[
+          {({ rows: all }) => {
+            const rows = active ? all.filter((r) => isActive(r.status)) : all
+            return (
+            <Table rows={rows} empty={active ? 'No active ones with spend in this range' : 'Nothing in this range'} cols={[
               ...(level === 'ad' ? [{ label: '', render: (r) => (r.thumbnail_url ? <img src={r.thumbnail_url} alt="" width="40" height="40" style={{ borderRadius: 6, objectFit: 'cover' }} loading="lazy" /> : null) }] : []),
               { label: level === 'ad' ? 'Ad' : 'Ad set', sortBy: 'name', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 240 }} title={r.name}>{r.name}</span> },
               { label: 'Campaign', sortBy: 'campaign', render: (r) => <span className="trunc muted" style={{ display: 'block', maxWidth: 190 }} title={r.campaign}>{r.campaign}</span> },
+              { label: 'Campaign id', render: (r) => <Id v={r.campaign_id} /> },
+              ...(level === 'ad' ? [{ label: 'Ad set', sortBy: 'adset', render: (r) => <span className="trunc muted" style={{ display: 'block', maxWidth: 170 }} title={r.adset}>{r.adset}</span> }] : []),
+              { label: 'Ad set id', render: (r) => <Id v={level === 'adset' ? r.id : r.adset_id} /> },
+              ...(level === 'ad' ? [{ label: 'Ad id', render: (r) => <Id v={r.id} /> }] : []),
+              { label: 'Status', cls: 'nw', sortBy: 'status', render: (r) => (r.status ? <Badge tone={STATUS_TONE[r.status]}>{r.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–') },
               { label: 'Spend', num: true, sortBy: 'spend', render: (r) => <b>{inr(r.spend)}</b> }, { label: 'Impressions', num: true, sortBy: 'impressions', render: (r) => num(r.impressions) },
               { label: 'Clicks', num: true, sortBy: 'link_clicks', render: (r) => num(r.link_clicks) }, { label: 'CTR', num: true, sortBy: 'ctr', render: (r) => pct(r.ctr, 2) },
               { label: 'CPC', num: true, sortBy: 'cpc', render: (r) => rupee(r.cpc) }, { label: 'Meta: carts', num: true, sortBy: 'meta_atc', render: (r) => num(r.meta_atc) },
               { label: 'Meta: purchases', num: true, sortBy: 'meta_purchases', render: (r) => num(r.meta_purchases) },
             ]} />
-          )}
+            )
+          }}
         </Loading>
       )}
     </Card>
@@ -126,6 +142,7 @@ function Flow({ data, open, setOpen, q }) {
                     {n.level === 'ad' && n.thumbnail_url && <img src={n.thumbnail_url} alt="" width="28" height="28" loading="lazy" />}
                     <span className="tag">{n.level === 'adset' ? 'ad set' : n.level}</span>
                     <span className="trunc" style={{ maxWidth: 260 }} title={`${n.name} (${n.id})`}>{n.name}</span>
+                    <span className="mono muted" style={{ fontSize: 11 }}>{n.id} <CopyBtn text={String(n.id)} title="Copy id" /></span>
                     {kids > 0 && <span className="muted" style={{ fontSize: 12 }}>{kids}</span>}
                   </div>
                 </td>
@@ -150,16 +167,22 @@ function Flow({ data, open, setOpen, q }) {
   )
 }
 
-function Hierarchy() {
+function Hierarchy({ active }) {
   const [idle, setIdle] = useState(false)
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(() => new Set())
-  const s = useApi('/meta/hierarchy', { include_idle: idle }, { scoped: true })
+  const s = useApi('/meta/hierarchy', { include_idle: idle || active }, { scoped: true })
   return (
     <Card title="Campaign structure" sub="how spend flows from each campaign to its ad sets and ads · click the arrow to open a level">
       <Loading state={s}>
         {(d) => {
           if (!d.connected) return <div className="muted">No Meta data yet.</div>
+          if (active) {  // keep only what is running; a parent stays only if something under it runs
+            const ads = (a) => a.children.filter((x) => isActive(x.status))
+            const sets = (c) => c.children.map((a) => ({ ...a, children: ads(a) })).filter((a) => isActive(a.status) && a.children.length)
+            d = { ...d, campaigns: d.campaigns.map((c) => ({ ...c, children: sets(c) })).filter((c) => isActive(c.status) && c.children.length) }
+            d.counts = { campaigns: d.campaigns.length, adsets: d.campaigns.reduce((n, c) => n + c.children.length, 0), ads: d.campaigns.reduce((n, c) => n + c.children.reduce((m, a) => m + a.children.length, 0), 0) }
+          }
           const all = d.campaigns.flatMap((c) => [c.id, ...c.children.map((a) => a.id)])
           return (
             <>
@@ -187,6 +210,7 @@ export default function MetaAds() {
   const [metric, setMetric] = useState('m_spend')
   const s = useApi('/meta/overview')
   const [tick, setTick] = useState(0)
+  const [active, setActive] = usePersisted('meta.active', false)
   return (
     <>
       <Status onSynced={() => setTick(tick + 1)} key={tick} />
@@ -200,6 +224,7 @@ export default function MetaAds() {
           const b = o.blended
           return (
             <>
+              <label className="chk" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> <b>Only active ads</b> <span className="muted" style={{ fontSize: 12 }}>hides paused, archived and deleted campaigns, ad sets and ads in the tables below · the totals above stay for everything</span></label>
               <ScorecardStrip>
                 {CARDS.map((k) => <Scorecard key={k} metric={k} kpis={t} prev={o.prev} compare={f.compare} spark={METRICS[k].series ? o.current[METRICS[k].series] : undefined} active={metric === k} onClick={METRICS[k].series ? () => setMetric(k) : undefined} />)}
               </ScorecardStrip>
@@ -234,18 +259,18 @@ export default function MetaAds() {
                 </div>
               )}
 
-              <Levels campaigns={o.campaigns} />
+              <Levels campaigns={o.campaigns} active={active} />
 
-              {o.wasted.length > 0 && (
+              {(active ? o.wasted.filter((r) => isActive(r.status)) : o.wasted).length > 0 && (
                 <Card title="Spending without results" sub="campaigns with ₹300+ spend and no add-to-cart from tracked sessions in this range">
-                  <Table rows={o.wasted} cols={[{ label: 'Campaign', sortBy: 'name', render: (r) => r.name }, { label: 'Spend', num: true, sortBy: 'spend', render: (r) => <b>{inr(r.spend)}</b> },
+                  <Table rows={active ? o.wasted.filter((r) => isActive(r.status)) : o.wasted} cols={[{ label: 'Campaign', sortBy: 'name', render: (r) => r.name }, { label: 'Campaign id', render: (r) => <Id v={r.campaign_id} /> }, { label: 'Spend', num: true, sortBy: 'spend', render: (r) => <b>{inr(r.spend)}</b> },
                     { label: 'Clicks', num: true, sortBy: 'link_clicks', render: (r) => num(r.link_clicks) }, { label: 'Our sessions', num: true, sortBy: 'sessions', render: (r) => num(r.sessions) },
                     { label: 'Status', render: (r) => (r.status ? <Badge tone={STATUS_TONE[r.status]}>{r.status.toLowerCase().replace(/_/g, ' ')}</Badge> : '–') }]} />
                   <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>A campaign showing 0 sessions may simply be an app-install campaign or one whose clicks go elsewhere, so check its objective before pausing it.</div>
                 </Card>
               )}
-              <Hierarchy />
-              <ExportBtn name="meta-campaigns" rows={o.campaigns} fields={[['Campaign', 'name'], ['Status', 'status'], ['Spend', 'spend'], ['Impressions', 'impressions'], ['Link clicks', 'link_clicks'], ['CTR', 'ctr'], ['CPC', 'cpc'], ['Our sessions', 'sessions'], ['Carts', 'carts'], ['Our orders', 'orders'], ['Our revenue', 'revenue'], ['Meta purchases', 'meta_purchases'], ['Verdict', 'verdict']]} />
+              <Hierarchy active={active} />
+              <ExportBtn name="meta-campaigns" rows={o.campaigns} fields={[['Campaign', 'name'], ['Campaign id', 'campaign_id'], ['Status', 'status'], ['Spend', 'spend'], ['Impressions', 'impressions'], ['Link clicks', 'link_clicks'], ['CTR', 'ctr'], ['CPC', 'cpc'], ['Our sessions', 'sessions'], ['Carts', 'carts'], ['Our orders', 'orders'], ['Our revenue', 'revenue'], ['Meta purchases', 'meta_purchases'], ['Verdict', 'verdict']]} />
             </>
           )
         }}

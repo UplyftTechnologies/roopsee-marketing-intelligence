@@ -173,14 +173,16 @@ function Explorer({ meta }) {
   const [journey, setJourney] = usePersisted('journeys.xj', '')
   const [reached, setReached] = usePersisted('journeys.xr', '')
   const [stuck, setStuck] = usePersisted('journeys.xs', false)
+  const [ad, setAd] = usePersisted('journeys.ad', f.prefill?.ad ?? '', Boolean(f.prefill?.ad))
+  const [roop, setRoop] = usePersisted('journeys.roop', f.prefill?.roop ?? '', Boolean(f.prefill?.roop))
   const [search, setSearch] = usePersisted('journeys.search', '')
   const [sort, setSort] = usePersisted('journeys.sort', { key: 'started_at', dir: 'desc' })
   const [limit, setLimit] = usePersisted('journeys.limit', 50)
   const [offset, setOffset] = useState(0)
-  useEffect(() => { setOffset(0) }, [mode, outcome, journey, reached, stuck, search, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
+  useEffect(() => { setOffset(0) }, [mode, outcome, journey, reached, stuck, ad, roop, search, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
   const spec = meta.find((j) => j.key === journey)
   const s = useApi('/journeys/explore', { mode, outcome: outcome || undefined, journey: journey && reached ? journey : undefined, reached: journey && reached ? reached : undefined, stuck: stuck && reached ? true : undefined,
-    search: search || undefined, sort: sort.key, direction: sort.dir, limit, offset })
+    search: search || undefined, ad: ad || undefined, roop: roop || undefined, sort: sort.key, direction: sort.dir, limit, offset })
   return (
     <>
       <div className="chip-row">
@@ -196,7 +198,9 @@ function Explorer({ meta }) {
             <label className="muted" style={{ fontSize: 12 }}><input type="checkbox" checked={stuck} disabled={!reached} onChange={(e) => setStuck(e.target.checked)} /> and stopped there</label>
           </>
         )}
-        {(outcome || journey || search) && <button type="button" className="btn" onClick={() => { setOutcome(''); setJourney(''); setReached(''); setStuck(false); setSearch('') }}>Clear</button>}
+        <select className="field" value={roop} onChange={(e) => setRoop(e.target.value)} aria-label="Roop"><option value="">Roop: any</option><option value="opened">Opened Roop</option><option value="asked">Asked Roop</option></select>
+        {ad && <button type="button" className="chip on" onClick={() => setAd('')} title="Remove this filter">Ad {ad} ✕</button>}
+        {(outcome || journey || search || ad || roop) && <button type="button" className="btn" onClick={() => { setOutcome(''); setJourney(''); setReached(''); setStuck(false); setSearch(''); setAd(''); setRoop('') }}>Clear</button>}
       </div>
       <Loading state={s}>
         {(d) => {

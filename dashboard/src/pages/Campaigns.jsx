@@ -1,3 +1,4 @@
+import RoopUsage from '../components/RoopUsage'
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { inr, num, pct, useApi, useFilters } from '../api'
@@ -49,7 +50,7 @@ export default function Campaigns() {
                   { label: 'Verdict', sortBy: 'verdict', render: (r) => <Badge tone={verdictTone[r.verdict]}>{r.verdict}</Badge> },
                 ]}
                 rows={shown}
-                onRow={(r) => f.go('sessions', { channel: r.channel, search: r.campaign === '(not set)' ? '' : r.campaign })}
+                onRow={(r) => f.go('sessions', { channel: r.channel, campaign_id: r.campaign === '(not set)' ? '' : r.campaign })}
               />
             </Card>
             <Card title="Cart rate by campaign" sub="campaigns with at least 100 sessions, % of sessions that added to cart">
@@ -65,6 +66,7 @@ export default function Campaigns() {
                 </ResponsiveContainer>
               )}
             </Card>
+            <RoopUsage />
             <UtmHealth />
           </>
         )

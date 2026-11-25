@@ -576,3 +576,66 @@ class JourneysTab(unittest.TestCase):
                      lambda: api.journeys_explore(outcome="x", **self.R)):
             with self.assertRaises(HTTPException):
                 call()
+
+
+class RoopByCampaignAndAd(unittest.TestCase):
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def test_roop_usage_matches_the_chat_journey(self):
+        d = api.roop_usage(level="channel", only_used=False, **self.R)
+        self.assertEqual(d["all"]["opened"], api.journeys_funnel(journey="chat", by="sessions", **self.R)["funnel"][0]["count"])
+        self.assertEqual(sum(r["opened"] for r in d["rows"]), d["all"]["opened"])
+        self.assertEqual(sum(r["sessions"] for r in d["rows"]), api.overview(**self.R)["kpis"]["sessions"])
+
+    def test_every_level_accounts_for_every_open(self):
+        for lv in ("campaign", "adset", "ad", "channel"):
+            with self.subTest(level=lv):
+                d = api.roop_usage(level=lv, limit=1000, **self.R)
+                self.assertEqual(sum(r["opened"] for r in d["rows"]), d["all"]["opened"])
+
+    def test_a_row_lists_exactly_its_visits(self):
+        for lv, kw in (("ad", "ad"), ("adset", "adset"), ("campaign", "campaign_id")):
+            row = next((r for r in api.roop_usage(level=lv, **self.R)["rows"] if not r["key"].startswith("(")), None)
+            if not row:
+                continue
+            with self.subTest(level=lv):
+                self.assertEqual(api.sessions(**self.R, limit=1, **{kw: row["key"]})["total"], row["sessions"])
+                self.assertEqual(api.sessions(**self.R, limit=1, has="roop", **{kw: row["key"]})["total"], row["opened"])
+                self.assertEqual(api.sessions(**self.R, limit=1, has="roop_asked", **{kw: row["key"]})["total"], row["asked"])
+
+    def test_the_roop_flags_match_the_journey(self):
+        self.assertEqual(api.sessions(**self.R, limit=1, has="roop")["total"], api.journeys_funnel(journey="chat", by="sessions", **self.R)["funnel"][0]["count"])
+        self.assertEqual(api.sessions(**self.R, limit=1, has="roop_asked")["total"], api.journeys_funnel(journey="chat", by="sessions", **self.R)["funnel"][1]["count"])
+        every = api.sessions(**self.R, limit=1)["total"]
+        self.assertEqual(api.sessions(**self.R, limit=1, has="roop")["total"] + api.sessions(**self.R, limit=1, lacks="roop")["total"], every)
+
+    def test_ad_cards_open_their_visits(self):
+        j = api.deeper_journeys(**self.R)
+        for ad in j["ads"][:3]:
+            with self.subTest(ad=ad["ad_id"]):
+                self.assertEqual(api.sessions(**self.R, limit=1, ad=ad["ad_id"], channel="Paid Meta")["total"], ad["sessions"])
+        for p in j["products"][:3]:
+            with self.subTest(product=p["product_id"]):
+                self.assertEqual(api.sessions(**self.R, limit=1, landing_product=p["product_id"])["total"], p["sessions"])
+
+    def test_searching_an_ad_id_finds_its_visits(self):
+        ad = api.session_ads(**self.R)[0]
+        self.assertEqual(api.sessions(**self.R, limit=1, search=ad["ad_id"])["total"], api.sessions(**self.R, limit=1, ad=ad["ad_id"])["total"])
+
+    def test_the_session_page_names_the_ad(self):
+        ad = api.session_ads(**self.R)[0]
+        row = api.sessions(**self.R, limit=1, ad=ad["ad_id"])["rows"][0]
+        self.assertEqual(row["ad_id"], ad["ad_id"])
+        self.assertEqual(api.session_detail(row["session_id"])["ad"]["ad_id"], ad["ad_id"])
+
+    def test_the_explorer_filters_by_ad_and_roop(self):
+        ad = api.session_ads(**self.R)[0]
+        self.assertEqual(api.journeys_explore(mode="visits", ad=ad["ad_id"], limit=1, **self.R)["total"], api.sessions(**self.R, limit=1, ad=ad["ad_id"])["total"])
+        self.assertEqual(api.journeys_explore(mode="visits", roop="opened", limit=1, **self.R)["total"], api.sessions(**self.R, limit=1, has="roop")["total"])
+
+    def test_bad_input_is_refused(self):
+        from fastapi import HTTPException
+        with self.assertRaises(HTTPException):
+            api.roop_usage(level="nope", **self.R)
+        with self.assertRaises(HTTPException):
+            api.journeys_explore(mode="visits", roop="x", **self.R)

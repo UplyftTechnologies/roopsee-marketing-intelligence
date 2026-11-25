@@ -205,7 +205,8 @@ def meta_breakdown(level: str = "adset", campaign_id: str | None = None, date_fr
     if campaign_id:
         w += " AND campaign_id = ?"
         a.append(campaign_id)
-    rows = q(f"""SELECT {idc} AS id, max({namec}) AS name, max(campaign_name) AS campaign, sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks,
+    rows = q(f"""SELECT {idc} AS id, max({namec}) AS name, max(campaign_name) AS campaign, max(campaign_id) AS campaign_id, max(adset_id) AS adset_id, max(adset_name) AS adset,
+                 sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks,
                  sum(link_clicks) AS link_clicks, sum(purchases) AS meta_purchases, sum(purchase_value) AS meta_value, sum(add_to_cart) AS meta_atc, sum(initiate_checkout) AS meta_checkout
                  FROM raw_meta_insights WHERE {w} GROUP BY 1 ORDER BY round(sum(spend), 2) DESC, 1 LIMIT 200""", a)
     thumbs = {r["entity_id"]: r for r in q("SELECT entity_id, thumbnail_url, effective_status FROM raw_meta_entities WHERE entity_type = ?", [level])}
@@ -260,7 +261,7 @@ def meta_hierarchy(date_from: str | None = None, date_to: str | None = None, inc
     def adset(c, aid, name=None):
         if aid not in c["adsets"]:
             e = ents.get(("adset", aid), {})
-            c["adsets"][aid] = {"id": aid, "level": "adset", "name": name or e.get("name") or aid, "status": e.get("effective_status"),
+            c["adsets"][aid] = {"id": aid, "level": "adset", "campaign_id": c["id"], "name": name or e.get("name") or aid, "status": e.get("effective_status"),
                                 "daily_budget": e.get("daily_budget"), "ads": {}}
         return c["adsets"][aid]
 
@@ -268,7 +269,7 @@ def meta_hierarchy(date_from: str | None = None, date_to: str | None = None, inc
         c = camp(r["campaign_id"], r["campaign_name"])
         a = adset(c, r["adset_id"], r["adset_name"])
         e = ents.get(("ad", r["ad_id"]), {})
-        a["ads"][r["ad_id"]] = _meta_lite({"id": r["ad_id"], "level": "ad", "name": r["ad_name"] or e.get("name") or r["ad_id"], "status": e.get("effective_status"),
+        a["ads"][r["ad_id"]] = _meta_lite({"id": r["ad_id"], "level": "ad", "campaign_id": c["id"], "adset_id": a["id"], "name": r["ad_name"] or e.get("name") or r["ad_id"], "status": e.get("effective_status"),
                                            "thumbnail_url": e.get("thumbnail_url"), **{k: r[k] or 0 for k in _SUM}})
     if include_idle:  # things that exist in Meta but had no spend in this range
         for (kind, eid), e in ents.items():
@@ -278,7 +279,7 @@ def meta_hierarchy(date_from: str | None = None, date_to: str | None = None, inc
                 adset(camp(e["campaign_id"]), eid)
             elif kind == "ad" and e.get("campaign_id") and e.get("adset_id"):
                 a = adset(camp(e["campaign_id"]), e["adset_id"])
-                a["ads"].setdefault(eid, _meta_lite({"id": eid, "level": "ad", "name": e.get("name") or eid, "status": e.get("effective_status"),
+                a["ads"].setdefault(eid, _meta_lite({"id": eid, "level": "ad", "campaign_id": a["campaign_id"], "adset_id": a["id"], "name": e.get("name") or eid, "status": e.get("effective_status"),
                                                      "thumbnail_url": e.get("thumbnail_url"), **zero}))
     out = []
     for c in camps.values():

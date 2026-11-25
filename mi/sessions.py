@@ -16,7 +16,8 @@ FLAG_LOGIN = "(coalesce(s.f_login, false) OR s.user_id IS NOT NULL)"
 # every flag is wrapped so a missing value counts as "did not" (NOT NULL would otherwise silently drop the session from "did not" filters)
 SESSION_FLAGS = {k: f"coalesce({v}, false)" for k, v in {
     "product": "s.f_product", "cart": "s.f_cart", "checkout": "s.f_checkout", "pay": "s.f_pay", "order": FLAG_ORDER,
-    "login": FLAG_LOGIN, "login_now": "s.f_login", "quiz": "s.f_quiz_done", "search": "s.f_search", "address": "s.f_address", "location": "s.f_location"}.items()}
+    "login": FLAG_LOGIN, "login_now": "s.f_login", "quiz": "s.f_quiz_done", "search": "s.f_search", "address": "s.f_address", "location": "s.f_location",
+    "roop": "jy.chat_opened", "roop_asked": "jy.chat_asked"}.items()}
 
 
 EMAIL = "coalesce(nullif(lower(u.email), ''), o.order_email)"
@@ -30,10 +31,14 @@ SESSION_SORTS = {"started_at": "s.started_at", "events": "s.events", "duration_s
 ORD_CTE = "WITH o AS (SELECT * FROM session_orders)"  # built once by the transform
 
 
-SESS_FROM = " FROM sessions s LEFT JOIN o ON o.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key)"
+SESS_FROM = (" FROM sessions s LEFT JOIN o ON o.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = coalesce(s.user_id, s.visitor_key)"
+             " LEFT JOIN journey_sessions jy ON jy.session_id = s.session_id LEFT JOIN session_attrib sa ON sa.session_id = s.session_id"
+             " LEFT JOIN (SELECT entity_id, any_value(name) AS name FROM raw_meta_entities WHERE entity_type = 'ad' GROUP BY 1) ae ON ae.entity_id = sa.ad_id"
+             " LEFT JOIN session_landing_product lp ON lp.session_id = s.session_id")
 
 
-def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any", pincode=None, event=None):
+def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, only_excluded=False, min_stage=0, has=None, lacks=None, match="any", pincode=None, event=None,
+                    ad=None, adset=None, campaign_id=None, landing_product=None):
     w, a = sess_where(d_from, d_to, include_excluded or only_excluded)  # "only hidden" must not be combined with "hide hidden"
     if only_excluded:
         w += " AND s.is_excluded"
@@ -49,6 +54,10 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
     for k in _csv(lacks):
         if k in SESSION_FLAGS:
             w += f" AND NOT {SESSION_FLAGS[k]}"
+    for col, val in (("sa.ad_id", ad), ("sa.adset_id", adset), ("s.campaign", campaign_id), ("lp.product_id", landing_product)):  # the ad / ad set / campaign / product page a visit came from
+        if val:
+            w += f" AND {col} = ?"
+            a.append(val)
     pins = _csv(pincode)
     if pins:
         w += " AND s.pincode IN (" + ",".join("?" * len(pins)) + ")"
@@ -65,25 +74,37 @@ def _sessions_where(d_from, d_to, include_excluded, search=None, channel=None, o
         w += f""" AND (lower(s.session_id) LIKE ? OR lower(s.visitor_key) LIKE ? OR lower(coalesce(s.user_id,'')) LIKE ? OR coalesce(s.ip,'') LIKE ?
                  OR coalesce(s.phone10,'') LIKE ? OR lower(coalesce(s.city,'')) LIKE ? OR lower(coalesce(u.name,'')) LIKE ? OR lower(s.campaign) LIKE ?
                  OR lower(coalesce({EMAIL}, '')) LIKE ? OR coalesce(s.pincode, '') LIKE ?
-                 OR s.session_id IN (SELECT session_id FROM orders_clean WHERE session_id IS NOT NULL AND lower(order_id) LIKE ?){ev_or})"""
-        a += [like] * 11 + ([f"%{ev_term}%"] if ev_or else [])
+                 OR s.session_id IN (SELECT session_id FROM orders_clean WHERE session_id IS NOT NULL AND lower(order_id) LIKE ?)
+                 OR lower(coalesce(sa.ad_id, '')) LIKE ? OR lower(coalesce(ae.name, '')) LIKE ?{ev_or})"""
+        a += [like] * 13 + ([f"%{ev_term}%"] if ev_or else [])
     return w, a
 
 
 @app.get("/api/sessions")
 def sessions(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, search: str | None = None,
              min_stage: int = 0, channel: str | None = None, only_excluded: bool = False, has: str | None = None, lacks: str | None = None,
-             match: str = "any", pincode: str | None = None, event: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
-    """has / lacks = comma lists of: product, cart, checkout, pay, order, login (known user), login_now (logged in during the session), quiz, search, address (saved a proper address), location (only picked a pincode / location). pincode = comma list of 6-digit pincodes given in the session. match=any|all applies to `has`."""
-    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode, event)
+             match: str = "any", pincode: str | None = None, event: str | None = None, ad: str | None = None, adset: str | None = None, campaign_id: str | None = None,
+             landing_product: str | None = None, sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
+    """ad / adset / campaign_id / landing_product = only visits that came from that Meta ad, ad set, campaign (exact id or name) or started on that product page.
+    has / lacks = comma lists of: product, cart, checkout, pay, order, login (known user), login_now (logged in during the session), quiz, search, roop (opened the Roop assistant), roop_asked (asked it a question), address (saved a proper address), location (only picked a pincode / location). pincode = comma list of 6-digit pincodes given in the session. match=any|all applies to `has`."""
+    w, a = _sessions_where(date_from, date_to, include_excluded, search, channel, only_excluded, min_stage, has, lacks, match, pincode, event, ad, adset, campaign_id, landing_product)
     order = SESSION_SORTS.get(sort, SESSION_SORTS["started_at"])
     d = "ASC" if direction.lower() == "asc" else "DESC"
     total = one(f"{ORD_CTE} SELECT count(*) n {SESS_FROM} WHERE {w}", a)["n"]
     rows = q(f"""{ORD_CTE} SELECT s.session_id, s.started_at, s.duration_s, s.events, s.pageviews, s.channel, s.source, s.medium, s.campaign, s.landing_path,
         s.city, s.region, s.country, s.device, s.platform, s.is_app, s.user_id, u.name, {EMAIL} AS email, s.phone10, s.pincode, s.ip, s.visitor_key, s.key_events, CASE WHEN {FLAG_ORDER} THEN 5 ELSE s.stage END AS stage,
-        s.is_excluded, s.excl_reason, coalesce(o.n_orders, 0) AS order_count, o.order_value, o.other_value AS order_other_value, o.statuses AS order_statuses
+        s.is_excluded, s.excl_reason, sa.ad_id, ae.name AS ad_name, sa.adset_id, coalesce(jy.chat_opened, false) AS roop_opened, coalesce(jy.chat_asked, false) AS roop_asked, coalesce(o.n_orders, 0) AS order_count, o.order_value, o.other_value AS order_other_value, o.statuses AS order_statuses
         {SESS_FROM} WHERE {w} ORDER BY {order} {d} NULLS LAST, s.started_at DESC, s.session_id LIMIT ? OFFSET ?""", [*a, max(1, min(int(limit), 5000)), max(0, offset)])
     return {"total": total, "rows": rows}
+
+
+@app.get("/api/sessions/ads")
+def session_ads(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, limit: int = 80):
+    """The Meta ads that brought visits in these dates (for the Ad filter of the Sessions tab), with their names where Meta is synced."""
+    w, a = sess_where(date_from, date_to, include_excluded)
+    return q(f"""SELECT sa.ad_id, ae.name, count(*) AS sessions, count(*) FILTER (WHERE jy.chat_opened) AS roop FROM sessions s JOIN session_attrib sa ON sa.session_id = s.session_id
+                 LEFT JOIN (SELECT entity_id, any_value(name) AS name FROM raw_meta_entities WHERE entity_type = 'ad' GROUP BY 1) ae ON ae.entity_id = sa.ad_id
+                 LEFT JOIN journey_sessions jy ON jy.session_id = s.session_id WHERE {w} AND s.channel = 'Paid Meta' GROUP BY 1, 2 ORDER BY sessions DESC, 1 LIMIT ?""", [*a, max(1, min(int(limit), 300))])
 
 
 @app.get("/api/sessions/counts")
@@ -141,6 +162,16 @@ def _event_details(value, extra, cart_step=False) -> list[dict]:
     return [{"k": nice(k), "v": out[k]} for k in keys]
 
 
+def _raw_record(r: dict) -> dict:
+    """The event exactly as stored in event_log (every column, extra_data as real JSON), for the 'raw data' view."""
+    out = {k: v for k, v in r.items() if k != "x"}
+    try:
+        out["extra_data"] = json.loads(r["x"]) if r.get("x") else None
+    except Exception:
+        out["extra_data"] = r.get("x")
+    return {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in out.items() if v is not None}
+
+
 def _addresses(user_id, session_id=None):
     """Addresses saved on the account (customer_address) plus, for a session, the pincodes / places typed during it."""
     saved = q("""SELECT id, full_name, phone, email, delivery_address, nearby_landmark, formatted_address, city, state, pincode, is_default, location_source,
@@ -163,15 +194,16 @@ def session_detail(session_id: str):
     events = q("""SELECT id, timezone('Asia/Kolkata', ts) AS at, event_name, event_key, page_type, path, product_name, brand, amount, search_term, city_n, ip
                   FROM events_clean WHERE session_id = ? AND NOT is_dup ORDER BY ts, id LIMIT 3000""", [session_id])
     hidden = one("SELECT count(*) FILTER (WHERE is_dup) AS n FROM events_clean WHERE session_id = ?", [session_id])["n"]
-    raw = {r["id"]: r for r in q("SELECT id, value, extra_data::VARCHAR AS x FROM raw_event_log WHERE id IN (SELECT id FROM events_clean WHERE session_id = ? AND NOT is_dup)", [session_id])}
+    raw = {r["id"]: r for r in q("SELECT *, extra_data::VARCHAR AS x FROM raw_event_log WHERE id IN (SELECT id FROM events_clean WHERE session_id = ? AND NOT is_dup)", [session_id])}
     for e in events:
         r = raw.pop(e.pop("id"), None)
         e["details"] = _event_details(r["value"], r["x"], e.get("event_key") in ("add_to_cart", "view_cart", "checkout_view", "pay_started", "order_placed")) if r else []
+        e["raw"] = _raw_record(r) if r else None
     from .chats import session_chats  # local import: chats.py imports nothing from here, but api.py loads both
     chats = session_chats(session_id)
     for c in chats:  # Roop chat messages are part of what the visitor did: show them in the timeline, in time order
         events.append({"at": c["at"], "event_name": "assistant_chat", "event_key": "roop_chat", "page_type": None, "path": "Roop chat", "product_name": None, "brand": None, "amount": None,
-                       "search_term": str(c["question"] or "")[:100], "city_n": None, "ip": None,
+                       "search_term": str(c["question"] or "")[:100], "city_n": None, "ip": None, "raw": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in c.items() if v is not None},
                        "details": [{"k": "Asked", "v": c["question"]}, {"k": "Roop replied" if not c["error"] else "No answer", "v": c["reply"] if not c["error"] else c["error"]}]
                        + ([{"k": "Rated", "v": "helpful" if c["rating"] == 1 else "not helpful"}] if c["rating"] else [])})
     if chats:
@@ -195,7 +227,15 @@ def session_detail(session_id: str):
     addresses = _addresses(s["user_id"], session_id)
     prev_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at < ? ORDER BY started_at DESC LIMIT 1", [pkey, s["started_at"]])
     next_s = one("SELECT session_id, started_at FROM sessions WHERE coalesce(user_id, visitor_key) = ? AND started_at > ? ORDER BY started_at ASC LIMIT 1", [pkey, s["started_at"]])
-    return {"session": s, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders, "addresses": addresses, "duplicates_hidden": hidden, "chats": chats,
+    ad = one("""SELECT sa.ad_id, sa.adset_id, ae.name, ae.effective_status AS status, ae.campaign_id FROM session_attrib sa
+                LEFT JOIN (SELECT entity_id, any_value(name) AS name, any_value(effective_status) AS effective_status, any_value(campaign_id) AS campaign_id FROM raw_meta_entities WHERE entity_type = 'ad' GROUP BY 1) ae
+                ON ae.entity_id = sa.ad_id WHERE sa.session_id = ?""", [session_id])
+    if ad:
+        from .deeper import ad_image_url
+        sp = one("SELECT coalesce(sum(spend), 0) AS spend, coalesce(sum(link_clicks), 0) AS clicks FROM raw_meta_insights WHERE ad_id = ?", [ad["ad_id"]])
+        ad = {**ad, "image": ad_image_url(ad["ad_id"]), "spend": float(sp["spend"] or 0), "clicks": sp["clicks"] or 0,
+              "visits": one("SELECT count(*) AS n FROM session_attrib WHERE ad_id = ?", [ad["ad_id"]])["n"]}
+    return {"session": s, "ad": ad or None, "events": events, "pages": pages, "event_types": types, "extra": extra, "orders": orders, "addresses": addresses, "duplicates_hidden": hidden, "chats": chats,
             "person": {**person, "person_key": pkey} if person else {"person_key": pkey}, "prev": prev_s or None, "next": next_s or None}
 
 

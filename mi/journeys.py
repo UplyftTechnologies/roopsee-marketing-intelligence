@@ -222,7 +222,7 @@ ENTERED = [("login", "login_asked", "Login"), ("quiz", "quiz_opened", "Quiz"), (
 
 @app.get("/api/journeys/explore")
 def journeys_explore(mode: str = "visits", date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, outcome: str | None = None,
-                     journey: str | None = None, reached: str | None = None, stuck: bool = False, channel: str | None = None, search: str | None = None,
+                     journey: str | None = None, reached: str | None = None, stuck: bool = False, channel: str | None = None, search: str | None = None, ad: str | None = None, roop: str | None = None,
                      sort: str = "started_at", direction: str = "desc", limit: int = 50, offset: int = 0):
     """Individual journeys. mode=visits: one row per visit with its path of key actions and outcome. mode=people: one row per person with their visits in order.
     Filters: outcome (browsed / product / cart / checkout / paying / ordered), journey + reached (visits that reached a step), stuck (reached it, went no further, never bought)."""
@@ -243,6 +243,13 @@ def journeys_explore(mode: str = "visits", date_from: str | None = None, date_to
         w += f" AND {_reach(journey, i)}"
         if stuck and i + 1 < len(keys):
             w += f" AND NOT {_reach(journey, i + 1)} AND NOT j.purchase_purchase"
+    if ad:
+        w += " AND sa.ad_id = ?"
+        a.append(ad)
+    if roop:
+        if roop not in ("opened", "asked"):
+            raise HTTPException(400, "roop must be opened or asked")
+        w += " AND j.chat_opened" if roop == "opened" else " AND j.chat_asked"
     if search:
         like = f"%{search.lower()}%"
         w += (" AND (lower(s.session_id) LIKE ? OR lower(coalesce(s.city, '')) LIKE ? OR lower(coalesce(u.name, '')) LIKE ? OR coalesce(u.phone10, '') LIKE ? OR lower(s.campaign) LIKE ?"
@@ -250,7 +257,7 @@ def journeys_explore(mode: str = "visits", date_from: str | None = None, date_to
         a += [like] * 6
     d = "ASC" if direction.lower() == "asc" else "DESC"
     base = (f"FROM sessions s JOIN journey_sessions j ON j.session_id = s.session_id LEFT JOIN session_orders o ON o.session_id = s.session_id "
-            f"LEFT JOIN pain_sessions ps ON ps.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = j.person_key")
+            f"LEFT JOIN pain_sessions ps ON ps.session_id = s.session_id LEFT JOIN users_360 u ON u.person_key = j.person_key LEFT JOIN session_attrib sa ON sa.session_id = s.session_id")
     lim, off = max(1, min(int(limit), 2000)), max(0, offset)
     if mode == "visits":
         total = one(f"SELECT count(*) AS n {base} WHERE {w}", a)["n"]

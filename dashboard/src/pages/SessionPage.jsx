@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { dt, dur, inr, num, tod, useApi, useFilters } from '../api'
 import { Badge, Card, Table } from '../ui'
 import { STAGE, STAGE_TONE } from '../shared'
-import { AddressCard, CopyBtn, ExcludeMenu, Facts, Journey, SessionTimeline, pretty } from '../components/profile'
+import { AddressCard, CopyBtn, ExcludeMenu, Facts, Journey, SessionEventsTable, pretty } from '../components/profile'
 import Icon from '../components/Icon'
 
 export default function SessionPage() {
@@ -48,11 +48,12 @@ export default function SessionPage() {
         <div className="sc static"><span className="sc-label">Orders placed</span><span className="sc-value">{num(orders.length)}</span><span className="sc-note">{orders.length ? inr(orders.reduce((a, o) => a + (o.total || 0), 0)) : 'none'}</span></div>
       </div>
 
-      <div className="grid g-main">
-        <Card title="What they did, step by step" sub="clock time and time since the session started · key actions are highlighted">
-          <SessionTimeline events={events} max={600} query={evq} onQuery={setEvq} />
-        </Card>
-        <div className="grid" style={{ gap: 14 }}>
+      <Card title={`Events in this session (${num(events.length)})`} sub="Oldest first. The gap is the time since the event before it. 💬 rows are messages to Roop. Click “raw data” on a row to see everything recorded for it.">
+        <SessionEventsTable events={events} query={evq} onQuery={setEvq} />
+      </Card>
+
+      <div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, alignItems: 'start' }}>
           {chats.length > 0 && (
             <Card title="Roop chat in this visit" sub="what they asked Roop, the skin-care assistant">
               {chats.map((c) => (
@@ -63,6 +64,21 @@ export default function SessionPage() {
                 </div>
               ))}
               <button type="button" className="btn small" onClick={() => f.go('chats', { chat: chats[0].conversation })}>Read the whole chat →</button>
+            </Card>
+          )}
+          {s.data.ad && (
+            <Card title="Came from this ad" sub="the Meta ad in the link this visit arrived with">
+              <div style={{ display: 'grid', gridTemplateColumns: s.data.ad.image ? '72px 1fr' : '1fr', gap: 10, alignItems: 'start' }}>
+                {s.data.ad.image && <img src={s.data.ad.image} alt="" loading="lazy" style={{ width: 72, height: 72, borderRadius: 8, objectFit: 'cover', background: 'var(--surface-2)' }} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{s.data.ad.name || `Ad ${s.data.ad.ad_id}`}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    <span className="mono">{s.data.ad.ad_id}</span>{s.data.ad.status ? ` · ${String(s.data.ad.status).toLowerCase().replace(/_/g, ' ')}` : ''}
+                    {s.data.ad.spend > 0 ? ` · ₹${Math.round(s.data.ad.spend).toLocaleString('en-IN')} spent in all` : ''}{!s.data.ad.name ? ' · not in the synced Meta accounts' : ''}
+                  </div>
+                  <button type="button" className="btn small" style={{ marginTop: 6 }} onClick={() => f.go('sessions', { ad: s.data.ad.ad_id })}>All {num(s.data.ad.visits)} visits from this ad →</button>
+                </div>
+              </div>
             </Card>
           )}
           <Card title="Who" right={person.person_key && <button type="button" className="btn small" onClick={() => f.go('person', { key: person.person_key })}>View full profile →</button>}>

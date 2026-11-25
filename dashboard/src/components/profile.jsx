@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { KEY_LABEL, dt, tod } from '../api'
-import { Badge, Card } from '../ui'
+import { Badge, Card, Table } from '../ui'
 import { useQuickExclude } from '../shared'
 import Icon from './Icon'
 import Popover from './Popover'
@@ -65,6 +65,107 @@ export function SessionTimeline({ events, max = 400, query, onQuery }) {
       </div>
       {words.length > 0 && rows.length === 0 && <div className="empty">No event matches “{q}”.</div>}
       {rows.length > max && <div className="muted" style={{ marginTop: 6 }}>Showing the first {max} of {rows.length} steps.</div>}
+    </div>
+  )
+}
+
+const CATS = [
+  { id: 'visits', label: 'Visits & pages' }, { id: 'browsing', label: 'Browsing' }, { id: 'cart', label: 'Cart & orders' }, { id: 'clicks', label: 'Other clicks' },
+  { id: 'login', label: 'Login & account' }, { id: 'roop', label: 'Roop chat' }, { id: 'errors', label: 'Errors & slow pages' },
+]
+const CART_KEYS = new Set(['add_to_cart', 'view_cart', 'checkout_view', 'pay_started', 'order_placed'])
+/** Which group an event belongs to in the session table. */
+export function eventCategory(e) {
+  const n = e.event_name || ''
+  if (n === 'assistant_chat') return 'roop'
+  if (/error|fail|slow|timeout|exception|page_load_sample|web_vital/i.test(n)) return 'errors'
+  if (/login|logout|signup|sign_up|register|otp|password|account|verify|verified/i.test(n)) return 'login'
+  if (CART_KEYS.has(e.event_key) || /cart|checkout|order|payment|pay_|coupon/i.test(n)) return 'cart'
+  if (/^(page_viewed|page_view|web_opened|app_opened|session_started|screen_viewed)/i.test(n)) return 'visits'
+  if (/click|tap|toggle|ui_/i.test(n)) return 'clicks'
+  return 'browsing'
+}
+const gapText = (s) => (s < 1 ? '–' : s < 60 ? `+${s} sec` : s < 3600 ? `+${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim() : `+${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`)
+const cap = (s) => (s ? String(s).replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase()) : '')
+
+/** An event's stored record as JSON (what the tracker sent), with the readable view one click away. */
+function RawData({ e }) {
+  const [view, setView] = useState(e.raw ? 'json' : 'plain')
+  const text = e.raw ? JSON.stringify(e.raw, null, 2) : ''
+  const det = e.details || []
+  return (
+    <div className="tl-all" style={{ display: 'block' }}>
+      <div className="chip-row" style={{ marginBottom: 6 }}>
+        {e.raw && <button type="button" className={`chip ${view === 'json' ? 'on' : ''}`} onClick={() => setView('json')}>JSON</button>}
+        <button type="button" className={`chip ${view === 'plain' ? 'on' : ''}`} onClick={() => setView('plain')}>Readable</button>
+        {e.raw && <CopyBtn text={text} title="Copy this event's JSON" />}
+      </div>
+      {view === 'json'
+        ? <pre className="mono" style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, maxHeight: 360, overflow: 'auto' }}>{text}</pre>
+        : det.length ? <dl style={{ margin: 0, display: 'grid', gap: 3 }}>{det.map((d) => <div key={d.k}><dt>{d.k}</dt><dd>{d.v}</dd></div>)}</dl> : <span className="muted">Nothing else was recorded.</span>}
+    </div>
+  )
+}
+
+/** The session's events as a table, the way the roopsee.com admin analytics shows them: # · Time · Gap · Page · What happened · Detail, with group chips and counts. */
+export function SessionEventsTable({ events, query, onQuery }) {
+  const [cat, setCat] = useState('all')
+  const [tech, setTech] = useState(true)
+  const [own, setOwn] = useState('')
+  const [open, setOpen] = useState(new Set())
+  const q = query ?? own
+  const setQ = onQuery ?? setOwn
+  if (!events || !events.length) return <div className="empty">No events recorded</div>
+  let prev = null
+  const all = events.map((e, i) => {
+    const t = new Date(e.at).getTime()
+    const gap = prev == null ? 0 : Math.max(0, Math.round((t - prev) / 1000))
+    prev = t
+    return { e, n: i + 1, gap, cat: eventCategory(e) }
+  })
+  const counts = {}
+  for (const r of all) counts[r.cat] = (counts[r.cat] || 0) + 1
+  const words = norm(q).split(' ').filter(Boolean)
+  const rows = all.filter((r) => (cat === 'all' || r.cat === cat) && (!words.length || matches(r.e, words)))
+  const toggle = (n) => setOpen((p) => { const nx = new Set(p); if (nx.has(n)) nx.delete(n); else nx.add(n); return nx })
+  const summary = (e) => {
+    if (e.search_term) return `“${e.search_term}”`
+    if (e.product_name) return `${e.product_name}${e.amount ? ` · ₹${e.amount}` : ''}`
+    const d = (e.details || [])[0]
+    if (d) return String(d.v).length > 70 ? `${String(d.v).slice(0, 67)}…` : d.v
+    return e.amount ? `₹${e.amount}` : '—'
+  }
+  return (
+    <div>
+      <div className="tl-tools">
+        {[{ id: 'all', label: 'All', n: all.length }, ...CATS.filter((c) => counts[c.id]).map((c) => ({ ...c, n: counts[c.id] }))].map((c) => (
+          <button key={c.id} type="button" className={`chip ${cat === c.id ? 'on' : ''}`} onClick={() => setCat(c.id)}>{c.label} <b>{c.n}</b></button>
+        ))}
+      </div>
+      <div className="tl-tools">
+        <input className="field" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search events, e.g. address, add to cart…" aria-label="Search events" style={{ minWidth: 220 }} />
+        <label className="toggle"><input type="checkbox" checked={tech} onChange={(e) => setTech(e.target.checked)} /> Show technical names</label>
+        <span className="muted">{rows.length === all.length ? `${all.length} events` : `${rows.length} of ${all.length} events`}</span>
+        {(words.length > 0 || cat !== 'all') && <button type="button" className="btn small" onClick={() => { setQ(''); setCat('all') }}>Clear</button>}
+      </div>
+      <Table scroll rows={rows} empty="No event matches." rowClass={(r) => (r.e.event_key ? 'key-row' : '')} cols={[
+        { label: '#', cls: 'muted', render: (r) => r.n },
+        { label: 'Time', cls: 'nw', render: (r) => tod(r.e.at) },
+        { label: 'Gap', cls: 'nw muted', render: (r) => gapText(r.gap) },
+        { label: 'Page', cls: 'nw', render: (r) => (r.e.page_type ? cap(r.e.page_type) : r.e.path ? <span className="mono">{pretty(r.e.path).slice(0, 24)}</span> : '–') },
+        { label: 'What happened', render: (r) => (r.cat === 'roop' ? <span>💬 {tech ? <span className="mono"><b>{r.e.event_name}</b></span> : <b>Message to Roop</b>}</span>
+          : tech ? <span className="mono"><b>{r.e.event_name}</b></span> : <b>{label(r.e)}</b>) },
+        { label: 'Detail', render: (r) => {
+          const det = r.e.details || []
+          return (
+            <div>
+              <span>{summary(r.e)}</span>
+              {(det.length > 0 || r.e.raw) && <> <button type="button" className="link-btn" onClick={() => toggle(r.n)} aria-expanded={open.has(r.n)} style={{ background: 'none', border: 0, color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit' }}>{open.has(r.n) ? 'hide data' : 'raw data'}</button></>}
+              {open.has(r.n) && <RawData e={r.e} />}
+            </div>
+          )
+        } },
+      ]} />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { day, dt, dur, num, pct, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Search, Table, axis, chartTip, delta } from '../ui'
 import { STAGE } from '../shared'
+import RoopUsage from '../components/RoopUsage'
 
 const VIEWS = [
   ['all', 'All', null],
@@ -104,6 +105,8 @@ export default function Chats() {
               <Card title="Why messages got no answer" sub="shoppers saw an error instead of a reply"><Bars items={d.failures} total={t.failed} empty="Every message got an answer." /></Card>
               <Card title="AI model used"><Bars items={d.models} total={t.messages} empty="No messages in this period." /></Card>
             </div>
+
+            <RoopUsage compact title="Roop by campaign" />
 
             <div className="grid g2">
               <Card title="Answers rated not helpful" sub="the clearest signal of what to improve. Click one to read the whole chat."><AnswerList items={d.disliked} onOpen={setOpen} empty="No answers were rated not helpful." /></Card>

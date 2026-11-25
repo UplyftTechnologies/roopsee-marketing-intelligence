@@ -78,7 +78,7 @@ def ad_image(ad_id: str):
 def _card_stats(r: dict, base: dict) -> dict:
     s = r["sessions"] or 0
     out = {**r, "bounce_rate": ratio(r["bounced"], s), "product_rate": ratio(r["product"], s), "cart_rate": ratio(r["carts"], s), "checkout_rate": ratio(r["checkouts"], s),
-           "order_rate": ratio(r["orders"], s), "pain_rate": ratio(r["pain"], s), "avg_duration": round(r["avg_duration"] or 0, 1)}
+           "order_rate": ratio(r["orders"], s), "pain_rate": ratio(r["pain"], s), "roop_rate": ratio(r["roop_opened"], s), "avg_duration": round(r["avg_duration"] or 0, 1)}
     notes = []
     if s >= 30:
         if out["bounce_rate"] >= base["bounce_rate"] + 0.12:
@@ -134,8 +134,8 @@ def deeper_journeys(date_from: str | None = None, date_to: str | None = None, in
     # 3. ads: a card per Meta ad (the ad id in the link)
     agg = ("count(*) AS sessions, count(*) FILTER (WHERE s.is_bounce) AS bounced, count(*) FILTER (WHERE s.f_product) AS product, count(*) FILTER (WHERE s.f_cart) AS carts, "
            f"count(*) FILTER (WHERE s.f_checkout) AS checkouts, count(*) FILTER (WHERE {FLAG_ORDER}) AS orders, coalesce(sum(o.order_value), 0) AS revenue, "
-           "avg(s.duration_s) FILTER (WHERE s.duration_s > 0) AS avg_duration, count(*) FILTER (WHERE ps.with_problem) AS pain")
-    ps = "LEFT JOIN pain_sessions ps ON ps.session_id = s.session_id"
+           "avg(s.duration_s) FILTER (WHERE s.duration_s > 0) AS avg_duration, count(*) FILTER (WHERE ps.with_problem) AS pain, count(*) FILTER (WHERE jy.chat_opened) AS roop_opened, count(*) FILTER (WHERE jy.chat_asked) AS roop_asked")
+    ps = "LEFT JOIN pain_sessions ps ON ps.session_id = s.session_id LEFT JOIN journey_sessions jy ON jy.session_id = s.session_id"
 
     def base_of(r):
         s = r["sessions"] or 1

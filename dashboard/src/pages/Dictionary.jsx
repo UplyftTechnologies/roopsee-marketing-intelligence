@@ -36,6 +36,13 @@ const SECTIONS = [
     ['Had event', 'A session that contains the named event at least once (part of a name is enough).'],
     ['Did / Did not / Any', 'Did: the session did it. Did not: it did not. Any: ignore it. Several Did choices can be combined as All or Any.'],
   ]],
+  ['Roop by campaign and ad', [
+    ['Opened Roop / Asked', 'A visit opened Roop when it opened the assistant; it asked when it sent at least one message. Opens are about twice as many as questions.'],
+    ['Where a visit came from', 'The visit’s own first-touch campaign, ad set (utm_term) and ad (utm_content), not the shortened campaign name on the assistant event. For Meta the campaign is an id; the name shows where Meta is synced.'],
+    ['Roop visits vs the rest', 'In each row, the share of visits that opened Roop and then ordered, next to the share of the other visits that ordered. It shows who uses Roop, not what Roop caused: people who open an assistant are often already more interested.'],
+    ['Sessions filters', 'Ad, ad set, campaign and landing product narrow the Sessions list to the visits behind a row; Roop (opened / asked) joins the Did / Did not choices. Searching an ad id or name also finds its visits.'],
+    ['Bracketed rows', 'Visits with no ad id, ad set or campaign tag in their link (shown as “(no ad)” and so on) cannot be listed by it.'],
+  ]],
   ['Journeys tab', [
     ['Journey', 'A series of steps a shopper takes towards a goal: Purchase, Checkout, Login & sign-up, Skin quiz, Search & discovery, Roop chat, and After the order (delivery). Every journey is a funnel with the same layout.'],
     ['Reached a step', 'Did that step, or any LATER step of the same journey: a saved address or a default payment method can skip a click, so a later step counts for the earlier ones.'],

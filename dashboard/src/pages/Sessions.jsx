@@ -11,6 +11,7 @@ const GROUPS = [
   ['Shopping', [['product', 'Viewed a product'], ['cart', 'Added to cart'], ['checkout', 'Reached checkout'], ['pay', 'Started payment'], ['order', 'Ordered']]],
   ['Account', [['login', 'Known user', 'Logged in during this session or at any other time'], ['login_now', 'Logged in this session']]],
   ['Engagement', [['quiz', 'Finished the quiz'], ['search', 'Searched']]],
+  ['Roop assistant', [['roop', 'Opened Roop', 'Opened the skin-care assistant'], ['roop_asked', 'Asked Roop a question', 'Sent at least one message to the assistant']]],
   ['Delivery', [['address', 'Saved an address', 'Saved a full address with a valid pincode'], ['location', 'Chose pincode / location', 'Typed a pincode, searched a place, used current location or picked a saved address']]],
 ]
 const LABEL = Object.fromEntries(GROUPS.flatMap(([, rows]) => rows.map(([k, l]) => [k, l])))
@@ -50,15 +51,20 @@ export default function Sessions() {
   const pre = f.prefill || {}
   // filters are remembered while you open a session / person and come back; a drill-down from another tab starts fresh
   const sh = pre.share || null  // opened from a shared link
-  const fresh = Boolean(pre.search || pre.channel || sh)
+  const fresh = Boolean(pre.search || pre.channel || pre.ad || pre.adset || pre.campaign_id || pre.landing_product || pre.has || sh)
   const [search, setSearch] = usePersisted('sessions.search', sh?.search ?? (pre.search || ''), fresh)
   const [channel, setChannel] = usePersisted('sessions.channel', sh?.channel ?? (pre.channel || 'All'), fresh)
-  const [has, setHas] = usePersisted('sessions.has', sh?.has ?? [], fresh)
+  const [has, setHas] = usePersisted('sessions.has', sh?.has ?? pre.has ?? [], fresh)
   const [lacks, setLacks] = usePersisted('sessions.lacks', sh?.lacks ?? [], fresh)
   const [match, setMatch] = usePersisted('sessions.match2', sh?.match ?? 'all', fresh)
   const [only, setOnly] = usePersisted('sessions.only', sh?.only ?? 'counted', fresh)
   const [pincode, setPincode] = usePersisted('sessions.pincode', sh?.pincode ?? '', fresh)
   const [event, setEvent] = usePersisted('sessions.event', sh?.event ?? '', fresh)
+  const [ad, setAd] = usePersisted('sessions.ad', sh?.ad ?? pre.ad ?? '', fresh)
+  const [adset, setAdset] = usePersisted('sessions.adset', sh?.adset ?? pre.adset ?? '', fresh)
+  const [campaignId, setCampaignId] = usePersisted('sessions.campaign_id', sh?.campaignId ?? pre.campaign_id ?? '', fresh)
+  const [landing, setLanding] = usePersisted('sessions.landing', sh?.landing ?? pre.landing_product ?? '', fresh)
+  const adList = useApi('/sessions/ads')
   const evNames = useApi('/events/names', {}, { scoped: false })
   const [sort, setSort] = usePersisted('sessions.sort', sh?.sort ?? { key: 'started_at', dir: 'desc' }, fresh)
   const [limit, setLimit] = usePersisted('sessions.limit', 50)
@@ -69,20 +75,24 @@ export default function Sessions() {
   const counts = useApi('/sessions/counts')
   const s = useApi('/sessions', {
     search, channel: channel === 'All' ? undefined : channel, has: has.join(',') || undefined, lacks: lacks.join(',') || undefined, match,
-    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, sort: sort.key, direction: sort.dir, limit, offset,
+    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, ad: ad || undefined, adset: adset || undefined, campaign_id: campaignId || undefined, landing_product: landing || undefined, sort: sort.key, direction: sort.dir, limit, offset,
   })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, sort, limit])
+  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, ad, adset, campaignId, landing, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
   const activePreset = PRESETS.find(([, , h, l, m]) => same(h, has) && same(l, lacks) && (h.length < 2 || m === match))?.[0]
   const stateOf = (k) => (has.includes(k) ? 'did' : lacks.includes(k) ? 'not' : 'any')
   const setFlag = (k, st) => {
     setHas((h) => (st === 'did' ? [...h.filter((x) => x !== k), k] : h.filter((x) => x !== k)))
     setLacks((l) => (st === 'not' ? [...l.filter((x) => x !== k), k] : l.filter((x) => x !== k)))
   }
-  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setEvent(''); setChannel('All'); setSearch(''); setOnly('counted') }
+  const clearAll = () => { setHas([]); setLacks([]); setMatch('all'); setPincode(''); setEvent(''); setAd(''); setAdset(''); setCampaignId(''); setLanding(''); setChannel('All'); setSearch(''); setOnly('counted') }
   const activeChips = [
     ...has.map((k) => ({ id: `d-${k}`, text: `Did: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
     ...lacks.map((k) => ({ id: `n-${k}`, text: `Did not: ${LABEL[k]}`, off: () => setFlag(k, 'any') })),
     ...(event.trim() ? [{ id: 'ev', text: `Had event: ${event.trim()}`, off: () => setEvent('') }] : []),
+    ...(ad ? [{ id: 'ad', text: `Ad: ${(adList.data || []).find((x) => x.ad_id === ad)?.name || ad}`, off: () => setAd('') }] : []),
+    ...(adset ? [{ id: 'adset', text: `Ad set: ${adset}`, off: () => setAdset('') }] : []),
+    ...(campaignId ? [{ id: 'cid', text: `Campaign: ${campaignId}`, off: () => setCampaignId('') }] : []),
+    ...(landing ? [{ id: 'lp', text: `Landed on product: ${landing}`, off: () => setLanding('') }] : []),
     ...(pins ? [{ id: 'pin', text: `Pincode: ${pins.split(',').join(', ')}`, off: () => setPincode('') }] : []),
     ...(channel !== 'All' ? [{ id: 'ch', text: `Channel: ${channel}`, off: () => setChannel('All') }] : []),
     ...(only === 'excluded' ? [{ id: 'ex', text: 'Only hidden sessions', off: () => setOnly('counted') }] : []),
@@ -100,7 +110,7 @@ export default function Sessions() {
           Filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
         </button>
         {(nFilters > 0 || search) && <button type="button" className="btn" onClick={clearAll}>Clear all</button>}
-        <ShareLink tab="sessions" state={{ search, channel, has, lacks, match, only, pincode, event, sort }} />
+        <ShareLink tab="sessions" state={{ search, channel, has, lacks, match, only, pincode, event, ad, adset, campaignId, landing, sort }} />
       </div>
       <div className="chip-row" role="group" aria-label="Quick views">
         <span className="muted" style={{ fontSize: 12 }}>Quick views</span>
@@ -136,6 +146,13 @@ export default function Sessions() {
                 <input className="field" list="event-names" value={event} onChange={(e) => setEvent(e.target.value)} placeholder="checked_delivery_pincode" aria-label="Had event" style={{ width: 200 }} />
                 <datalist id="event-names">{(evNames.data || []).map((e) => <option key={e.event_name} value={e.event_name}>{`${e.sessions} sessions`}</option>)}</datalist>
               </label>
+              <label className="flag-row" title="Only visits that came from this Meta ad (the ad id in the link)"><span className="flag-name">Ad</span>
+                <select className="field" value={ad} onChange={(e) => setAd(e.target.value)} aria-label="Ad" style={{ maxWidth: 220 }}>
+                  <option value="">All ads</option>
+                  {ad && !(adList.data || []).some((x) => x.ad_id === ad) && <option value={ad}>{ad}</option>}
+                  {(adList.data || []).map((x) => <option key={x.ad_id} value={x.ad_id}>{`${x.name || x.ad_id} (${num(x.sessions)})`}</option>)}
+                </select>
+              </label>
               <label className="flag-row" title="The pincode the visitor typed or picked as their delivery location"><span className="flag-name">Pincode</span>
                 <input className="field" value={pincode} onChange={(e) => setPincode(e.target.value)} placeholder="400001, 560001" aria-label="Pincode" style={{ width: 150 }} />
               </label>
@@ -170,6 +187,7 @@ export default function Sessions() {
                   { label: 'Stage', cls: 'nw', sortBy: 'stage', render: (r) => <span title={STAGE[r.stage]}><Badge tone={STAGE_TONE[r.stage]}>{STAGE_SHORT[r.stage]}</Badge></span> },
                   { label: 'Order value', num: true, sortBy: 'order_value', render: (r) => <OrderValue r={r} /> },
                   { label: 'Channel', cls: 'nw', sortBy: 'channel', render: (r) => <span title={`${r.source} / ${r.medium} / ${r.campaign}`}>{r.channel}</span> },
+                  { label: 'Ad', cls: 'nw', render: (r) => (r.ad_id ? <span title={r.ad_id}><span className="trunc" style={{ display: 'inline-block', maxWidth: 150, verticalAlign: 'bottom' }}>{r.ad_name || r.ad_id}</span>{r.roop_opened ? <> <Badge tone="good">Roop</Badge></> : null}</span> : (r.roop_opened ? <Badge tone="good">Roop</Badge> : <span className="muted">–</span>)) },
                   { label: 'Place · device', cls: 'nw', sortBy: 'city', render: (r) => `${r.city || r.region || '–'} · ${r.is_app ? 'App' : r.device || '–'}` },
                   { label: 'Pincode', cls: 'mono nw', sortBy: 'pincode', render: (r) => r.pincode || <span className="muted">–</span> },
                   { label: 'Events', num: true, sortBy: 'events', render: (r) => r.events }, { label: 'Time', num: true, sortBy: 'duration_s', render: (r) => dur(r.duration_s) },

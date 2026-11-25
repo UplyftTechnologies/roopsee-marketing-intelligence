@@ -47,13 +47,14 @@ function PostCard({ r, kind, f }) {
       </div>
       <Funnel r={r} />
       <div className="muted" style={{ fontSize: 12 }}>
-        bounce {pct(r.bounce_rate, 0)} · cart {pct(r.cart_rate, 1)} · avg {secs(r.avg_duration)}{r.pain_rate >= 0.1 ? ` · ${pct(r.pain_rate, 0)} hit a problem` : ''}
+        bounce {pct(r.bounce_rate, 0)} · cart {pct(r.cart_rate, 1)} · avg {secs(r.avg_duration)}{r.roop_opened > 0 ? ` · opened Roop ${num(r.roop_opened)} (${pct(r.roop_rate, 1)})` : ''}{r.pain_rate >= 0.1 ? ` · ${pct(r.pain_rate, 0)} hit a problem` : ''}
         {kind === 'ad' && r.spend > 0 ? ` · spent ${inr(r.spend)}${r.cost_per_order ? ` (${inr(r.cost_per_order)} per order)` : ''}` : ''}
         {kind === 'ad' && r.landing?.length ? <><br />landed on: {r.landing.map((l) => `${l.name} ${Math.round((l.count / r.sessions) * 100)}%`).join(', ')}</> : null}
       </div>
       {r.notes.length > 0 && <ul style={{ margin: 0, paddingLeft: 16, fontSize: 13, display: 'grid', gap: 2 }}>{r.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       <div>
-        <button type="button" className="btn small" onClick={() => f.go('sessions', { search: kind === 'ad' ? r.ad_id : r.name })}>See the visits →</button>
+        <button type="button" className="btn small" onClick={() => f.go('sessions', kind === 'ad' ? { ad: r.ad_id } : { landing_product: r.product_id })}>See the visits →</button>
+        {r.roop_opened > 0 && <> <button type="button" className="btn small" onClick={() => f.go('sessions', kind === 'ad' ? { ad: r.ad_id, has: ['roop'] } : { landing_product: r.product_id, has: ['roop'] })}>Visits that opened Roop ({num(r.roop_opened)}) →</button></>}
       </div>
     </article>
   )
