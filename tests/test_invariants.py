@@ -374,43 +374,46 @@ class DeeperAnalysis(unittest.TestCase):
     R = dict(date_from="2026-10-01", date_to="2026-11-20")
 
     def test_first_order_buckets_add_up(self):
-        b = api.deeper_journeys(**self.R)["before_order"]
+        b = api.journeys_detail(journey="purchase", **self.R)["purchase"]
         self.assertEqual(sum(x["count"] for x in b["visits"]), b["orders"])
         self.assertEqual(sum(x["count"] for x in b["days"]), b["orders"])
 
     def test_ad_cards_follow_the_funnel(self):
-        for ad in api.deeper_journeys(**self.R)["ads"]:
+        for ad in api.deeper_ads(**self.R)["ads"]:
             with self.subTest(ad=ad["ad_id"]):
                 self.assertGreaterEqual(ad["sessions"], ad["carts"])
                 self.assertGreaterEqual(ad["carts"], ad["checkouts"] - 0 if ad["checkouts"] <= ad["carts"] else 0)
                 self.assertLessEqual(ad["orders"], ad["sessions"])
 
     def test_search_numbers_are_consistent(self):
-        k = api.deeper_discovery(**self.R)["kpis"]
+        k = api.journeys_detail(journey="search", **self.R)["search"]["kpis"]
         self.assertLessEqual(k["zero_searches"], k["searches"])
-        self.assertLessEqual(k["click_sessions"], k["sessions"])
+        searched = api.journeys_funnel(journey="search", by="sessions", **self.R)["funnel"][0]["count"]
+        self.assertLessEqual(k["click_sessions"], searched)  # tapping a result needs a search first
 
-    def test_quiz_numbers_are_consistent(self):
-        f = api.deeper_quiz(**self.R)["funnel"]
-        self.assertLessEqual(f["completed"], f["engaged"])
-        self.assertLessEqual(f["completed_ordered"], f["completed_carted"] + f["completed_ordered"])
+    def test_quiz_detail_never_exceeds_the_quiz_journey(self):
+        d = api.journeys_detail(journey="quiz", **self.R)["quiz"]
+        answered = api.journeys_funnel(journey="quiz", by="sessions", **self.R)["funnel"][1]["count"]
+        for st in d["steps"]:
+            self.assertLessEqual(st["sessions"], answered)
+        finished = api.journeys_funnel(journey="quiz", by="sessions", **self.R)["funnel"][2]["count"]
+        self.assertLessEqual(sum(p["sessions"] for p in d["programs"]), finished)
 
-    def test_chain_steps_never_grow(self):
-        c = api.deeper_chain(**self.R, step=["product_view", "add_to_cart", "view_cart"], unit="key")
-        counts = [x["sessions"] for x in c["steps"]]
-        self.assertEqual(counts, sorted(counts, reverse=True))
-        self.assertLessEqual(sum(n["sessions"] for n in c["next"]) + c["ended"], c["last"] + 0)
+    def test_pay_timing_buckets_add_up(self):
+        p = api.journeys_detail(journey="checkout", **self.R)["checkout"]
+        self.assertEqual(sum(b["count"] for b in p["buckets"]), p["timed"])
+        self.assertEqual(sum(m["orders"] for m in p["by_method"]), p["timed"])
 
-    def test_chain_needs_a_known_unit(self):
+    def test_detail_refuses_unknown_journeys(self):
         from fastapi import HTTPException
         with self.assertRaises(HTTPException):
-            api.deeper_chain(**self.R, step=[], unit="nope")
+            api.journeys_detail(journey="chat", **self.R)
 
     def test_every_label_lists_exactly_its_people(self):
-        d = api.deeper_segments(**self.R)
+        d = api.segment_labels(**self.R)
         for l in d["labels"][:6]:
             with self.subTest(label=l["key"]):
-                self.assertEqual(api.deeper_segment_people(label=l["key"], limit=1, **self.R)["total"], l["people"])
+                self.assertEqual(api.segment_people(label=l["key"], limit=1, **self.R)["total"], l["people"])
 
     def test_labels_belong_to_known_people(self):
         bad = one("SELECT count(*) n FROM user_labels l WHERE l.person_key NOT IN (SELECT person_key FROM users_360)")
@@ -610,7 +613,7 @@ class RoopByCampaignAndAd(unittest.TestCase):
         self.assertEqual(api.sessions(**self.R, limit=1, has="roop")["total"] + api.sessions(**self.R, limit=1, lacks="roop")["total"], every)
 
     def test_ad_cards_open_their_visits(self):
-        j = api.deeper_journeys(**self.R)
+        j = api.deeper_ads(**self.R)
         for ad in j["ads"][:3]:
             with self.subTest(ad=ad["ad_id"]):
                 self.assertEqual(api.sessions(**self.R, limit=1, ad=ad["ad_id"], channel="Paid Meta")["total"], ad["sessions"])
@@ -639,3 +642,62 @@ class RoopByCampaignAndAd(unittest.TestCase):
             api.roop_usage(level="nope", **self.R)
         with self.assertRaises(HTTPException):
             api.journeys_explore(mode="visits", roop="x", **self.R)
+
+
+class JourneyPresets(unittest.TestCase):
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def match(self, steps, **kw):
+        d = api.Definition(steps=[api.Step(action=a, did=did) for a, did in steps], **kw)
+        return api.preset_match(d, limit=5, **self.R)
+
+    def test_one_step_equals_the_sessions_filter(self):
+        for action, flag in (("key:add_to_cart", "cart"), ("key:checkout_view", "checkout"), ("key:search", "search"), ("flag:order", "order")):
+            with self.subTest(action=action):
+                self.assertEqual(self.match([(action, True)])["summary"]["visits"], api.sessions(limit=1, has=flag, **self.R)["total"])
+
+    def test_did_and_did_not_add_up_to_everything(self):
+        did = self.match([("key:add_to_cart", True)])["summary"]["visits"]
+        nope = self.match([("key:add_to_cart", False)])["summary"]["visits"]
+        self.assertEqual(did + nope, api.overview(**self.R)["kpis"]["sessions"])
+
+    def test_order_only_narrows(self):
+        steps = [("key:product_view", True), ("key:add_to_cart", True), ("key:checkout_view", True)]
+        any_order = self.match(steps)["summary"]["visits"]
+        later = self.match(steps, ordered=True)["summary"]["visits"]
+        right_after = self.match(steps, ordered=True, gap="next")["summary"]["visits"]
+        self.assertLessEqual(right_after, later)
+        self.assertLessEqual(later, any_order)
+
+    def test_steps_only_shrink_and_end_at_the_total(self):
+        m = self.match([("key:search", True), ("key:add_to_cart", True), ("flag:order", False)], ordered=True)
+        counts = [x["visits"] for x in m["steps"]]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        self.assertEqual(counts[-1], m["summary"]["visits"])
+        self.assertEqual(m["total"], m["summary"]["visits"])
+
+    def test_people_never_exceed_visits(self):
+        m = self.match([("key:add_to_cart", True)])
+        self.assertLessEqual(m["summary"]["people"], m["summary"]["visits"])
+        d = api.Definition(steps=[api.Step(action="key:add_to_cart")])
+        self.assertEqual(api.preset_match(d, mode="people", limit=1, **self.R)["total"], m["summary"]["people"])
+
+    def test_every_listed_visit_really_matches(self):
+        for r in self.match([("key:add_to_cart", True), ("flag:order", False)])["rows"]:
+            with self.subTest(session=r["session_id"]):
+                self.assertIn("add_to_cart", r["key_events"] or "")
+                self.assertNotEqual(r["stage"], 5)
+
+    def test_saved_presets_count_like_the_match(self):
+        counts = api.preset_counts(**self.R)["counts"]
+        for p in api.list_presets()["presets"][:5]:
+            with self.subTest(preset=p["name"]):
+                self.assertEqual(counts[p["id"]]["visits"], api.preset_match(api.Definition(**p["definition"]), limit=1, **self.R)["summary"]["visits"])
+
+    def test_bad_presets_are_refused(self):
+        from fastapi import HTTPException
+        for d in (dict(steps=[]), dict(steps=[api.Step(action="key:nope")]), dict(steps=[api.Step(action="event:drop table")]),
+                  dict(steps=[api.Step(action="key:search")], gap="soon"), dict(steps=[api.Step(action="key:search")] * 9)):
+            with self.subTest(definition=str(d)[:60]):
+                with self.assertRaises(HTTPException):
+                    api.preset_match(api.Definition(**d), **self.R)

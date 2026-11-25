@@ -271,3 +271,74 @@ tr.click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 
 .copy-row { display: flex; justify-content: flex-end; margin: 0 0 4px; }
 .copy-btn { white-space: nowrap; }
+
+
+/* ---------------------------------------------------------------- UI pass (Nov 2026) */
+/* a table and its copy button are ONE element, so tables inside grids keep their column; the button shows in the corner on hover / keyboard focus */
+.tbl { position: relative; min-width: 0; }
+.tbl > .copy-row { display: flex; justify-content: flex-end; margin: 0 0 6px; }
+/* card header: the card's own buttons, then the table's Copy button (always visible, never over the table) */
+.card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; flex: none; }
+.copy-slot { display: contents; }
+/* a wide table fades at the side that has more columns to scroll to (set by the Table component) */
+.tbl[data-edge*='r']::after, .tbl[data-edge*='l']::before { content: ''; position: absolute; top: 0; bottom: 0; width: 36px; pointer-events: none; z-index: 3; }
+.tbl[data-edge*='r']::after { right: 0; background: linear-gradient(to left, var(--surface-1) 10%, transparent); box-shadow: inset -10px 0 10px -10px rgba(0, 0, 0, .35); }
+.tbl[data-edge*='l']::before { left: 0; background: linear-gradient(to right, var(--surface-1) 10%, transparent); box-shadow: inset 10px 0 10px -10px rgba(0, 0, 0, .35); }
+.search-field { width: 340px; max-width: 100%; }
+/* top bar: page name with its one-line description; filters in one popover */
+.page-title { min-width: 0; max-width: 46%; }
+.page-title h1 { line-height: 1.15; }
+.page-title .crumb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.topbar2 { flex-wrap: nowrap; }
+.topbar2 > * { flex-shrink: 0; }
+.topbar2 > .page-title { flex-shrink: 1; }
+.badge.info { background: var(--accent-soft); color: var(--accent); }
+.upgrade-chip { gap: 6px; padding: 3px 4px 3px 9px; }
+.chip-x { border: 0; background: none; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; border-radius: 50%; }
+.chip-x:hover { background: var(--hover); }
+.count-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; }
+.filter-pop { display: grid; gap: 4px; }
+.filter-pop .pop-label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); padding: 4px 10px 2px; }
+.filter-pop .seg { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 6px; }
+.filter-pop > small { padding: 0 10px 4px; display: block; }
+.chip:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 1280px) { .page-title .crumb { display: none; } }
+/* sequential ramp (heatmaps, retention grids) in dark mode: low = dim, high = bright, so empty cells do not glare */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    --seq-100: #1c2b40; --seq-200: #1d3a63; --seq-250: #1f4473; --seq-300: #234f86; --seq-350: #2a5d9c; --seq-400: #2f6db5; --seq-500: #3f86d8; --seq-600: #6aa5ee; --seq-700: #a8cbf7;
+  }
+}
+:root[data-theme='dark'] {
+  --seq-100: #1c2b40; --seq-200: #1d3a63; --seq-250: #1f4473; --seq-300: #234f86; --seq-350: #2a5d9c; --seq-400: #2f6db5; --seq-500: #3f86d8; --seq-600: #6aa5ee; --seq-700: #a8cbf7;
+}
+.page-title { max-width: none; flex: 1 1 auto; }
+/* Home: one list of what needs a look, one of what is working */
+.attn-list { display: grid; }
+.attn-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 16px; gap: 10px; align-items: start; padding: 10px 6px; border-top: 1px solid var(--grid); border-radius: 6px; }
+.attn-row:first-child { border-top: 0; }
+.attn-row[role='button'] { cursor: pointer; }
+.attn-row[role='button']:hover, .attn-row[role='button']:focus-visible { background: var(--hover); }
+.attn-row .badge { justify-self: start; margin-top: 1px; }
+.attn-title { font-weight: 500; line-height: 1.35; }
+.attn-when { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-muted); white-space: nowrap; }
+.attn-detail { font-size: 13px; margin-top: 2px; }
+.attn-go { color: var(--text-muted); padding-top: 1px; }
+.attn-row:hover .attn-go { color: var(--accent); }
+/* Journeys funnel: wide bars, numbers on one line, "stopped" in its own column */
+.fbars { display: grid; gap: 10px; }
+.fbar-row { display: grid; grid-template-columns: minmax(120px, 160px) minmax(80px, 1fr) 104px; gap: 12px; align-items: center; }
+.fbars.with-stops .fbar-row { grid-template-columns: minmax(120px, 160px) minmax(80px, 1fr) 104px 112px; }
+.fbar-label { font-size: 13.5px; }
+.fbar-track { background: var(--surface-2); border-radius: 6px; height: 22px; }
+.fbar-fill { height: 100%; border-radius: 6px; background: var(--series-1); opacity: .85; }
+.fbar-fill.worst { background: var(--warning); }
+.fbar-num { text-align: right; font-size: 13px; line-height: 1.25; white-space: nowrap; }
+.fbar-sub { font-size: 11px; }
+.fbar-stop { text-align: right; }
+/* Meta Ads: connect steps */
+.setup-steps { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 8px; font-size: 13.5px; }
+.setup-code { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; font-size: 12px; white-space: pre; overflow-x: auto; }
+/* Journeys: the funnel gets more of the row than "What went wrong" */
+.g-funnel { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+.fbar-stop .btn { white-space: nowrap; }

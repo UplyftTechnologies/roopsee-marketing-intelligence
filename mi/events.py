@@ -15,7 +15,7 @@ from collections import Counter
 from fastapi import HTTPException, Query
 
 from .core import _csv, app, one, q
-from .payload import NOISE
+from .payload import NOISE, event_params, flat_payload, match_score
 from .sessions import _event_details
 
 FIELD_RE = re.compile(r"^[A-Za-z0-9_\-]{1,60}$")
@@ -217,6 +217,9 @@ def events_rows(date_from: str | None = None, date_to: str | None = None, includ
     if fields:
         need["raw"] = True
     order = ROW_SORTS.get(sort, "e.ts")
+    if sort == "score":  # the product match score lives in the stored payload
+        need["raw"] = True
+        order = f"try_cast({pf('product_match_score')} AS DOUBLE)"
     d = "ASC" if direction.lower() == "asc" else "DESC"
     frm = _from(need)
     total = one(f"SELECT count(*) AS n {frm} WHERE {w}", a)["n"]
@@ -225,8 +228,16 @@ def events_rows(date_from: str | None = None, date_to: str | None = None, includ
                  e.path, e.page_type, e.product_name, e.search_term, e.order_id, e.city_n AS city, e.is_app, e.device_n AS device, e.is_dup, e.is_excluded,
                  s.channel, s.campaign{sel} {frm} WHERE {w} ORDER BY {order} {d} NULLS LAST, e.ts DESC, e.id LIMIT ? OFFSET ?""",
              [*a, max(1, min(int(limit), 5000)), max(0, offset)])
+    stored = {}
+    if rows:  # parameters are read for the rows on this page only
+        ids = [r["id"] for r in rows]
+        stored = {x["id"]: x for x in q(f"SELECT id, value, extra_data::VARCHAR AS x FROM raw_event_log WHERE id IN ({','.join('?' * len(ids))})", ids)}
     for r in rows:
         r["payload"] = {f: r.pop(f"pf_{i}", None) for i, f in enumerate(fields)}
+        st = stored.get(r["id"])
+        flat = flat_payload(st["x"], st["value"]) if st else {}
+        r["score"], r["score_note"] = match_score(flat)
+        r["params"] = event_params(flat, skip=("search_term",))
     return {"total": total, "rows": rows, "cols": fields}
 
 

@@ -181,8 +181,12 @@ export default function Sessions() {
                 sort={sort} onSort={(k) => setSort(nextSort(sort, k, TEXT_SORTS))}
                 onRow={(r) => f.go('session', { key: r.session_id })} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} cols={[
                   { label: 'Started', cls: 'nw', sortBy: 'started_at', render: (r) => <>{dt(r.started_at)}{r.is_excluded && <div><Badge tone="bad">excluded</Badge></div>}</> },
-                  { label: 'Who', cls: 'nw', sortBy: 'name', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
-                  { label: 'Email', cls: 'nw', sortBy: 'email', render: (r) => (r.email ? <span className="trunc" style={{ display: 'block', maxWidth: 160 }} title={r.email}>{r.email}</span> : <span className="muted">–</span>) },
+                  { label: 'Who', cls: 'nw', sortBy: 'name', render: (r) => (
+                    <div style={{ maxWidth: 200 }}>
+                      {r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>)}
+                      {r.email && <div className="muted trunc" style={{ fontSize: 11.5 }} title={r.email}>{r.email}</div>}
+                    </div>
+                  ) },
                   { label: 'Journey', render: (r) => <div style={{ minWidth: 220, maxWidth: 300 }}>{r.key_events ? <Journey keyEvents={r.key_events} /> : <span className="muted">{r.events} event{r.events === 1 ? '' : 's'}, no key action</span>}</div> },
                   { label: 'Stage', cls: 'nw', sortBy: 'stage', render: (r) => <span title={STAGE[r.stage]}><Badge tone={STAGE_TONE[r.stage]}>{STAGE_SHORT[r.stage]}</Badge></span> },
                   { label: 'Order value', num: true, sortBy: 'order_value', render: (r) => <OrderValue r={r} /> },

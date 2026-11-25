@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { dt, inr, num, pct, useApi, useFilters } from '../api'
-import { Badge, Card, ExportBtn, Kpi, Loading, Pager, Table, nextSort } from '../ui'
+import { dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
+import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Pager, Table, nextSort } from '../ui'
+import Segments from './Segments'
 
 function People({ id, onClose }) {
   const f = useFilters()
@@ -37,7 +38,21 @@ function People({ id, onClose }) {
   )
 }
 
+const TABS = [{ value: 'lists', label: 'Ready-made lists' }, { value: 'groups', label: 'Interest & behaviour groups' }]
+
 export default function Audiences() {
+  const [tab, setTab] = usePersisted('audiences.tab', 'lists')
+  const [label, setLabel] = usePersisted('audiences.label', '')
+  return (
+    <>
+      <div className="chip-row" role="tablist" aria-label="Audiences"><Chips value={tab} onChange={setTab} options={TABS} /></div>
+      {tab === 'groups' ? <Segments label={label} setLabel={setLabel} /> : <Lists />}
+    </>
+  )
+}
+
+/** The ready-made lists: who to contact, and with what. */
+function Lists() {
   const s = useApi('/audiences', {}, { scoped: true })
   const [open, setOpen] = useState(null)
   return (

@@ -155,11 +155,13 @@ export function SessionEventsTable({ events, query, onQuery }) {
         { label: 'Page', cls: 'nw', render: (r) => (r.e.page_type ? cap(r.e.page_type) : r.e.path ? <span className="mono">{pretty(r.e.path).slice(0, 24)}</span> : '–') },
         { label: 'What happened', render: (r) => (r.cat === 'roop' ? <span>💬 {tech ? <span className="mono"><b>{r.e.event_name}</b></span> : <b>Message to Roop</b>}</span>
           : tech ? <span className="mono"><b>{r.e.event_name}</b></span> : <b>{label(r.e)}</b>) },
+        { label: 'Score', num: true, render: (r) => (r.e.score != null ? <b title="Product match score">{r.e.score}</b> : r.e.score_note ? <span className="muted">{r.e.score_note}</span> : <span className="muted">–</span>) },
         { label: 'Detail', render: (r) => {
           const det = r.e.details || []
+          const ps = r.e.params || []
           return (
             <div>
-              <span>{summary(r.e)}</span>
+              {ps.length ? <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>{ps.slice(0, 4).map((p) => <span key={p.k} className="chip" style={{ cursor: 'default', maxWidth: 220 }} title={`${p.k}: ${p.v}`}><span className="muted">{p.k}:</span> <span className="trunc" style={{ display: 'inline-block', maxWidth: 130, verticalAlign: 'bottom' }}>{p.v}</span></span>)}{ps.length > 4 && <span className="muted">+{ps.length - 4} more</span>}</span> : <span>{summary(r.e)}</span>}
               {(det.length > 0 || r.e.raw) && <> <button type="button" className="link-btn" onClick={() => toggle(r.n)} aria-expanded={open.has(r.n)} style={{ background: 'none', border: 0, color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit' }}>{open.has(r.n) ? 'hide data' : 'raw data'}</button></>}
               {open.has(r.n) && <RawData e={r.e} />}
             </div>

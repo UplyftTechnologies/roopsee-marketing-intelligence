@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { dt, inr, num, pct, useApi, useFilters } from '../../api'
-import { Badge, Card, ExportBtn, Loading, Pager, Table } from '../../ui'
-import { Bars, NotBuilt } from './common'
-import { UntrackedNote } from '../../components/RevenueNotes'
+import { dt, inr, num, pct, useApi, useFilters } from '../api'
+import { Badge, Card, ExportBtn, Loading, Pager, Table } from '../ui'
+import { Bars, NotBuilt } from './deeper/common'
+import { UntrackedNote } from '../components/RevenueNotes'
 
+// Audiences is an all-time page: the date range in the top bar does not apply (empty dates = all time)
+const ALL_TIME = { date_from: '', date_to: '' }
 const GROUPS = ['Interest', 'Price range', 'Discounts', 'Discovery', 'Device', 'Skin concern (quiz)', 'Journey stage']
 
 export default function Segments({ label, setLabel }) {
   const f = useFilters()
-  const s = useApi('/deeper/segments', { label: label || undefined })
+  const s = useApi('/segments', { label: label || undefined, ...ALL_TIME })
   return (
     <Loading state={s}>
       {(d) => {
@@ -20,7 +22,7 @@ export default function Segments({ label, setLabel }) {
         return (
           <>
             <div className="banner" role="note">
-              <span>Every person carries any number of labels (a quiz user can also be a makeup user and a budget shopper). {num(d.totals.people)} people were active in these dates; {pct(d.base.buyer_rate, 1)} of them have bought. Click a label to see who has it and what else they are. Label rules: <span className="mono">mi/deeper_defs.py</span>.</span>
+              <span>Every person carries any number of labels (a quiz user can also be a makeup user and a budget shopper). {num(d.totals.people)} people have been tracked; {pct(d.base.buyer_rate, 1)} of them have bought. Click a label to see who has it and what else they are. Label rules: <span className="mono">mi/deeper_defs.py</span>.</span>
             </div>
             <UntrackedNote untracked={d.untracked} />
             {groups.map((g) => (
@@ -55,7 +57,7 @@ function Detail({ cur, d, f }) {
   const [limit, setLimit] = useState(50)
   const [offset, setOffset] = useState(0)
   useEffect(() => { setOffset(0) }, [cur.key, only, sort, limit])
-  const p = useApi('/deeper/segments/people', { label: cur.key, only_reachable: only || undefined, sort, limit, offset })
+  const p = useApi('/segments/people', { ...ALL_TIME, label: cur.key, only_reachable: only || undefined, sort, limit, offset })
   return (
     <div id="segment-detail" className="grid g2" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2.2fr)' }}>
       <Card title={cur.title} sub={cur.description}>
@@ -74,7 +76,7 @@ function Detail({ cur, d, f }) {
           {({ rows, total }) => (
             <>
               <Table scroll onRow={(r) => f.go('person', { key: r.person_key })} rows={rows} empty="Nobody matches." cols={[
-                { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+                { label: 'Who', cls: 'nw', render: (r) => r.name || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
                 { label: 'Phone', cls: 'mono nw', render: (r) => r.phone10 || <span className="muted">–</span> },
                 { label: 'City', cls: 'nw', render: (r) => r.city || '–' },
                 { label: 'Labels', render: (r) => <span>{(r.labels || []).slice(0, 5).map((t) => <Badge key={t}>{t}</Badge>)}</span> },

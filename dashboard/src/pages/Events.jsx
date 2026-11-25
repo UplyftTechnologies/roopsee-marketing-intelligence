@@ -142,6 +142,8 @@ function Rows({ scope, names, setNames, payload, addPayload, by, setBy, cols, se
     return () => { live = false }
   }, [builder.field, scope.event, f.from, f.to, f.includeExcluded, f.deviceType, f.tick])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // with a single event chosen, its most common parameters get a column each
+  const autoCols = scope.event && !String(scope.event).includes(',') ? fieldList.filter((x) => x.field !== 'product_match_score' && x.field !== 'matchScore' && x.share >= 0.3).slice(0, 3).map((x) => x.field) : []
   const rows = useApi('/events/rows', { ...scope, cols: cols.join(',') || undefined, sort: sort.key, direction: sort.dir, limit, offset })
   const toggleCol = (c) => setCols((x) => (x.includes(c) ? x.filter((y) => y !== c) : x.length < 8 ? [...x, c] : x))
   const addFilter = () => {
@@ -221,17 +223,20 @@ function Rows({ scope, names, setNames, payload, addPayload, by, setBy, cols, se
             {open && <Detail id={open} onClose={() => setOpen(null)} go={f.go} />}
             <Card title={`${num(total)} events`} sub="click a row for everything the event carries · click a title to sort"
               right={<ExportBtn name="events" rows={list} fields={[['Time', 'at'], ['Event', 'event_name'], ['Who', 'who'], ['Phone', 'phone10'], ['Session id', 'session_id'], ['Page', 'path'], ['Product', 'product_name'],
-                ['Search term', 'search_term'], ['Order', 'order_id'], ['City', 'city'], ['Device', 'device'], ['Channel', 'channel'], ['Campaign', 'campaign'], ...pcols.map((c) => [c, (r) => r.payload[c]])]} />}>
+                ['Search term', 'search_term'], ['Match score', (r) => r.score ?? r.score_note ?? ''], ['Parameters', (r) => r.params.map((p) => `${p.k}: ${p.v}`).join('; ')], ['Order', 'order_id'], ['City', 'city'], ['Device', 'device'], ['Channel', 'channel'], ['Campaign', 'campaign'], ...pcols.map((c) => [c, (r) => r.payload[c]])]} />}>
               <Table scroll sort={sort} onSort={(k) => setSort(nextSort(sort, k, TEXT_SORTS))} onRow={(r) => setOpen(r.id)} rowClass={(r) => (r.is_excluded ? 'excluded' : '')} rows={list}
                 empty="No events match these filters. Try removing a filter or widening the date range." cols={[
                   { label: 'Time', cls: 'nw', sortBy: 'ts', render: (r) => <>{dt(r.at)}{r.is_dup && <div><Badge>repeat</Badge></div>}</> },
                   { label: 'Event', cls: 'mono', sortBy: 'event_name', render: (r) => r.event_name },
-                  { label: 'Who', cls: 'nw', sortBy: 'who', render: (r) => r.who || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted">anonymous</span>) },
+                  { label: 'Who', cls: 'nw', sortBy: 'who', render: (r) => r.who || (r.phone10 ? <span className="mono">{r.phone10}</span> : <span className="muted" title="Never logged in on this browser">Guest</span>) },
                   { label: 'Session', cls: 'mono nw', sortBy: 'session_id', render: (r) => <a href={`#session/${encodeURIComponent(r.session_id)}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); f.go('session', { key: r.session_id }) }} title="Open the session">{r.session_id.slice(0, 12)}…</a> },
                   { label: 'Page', sortBy: 'page', render: (r) => <span className="trunc" style={{ display: 'block', maxWidth: 200 }} title={r.path}>{r.path || '–'}</span> },
                   { label: 'Product', sortBy: 'product', render: (r) => (r.product_name ? <span className="trunc" style={{ display: 'block', maxWidth: 180 }} title={r.product_name}>{r.product_name}</span> : <span className="muted">–</span>) },
                   { label: 'Search term', sortBy: 'search_term', render: (r) => r.search_term || <span className="muted">–</span> },
+                  { label: 'Score', num: true, sortBy: 'score', render: (r) => <Score r={r} /> },
+                  ...autoCols.map((c) => ({ label: c, cls: 'mono', render: (r) => r.params.find((p) => p.k === c)?.v ?? <span className="muted">–</span> })),
                   ...pcols.map((c) => ({ label: c, cls: 'mono', render: (r) => r.payload[c] ?? <span className="muted">–</span> })),
+                  { label: 'Parameters', render: (r) => <Params params={r.params.filter((p) => !autoCols.includes(p.k))} /> },
                   { label: 'City · device', cls: 'nw', sortBy: 'city', render: (r) => `${r.city || '–'} · ${r.is_app ? 'App' : r.device || '–'}` },
                 ]} />
               <Pager total={total} limit={limit} offset={offset} setOffset={setOffset} setLimit={setLimit} />
@@ -240,6 +245,30 @@ function Rows({ scope, names, setNames, payload, addPayload, by, setBy, cols, se
         )}
       </Loading>
     </>
+  )
+}
+
+/** The product match score (0-100) when the event carries one. */
+export function Score({ r }) {
+  if (r.score != null) return <b title="Product match score for this shopper">{r.score}</b>
+  if (r.score_note) return <span className="muted" title="The tracker sent this instead of a number">{r.score_note}</span>
+  return <span className="muted">–</span>
+}
+
+/** An event's parameters as small name: value chips, right in the table cell. */
+export function Params({ params, max = 4 }) {
+  const [all, setAll] = useState(false)
+  if (!params || !params.length) return <span className="muted">–</span>
+  const shown = all ? params : params.slice(0, max)
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+      {shown.map((p) => (
+        <span key={p.k} className="chip" style={{ cursor: 'default', maxWidth: 220 }} title={`${p.k}: ${p.v}`}>
+          <span className="muted">{p.k}:</span> <span className="trunc" style={{ display: 'inline-block', maxWidth: 140, verticalAlign: 'bottom' }}>{p.v}</span>
+        </span>
+      ))}
+      {params.length > max && <button type="button" className="btn small" onClick={() => setAll(!all)}>{all ? 'less' : `+${params.length - max} more`}</button>}
+    </div>
   )
 }
 

@@ -1,4 +1,4 @@
-"""SQL for the tables behind the Deeper analysis tab (built by the rebuild, mi/transform.py).
+"""SQL for the tables behind Ads & landing pages, Journeys › More detail and the Audiences groups (built by the rebuild, mi/transform.py).
 
 Which ad / landing product a visit came from, its concerns and products, discovery (search / filter) events, quiz progress, the pay-to-confirmation
 steps, and the people labels (segments). The definitions to edit are in mi/deeper_defs.py.

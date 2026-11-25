@@ -67,7 +67,7 @@ def data_health():
     if raw.get("last_event"):
         lag = (datetime.now(timezone.utc) - raw["last_event"].astimezone(timezone.utc)).total_seconds() / 3600
         add("fresh", "Newest event", "ok" if lag <= 6 else "warn" if lag <= 24 else "bad",
-            f"{lag:.0f} hours old (latest {raw['last_event'].astimezone(timezone(timedelta(hours=5, minutes=30))):%d %b %H:%M} IST). Press Refresh data to pull newer events.")
+            f"{lag:.0f} hour{'' if round(lag) == 1 else 's'} old (latest {raw['last_event'].astimezone(timezone(timedelta(hours=5, minutes=30))):%d %b %H:%M} IST). Press Refresh data to pull newer events.")
     else:
         add("fresh", "Newest event", "bad", "No events loaded yet")
     if not has_tables():

@@ -35,3 +35,48 @@ def slim(obj):
     if isinstance(raw, dict):
         out["rawBody"] = {k: v for k, v in raw.items() if k not in REMOVE}
     return out
+
+
+import json as _json
+
+SCORE_KEYS = ("product_match_score", "matchScore")
+
+
+def flat_payload(extra, value=None) -> dict:
+    """One event's stored payload as a flat dict: top level plus the `rawBody` copy, with the event's `value` added when it has one."""
+    try:
+        d = _json.loads(extra) if isinstance(extra, str) else (extra or {})
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    flat = {**{k: v for k, v in d.items() if k != "rawBody"}, **(d.get("rawBody") if isinstance(d.get("rawBody"), dict) else {})}
+    if value not in (None, "") and "value" not in flat:
+        flat["value"] = value
+    return flat
+
+
+def match_score(flat: dict):
+    """(score, note): the product match score (0-100) when the event carries one; `note` explains a non-number such as 'not_scorable'."""
+    for k in SCORE_KEYS:
+        v = flat.get(k)
+        if v in (None, ""):
+            continue
+        try:
+            return round(float(v), 2), None
+        except (TypeError, ValueError):
+            return None, str(v).replace("_", " ")
+    return None, None
+
+
+def event_params(flat: dict, skip=()) -> list[dict]:
+    """The readable name / value pairs of a payload, in stored order: plumbing, empty values and the score (it has its own column) left out."""
+    out = []
+    for k, v in flat.items():
+        if k in NOISE or k in SCORE_KEYS or k in skip or v is None or v == "" or v == [] or v == {}:
+            continue
+        if isinstance(v, (dict, list)):
+            v = _json.dumps(v, ensure_ascii=False)
+        v = str(v)
+        out.append({"k": k, "v": v if len(v) <= 160 else v[:157] + "…"})
+    return out
