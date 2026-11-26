@@ -65,6 +65,7 @@ Use `.venv/bin/python` on macOS/Linux or `.venv\Scripts\python` on Windows:
 .venv/bin/python -m mi.cli serve        # server only (UI must already be built)
 .venv/bin/python -m mi.cli all          # extract + transform from the command line
 cd dashboard && npm run dev             # hot-reload UI on http://localhost:5173 (proxies /api to :8000)
+cd dashboard && npm start               # the same development UI, started through Nodemon
 ```
 
 `python -m mi.cli {extract | transform | all | serve | access | slim | compact | purge}`:

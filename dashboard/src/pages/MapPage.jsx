@@ -100,6 +100,40 @@ function GeoMap({ areas, states, layers, shade, level, basis, focus, onOpen }) {
     return () => { m.off('zoomend', draw); names.remove() }
   }, [states])
 
+  // City names: show the most meaningful labels in the current viewport without
+  // covering the map in text. More labels appear as the user zooms in.
+  useEffect(() => {
+    const m = map.current
+    if (!m || level !== 'city') return undefined
+    const names = L.layerGroup().addTo(m)
+    const cityName = (name) => String(name || '').replace(/, [^,]+$/, '')
+    const draw = () => {
+      names.clearLayers()
+      const zoom = m.getZoom()
+      const limit = zoom < 6 ? 12 : zoom < 7 ? 24 : zoom < 9 ? 48 : 90
+      const used = new Set()
+      const candidates = [...areas]
+        .filter((a) => Number.isFinite(a.lat) && Number.isFinite(a.lon) && m.getBounds().contains([a.lat, a.lon]))
+        .sort((a, b) => b.visits - a.visits)
+      for (const a of candidates) {
+        if (names.getLayers().length >= limit) break
+        // Keep a little space between labels. Circle bubbles remain clickable below them.
+        const p = m.latLngToContainerPoint([a.lat, a.lon])
+        const slot = `${Math.floor(p.x / 96)}:${Math.floor(p.y / 30)}`
+        if (used.has(slot)) continue
+        used.add(slot)
+        L.marker([a.lat, a.lon], {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({ className: 'map-city', html: `<span>${esc(cityName(a.name))}</span>`, iconSize: [0, 0] }),
+        }).addTo(names)
+      }
+    }
+    draw()
+    m.on('moveend zoomend', draw)
+    return () => { m.off('moveend zoomend', draw); names.remove() }
+  }, [areas, level])
+
   // circles: visits (blue, biggest) under checkouts (amber) under orders (green)
   useEffect(() => {
     const g = bubbles.current
@@ -141,6 +175,7 @@ export default function MapPage() {
   const [basis, setBasis] = usePersisted('map.basis', 'visitor')
   const [layers, setLayers] = usePersisted('map.layers', ['visits', 'checkouts', 'orders'])
   const [shade, setShade] = usePersisted('map.shade', 'visits')
+  const [cityState, setCityState] = usePersisted('map.cityState', '')
   const [states, setStates] = useState(null)
   const [focus, setFocus] = useState(null)
   useEffect(() => { api('/geo/states').then(setStates).catch(() => setStates(null)) }, [])
@@ -152,6 +187,7 @@ export default function MapPage() {
     f.go('sessions', Object.fromEntries(Object.entries(sets).map(([k, v]) => [k, [...v].join(',')])))
   }
   const effBasis = level === 'pincode' ? 'delivery' : basis
+  const cityStates = level === 'city' ? [...new Set((s.data?.areas || []).map((a) => a.state).filter(Boolean))].sort((a, b) => a.localeCompare(b)) : []
 
   return (
     <>
@@ -175,23 +211,38 @@ export default function MapPage() {
               <select className="field" value={shade} onChange={(e) => setShade(e.target.value)} aria-label="Shade states by">{SHADES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
             </label>
           )}
+          {level === 'city' && (
+            <label className="muted" style={{ fontSize: 12 }}>State{' '}
+              <select className="field" value={cityState} onChange={(e) => setCityState(e.target.value)} aria-label="Filter cities by state">
+                <option value="">All states</option>
+                {cityStates.map((state) => <option key={state} value={state}>{state}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         <Loading state={s}>
           {(d) => {
-            const t = d.totals
-            const un = d.unplaced
+            const stateFiltered = level === 'city' && Boolean(cityState)
+            const shownAreas = stateFiltered ? d.areas.filter((a) => a.state === cityState) : d.areas
+            const filteredTotals = shownAreas.reduce((sum, a) => ({
+              visits: sum.visits + a.visits, checkouts: sum.checkouts + a.checkouts, orders: sum.orders + a.orders,
+              revenue: sum.revenue + a.revenue, visits_with_place: sum.visits_with_place + a.visits,
+            }), { visits: 0, checkouts: 0, orders: 0, revenue: 0, visits_with_place: 0 })
+            const t = stateFiltered ? filteredTotals : d.totals
+            const un = stateFiltered ? { visits: 0, checkouts: 0, orders: 0, revenue: 0 } : d.unplaced
             const delivery = d.basis === 'delivery'
             const placedVisits = delivery ? (t.visits_with_place ?? 0) - un.visits : t.visits - un.visits
             const denom = delivery ? t.visits_with_place || 0 : t.visits
+            const checkoutRate = stateFiltered ? (t.visits ? t.checkouts / t.visits : 0) : t.checkout_rate
             return (
               <>
                 <div className="kpis" style={{ marginBottom: 10 }}>
-                  <Kpi label={delivery ? 'Visits that gave a place' : 'Visits'} value={num(delivery ? t.visits_with_place || 0 : t.visits)} note={delivery ? `of ${num(t.visits)} visits (the rest never gave an address or pincode)` : `${pct(denom ? placedVisits / denom : 0, 0)} placed on the map`} />
-                  <Kpi label="Checkouts started" value={num(t.checkouts)} note={`${pct(t.checkout_rate, 1)} of visits`} />
+                  <Kpi label={delivery ? 'Visits that gave a place' : 'Visits'} value={num(delivery ? t.visits_with_place || 0 : t.visits)} note={stateFiltered ? `shown for ${cityState}` : delivery ? `of ${num(t.visits)} visits (the rest never gave an address or pincode)` : `${pct(denom ? placedVisits / denom : 0, 0)} placed on the map`} />
+                  <Kpi label="Checkouts started" value={num(t.checkouts)} note={`${pct(checkoutRate, 1)} of visits`} />
                   <Kpi label="Orders" value={num(t.orders)} note={delivery ? 'delivered orders, all of them' : 'visits that ordered'} />
-                  <Kpi label="Revenue" value={inr(t.revenue)} note={`${num(d.area_count)} ${level === 'state' ? 'states' : level === 'city' ? 'cities' : 'pincodes'} on the map`} />
+                  <Kpi label="Revenue" value={inr(t.revenue)} note={`${num(stateFiltered ? shownAreas.length : d.area_count)} ${level === 'state' ? 'states' : level === 'city' ? 'cities' : 'pincodes'} on the map`} />
                 </div>
-                <GeoMap areas={d.areas} states={states} layers={layers} shade={shade} level={d.level} basis={d.basis} focus={focus} onOpen={open} />
+                <GeoMap areas={shownAreas} states={states} layers={layers} shade={shade} level={d.level} basis={d.basis} focus={focus} onOpen={open} />
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
                   {delivery
                     ? 'Orders are the delivered orders of the Orders page, by delivery address. Only the few visitors who gave an address or pincode have a place, so visits and checkouts here are a small part of the total.'
@@ -214,7 +265,7 @@ export default function MapPage() {
       <Loading state={s}>
         {(d) => (
           <Card title={`By ${level === 'state' ? 'state' : level === 'city' ? 'city' : 'pincode'}`} sub="click a row to list its visits · “Show” flies to it on the map">
-            <Table id={`geo-${level}`} rows={d.areas} onRow={open} empty="Nothing in this range." cols={[
+            <Table id={`geo-${level}`} rows={level === 'city' && cityState ? d.areas.filter((a) => a.state === cityState) : d.areas} onRow={open} empty="Nothing in this range." cols={[
               { label: level === 'state' ? 'State' : level === 'city' ? 'City' : 'Pincode', sortBy: 'name', render: (r) => <b>{level === 'city' && r.state ? r.name.replace(/, [^,]+$/, '') : r.name}</b> },
               ...(level !== 'state' ? [{ label: 'State', sortBy: 'state', render: (r) => r.state || '–' }] : []),
               { label: 'Visits', num: true, sortBy: 'visits', render: (r) => num(r.visits) },

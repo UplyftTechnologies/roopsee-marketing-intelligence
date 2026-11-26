@@ -408,6 +408,7 @@ tr.click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 .map-box .leaflet-tooltip { font-size: 12.5px; line-height: 1.45; }
 .map-box.leaflet-container { background: var(--surface-1); }
 .map-state span { display: inline-block; transform: translate(-50%, -50%); white-space: nowrap; font-size: 10.5px; color: var(--text-muted); pointer-events: none; text-shadow: 0 0 3px var(--surface-1), 0 0 3px var(--surface-1); }
+.map-city span { display: inline-block; transform: translate(7px, -50%); max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 10px; font-weight: 500; line-height: 14px; pointer-events: none; text-shadow: 0 0 3px var(--surface-1), 0 0 3px var(--surface-1), 0 0 3px var(--surface-1); }
 
 /* Price intelligence */
 .price-sites { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -460,3 +461,50 @@ tr.x-row > td { background: var(--surface-2); padding: 10px 14px; }
 .ev-panel pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 360px; overflow: auto; }
 .kv { display: grid; grid-template-columns: minmax(90px, 200px) minmax(0, 1fr); gap: 4px 18px; margin: 0; }
 .kv dt { color: var(--text-muted); overflow-wrap: anywhere; } .kv dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------- ads and landing-page performance cards ---------- */
+.post-analysis { display: grid; gap: 32px; }
+.post-section { display: grid; gap: 14px; }
+.post-section-head { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 4px 2px 0; }
+.post-section-head h2 { font-size: 19px; font-weight: 500; letter-spacing: -.2px; }
+.post-eyebrow { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px; }
+.post-baseline { display: grid; grid-template-columns: auto auto; align-items: baseline; justify-content: end; column-gap: 6px; color: var(--text-secondary); font-size: 12px; text-align: right; }
+.post-baseline b { color: var(--text-primary); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.post-baseline small { grid-column: 1 / -1; color: var(--text-muted); font-size: 11.5px; }
+.post-helper { color: var(--text-secondary); font-size: 12px; margin-top: -4px; }
+.post-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.post-card { display: grid; align-content: start; gap: 14px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); transition: border-color .15s, box-shadow .15s, transform .15s; }
+.post-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 3px 10px rgba(60, 64, 67, .10); transform: translateY(-1px); }
+.post-card-head { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; align-items: start; }
+.post-thumb { display: grid; place-items: center; width: 76px; height: 76px; overflow: hidden; border: 1px solid var(--grid); border-radius: 10px; background: var(--surface-2); }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.post-thumb > span { display: grid; gap: 4px; padding: 8px; text-align: center; }
+.post-thumb b { color: var(--text-secondary); font-size: 10px; letter-spacing: .08em; }
+.post-thumb small { color: var(--text-muted); font-size: 10px; line-height: 1.25; }
+.post-title { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+.post-kicker { color: var(--text-muted); font-size: 11px; }
+.post-title h3 { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.post-id { overflow: hidden; max-width: 100%; color: var(--text-secondary); font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.post-title .badge { margin-top: 2px; }
+.post-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--grid); border-radius: 8px; overflow: hidden; }
+.post-metric { display: grid; gap: 1px; min-width: 0; padding: 8px 10px; border-right: 1px solid var(--grid); }
+.post-metric:last-child { border-right: 0; }
+.post-metric span { overflow: hidden; color: var(--text-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.post-metric b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.post-funnel { display: grid; gap: 7px; }
+.post-funnel-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 42px; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 11.5px; }
+.post-funnel-row b { color: var(--text-primary); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; }
+.post-funnel-bar { display: block; height: 5px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
+.post-funnel-bar i { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--accent); opacity: .8; }
+.post-context { display: grid; gap: 3px; color: var(--text-secondary); font-size: 11.5px; line-height: 1.4; }
+.post-context span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post-notes { display: grid; gap: 5px; margin: 0; padding: 10px 0 0 18px; border-top: 1px solid var(--grid); color: var(--text-primary); font-size: 12.5px; line-height: 1.35; }
+.post-notes li::marker { color: var(--accent); }
+.post-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 2px; }
+.post-actions .btn:first-child { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 700px) {
+  .post-section-head { align-items: start; flex-direction: column; gap: 6px; }
+  .post-baseline { justify-content: start; text-align: left; }
+  .post-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .post-card { transition: none; } .post-card:hover { transform: none; } }

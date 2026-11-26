@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { KEY_LABEL, dt, tod } from '../api'
 import { Badge, Card, Table } from '../ui'
 import { useQuickExclude } from '../shared'
@@ -89,12 +89,12 @@ const gapText = (s) => (s < 1 ? '–' : s < 60 ? `+${s} sec` : s < 3600 ? `+${Ma
 const cap = (s) => (s ? String(s).replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase()) : '')
 
 /** An event's stored record as JSON (what the tracker sent), with the readable view one click away. */
-function RawData({ e }) {
+function RawData({ e, panelRef }) {
   const [view, setView] = useState(e.raw ? 'json' : 'plain')
   const text = e.raw ? JSON.stringify(e.raw, null, 2) : ''
   const det = e.details || []
   return (
-    <div className="ev-panel">
+    <div ref={panelRef} className="ev-panel">
       <div className="chip-row" style={{ marginBottom: 8 }}>
         {e.raw && <button type="button" className={`chip ${view === 'json' ? 'on' : ''}`} onClick={() => setView('json')}>JSON</button>}
         <button type="button" className={`chip ${view === 'plain' ? 'on' : ''}`} onClick={() => setView('plain')}>Readable</button>
@@ -118,21 +118,35 @@ export function SessionEventsTable({ events, query, onQuery }) {
   const [tech, setTech] = useState(true)
   const [own, setOwn] = useState('')
   const [open, setOpen] = useState({})  // row number -> 'details' | 'raw'
+  const [rawTarget, setRawTarget] = useState(null)
+  const rawPanel = useRef(null)
   const q = query ?? own
   const setQ = onQuery ?? setOwn
+  useEffect(() => {
+    if (rawTarget != null && rawPanel.current) rawPanel.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [rawTarget])
+  // Keep the table data referentially stable while a detail panel opens. The shared
+  // Table resets its internal scroll position when its rows change, so rebuilding
+  // this array for an expand/collapse click made the event list jump to the top.
+  const all = useMemo(() => {
+    let prev = null
+    return (events || []).map((e, i) => {
+      const t = new Date(e.at).getTime()
+      const gap = prev == null ? 0 : Math.max(0, Math.round((t - prev) / 1000))
+      prev = t
+      return { e, n: i + 1, gap, cat: eventCategory(e) }
+    })
+  }, [events])
+  const words = useMemo(() => norm(q).split(' ').filter(Boolean), [q])
+  const rows = useMemo(() => all.filter((r) => (cat === 'all' || r.cat === cat) && (!words.length || matches(r.e, words))), [all, cat, words])
   if (!events || !events.length) return <div className="empty">No events recorded</div>
-  let prev = null
-  const all = events.map((e, i) => {
-    const t = new Date(e.at).getTime()
-    const gap = prev == null ? 0 : Math.max(0, Math.round((t - prev) / 1000))
-    prev = t
-    return { e, n: i + 1, gap, cat: eventCategory(e) }
-  })
   const counts = {}
   for (const r of all) counts[r.cat] = (counts[r.cat] || 0) + 1
-  const words = norm(q).split(' ').filter(Boolean)
-  const rows = all.filter((r) => (cat === 'all' || r.cat === cat) && (!words.length || matches(r.e, words)))
-  const toggle = (n, what) => setOpen((p) => ({ ...p, [n]: p[n] === what ? null : what }))
+  const toggle = (n, what) => {
+    const next = open[n] === what ? null : what
+    setOpen((p) => ({ ...p, [n]: next }))
+    setRawTarget(next === 'raw' ? n : null)
+  }
   const pairs = (e) => (e.params?.length ? e.params : e.details || [])
   const button = (n, what, text) => (
     <button type="button" className={`row-btn no-copy${open[n] === what ? ' on' : ''}`} onClick={() => toggle(n, what)} aria-expanded={open[n] === what}>{text}</button>
@@ -151,7 +165,7 @@ export function SessionEventsTable({ events, query, onQuery }) {
         {(words.length > 0 || cat !== 'all') && <button type="button" className="btn small" onClick={() => { setQ(''); setCat('all') }}>Clear</button>}
       </div>
       <Table scroll rows={rows} empty="No event matches." rowClass={(r) => (r.e.event_key ? 'key-row' : '')}
-        expanded={(r) => (open[r.n] === 'raw' ? <RawData e={r.e} /> : open[r.n] === 'details' ? <div className="ev-panel"><Pairs rows={pairs(r.e)} /></div> : null)} cols={[
+        expanded={(r) => (open[r.n] === 'raw' ? <RawData e={r.e} panelRef={r.n === rawTarget ? rawPanel : null} /> : open[r.n] === 'details' ? <div className="ev-panel"><Pairs rows={pairs(r.e)} /></div> : null)} cols={[
         { label: '#', cls: 'muted', render: (r) => r.n },
         { label: 'Time', cls: 'nw', render: (r) => tod(r.e.at) },
         { label: 'Gap', cls: 'nw muted', render: (r) => gapText(r.gap) },
