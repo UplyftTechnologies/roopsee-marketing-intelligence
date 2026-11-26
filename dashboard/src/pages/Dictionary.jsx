@@ -43,12 +43,21 @@ const SECTIONS = [
     ['Sessions filters', 'Ad, ad set, campaign and landing product narrow the Sessions list to the visits behind a row; Roop (opened / asked) joins the Did / Did not choices. Searching an ad id or name also finds its visits.'],
     ['Bracketed rows', 'Visits with no ad id, ad set or campaign tag in their link (shown as “(no ad)” and so on) cannot be listed by it.'],
   ]],
+  ['Page speed page', [
+    ['Visits with a problem', 'A visit with a page that took over 3 seconds to show, a request that took over 5 seconds, a failed request or a page error. One visit counts once, however many problems it had.'],
+    ['Ordered, with a problem', 'The share of those visits that ordered, next to the share of the other visits. It shows where they differ, not that the problem caused it.'],
+  ]],
+  ['Event parameters, values and scores', [
+    ['Parameters and Value', 'Parameters are the extra fields the tracker sends with an event; Value is the event’s own value field. In the event catalogue they come from each event’s latest 60 rows; in Event rows they are the row’s own.'],
+    ['Score with a *', 'Some add-to-cart and product events arrive without a product match score. They show the score of the latest earlier event of the same product in the same visit, marked with *. If there is none, the cell stays empty.'],
+    ['Returning shoppers in Roop chats', 'Shoppers with two or more chats, grouped by account, or by browser (visitor id) when not logged in. A guest chat joins the account when exactly one account ever logged in on that browser.'],
+  ]],
   ['Map', [
     ['What the circles are', 'Blue: visits. Amber: visits that started a checkout. Green: orders. They are drawn on top of each other, all on one scale, so the green and amber circles sit inside the blue one. Click a circle or a state to list those visits.'],
     ['Where visitors browse from', 'Visits, checkouts and orders of the same visits, placed by the visitor’s IP address (state and city). It is where they were, not where the order goes, and about one visit in eight has no IP location. Orders here are visits that ordered.'],
     ['Where orders are delivered', 'Every valid order by its delivery address, the same orders as the Orders page. Visits and checkouts only exist for the few visitors who typed a pincode or saved an address, so they are a small part of the total. Pincode is always this view.'],
     ['Not on the map', 'Places we could not find (no IP location, or a name that is not in the place list) are counted under the map, so the areas plus this line always equal the whole. Shading by a rate skips states with fewer than 30 visits.'],
-    ['Place data', 'State outlines, pincode centres and place-name centres come from public files stored in mi/geo_data (GeoNames, CC BY 4.0). Outlines are simplified, for orientation only. The background map (OpenStreetMap) needs an internet connection.'],
+    ['Place data', 'State outlines, pincode centres and place-name centres come from public files stored in mi/geo_data (GeoNames, CC BY 4.0). Only India is drawn, from these outlines, so the map needs no internet. Outlines are simplified, for orientation only.'],
   ]],
   ['Choosing table columns', [
     ['Columns button', 'Every table with more than four columns has a Columns button next to Copy. Tick the columns to show; the first column (it names the row) always stays. All shows every column, Essentials the main ones, Reset goes back to the default.'],
@@ -105,11 +114,14 @@ const SECTIONS = [
   ]],
   ['Price intelligence', [
     ['Our price', 'The Selling Price and MRP of each product in the product sheet (master_products). The sheet is the only product list this tab uses. The competitor prices typed into the sheet by hand are not used.'],
-    ['Competitor price', 'The REGULAR price on the product page of Nykaa, Tira or Purplle at the last refresh. Nykaa also shows an offer price for some customers (for example a first order): it is shown as a note, never compared.'],
+    ['Competitor price', 'The REGULAR price on the product page of Nykaa, Tira or Purplle at the last refresh, whether or not the item is in stock there. If the latest read gave no price (for example a sold-out Tira page), the last price seen is shown with its date and still compared. Nykaa also shows an offer price for some customers (for example a first order): it is shown as a note, never compared.'],
+    ['What a shop column says', 'A price; To review (a possible match is waiting for you); Not available (not found on the site, marked “Not sold here”, or no price ever shown); Not checked (not looked for or not read yet).'],
     ['Refresh prices', 'Reads every matched product page, one page at a time per site with a 3-4 second pause, the three sites side by side (about 15-20 minutes for the whole sheet). Only public product pages and the sitemaps each site publishes are read: no search pages, no logins. Every reading is kept, so price history builds up with each refresh.'],
     ['How a product is found on a site', 'First the product link in the sheet (Nykaa and Tira links; nykaaman.com links are read on nykaa.com, which has the same products). Otherwise the site’s own product list (its sitemap) is searched: same brand, the size must not differ, and the name must match. On Purplle the page carries the barcode, so a Purplle match is automatic only when it equals the barcode in the sheet. On Nykaa and Tira a name match of 85% or more with the same size is automatic; anything less sure waits in Review matches.'],
-    ['Review matches', 'Matches we are not sure about. Confirm the right page, reject it (it is never proposed again), or paste the right link. Not found: no page of the same brand, name and size; it is looked for again after a week.'],
-    ['Our gap', 'Our price against the cheapest IN-STOCK competitor: +10% means we are 10% dearer. Dearer / cheapest / same use a 1% margin.'],
+    ['Review matches', 'Matches we are not sure about. Confirm the right page, reject it (it is never proposed again), or paste the right link. Not found: no page of the same brand, name and size; it is looked for again after a week, or at once with “Search again + refresh”.'],
+    ['Sharing between computers', 'When set up (docs/price-sync.md), prices, matches and decisions are kept in Supabase and every computer shows the same ones. Only one computer can refresh at a time. A decision made on a screen that is out of date is refused. Without a connection you can view what was last downloaded, but not refresh or decide. Earlier history of a computer is sent only when you press Upload.'],
+    ['Price history graph', 'Click a product in the comparison table. One point per price refresh for each shop and for our own price. Our own price is recorded from the first refresh after this was added; before that only today’s price is drawn as a dashed line.'],
+    ['Our gap', 'Our price against the cheapest competitor price: +10% means we are 10% dearer. Dearer / cheapest / same use a 1% margin.'],
     ['Price index', 'For a brand or category: 100 = the same as the cheapest competitor, 110 = we are 10% dearer (the median of its products).'],
     ['Discount', '(MRP − price) ÷ MRP, ours and each site’s, on the same products.'],
     ['Revenue at risk', 'Products that sell or get views (in the dates at the top) while a competitor is cheaper; “cut to match” is how much lower our price would have to be.'],
@@ -162,21 +174,60 @@ const SECTIONS = [
   ]],
 ]
 
+const slug = (t) => `dict-${t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
+
+/** The text with every match of the search marked. */
+function Marked({ text, needle }) {
+  if (!needle) return text
+  const parts = String(text).split(new RegExp(`(${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'))
+  return parts.map((p, i) => (p.toLowerCase() === needle ? <mark key={i}>{p}</mark> : p))
+}
+
 export default function Dictionary() {
   const [q, setQ] = useState('')
+  const [closed, setClosed] = useState(() => new Set())
   const needle = q.trim().toLowerCase()
   const shown = SECTIONS.map(([title, rows]) => [title, rows.filter(([t, d]) => !needle || `${t} ${d}`.toLowerCase().includes(needle))]).filter(([, rows]) => rows.length)
+  const found = shown.reduce((n, [, rows]) => n + rows.length, 0)
+  const total = SECTIONS.reduce((n, [, rows]) => n + rows.length, 0)
+  const toggle = (t) => setClosed((c) => { const n = new Set(c); if (n.has(t)) n.delete(t); else n.add(t); return n })
+  const jump = (t) => {
+    setClosed((c) => { const n = new Set(c); n.delete(t); return n })
+    requestAnimationFrame(() => document.getElementById(slug(t))?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
   return (
     <>
-      <div className="chip-row"><Search value={q} onChange={setQ} placeholder="Find a term, for example sale, bounce, direct…" /></div>
-      {shown.length === 0 && <div className="empty">Nothing matches “{q}”.</div>}
-      {shown.map(([title, rows]) => (
-        <Card key={title} title={title}>
-          <dl className="facts dict">
-            {rows.map(([t, d]) => (<div key={t} className="dict-row"><dt>{t}</dt><dd>{d}</dd></div>))}
-          </dl>
-        </Card>
-      ))}
+      <div className="chip-row" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <Search value={q} onChange={setQ} placeholder="Find a term, for example sale, bounce, direct…" />
+        <span className="muted" style={{ fontSize: 12.5 }}>{needle ? `${found} of ${total} terms match` : `${total} terms in ${SECTIONS.length} sections`}</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn small" onClick={() => setClosed(new Set())}>Expand all</button>
+        <button type="button" className="btn small" onClick={() => setClosed(new Set(SECTIONS.map(([t]) => t)))}>Collapse all</button>
+      </div>
+      {shown.length === 0 ? <div className="empty">Nothing matches “{q}”.</div> : (
+        <div className="dict-layout">
+          <nav className="card dict-nav" aria-label="Sections">
+            {shown.map(([title, rows]) => <button key={title} type="button" onClick={() => jump(title)}><span>{title}</span><em>{rows.length}</em></button>)}
+          </nav>
+          <div className="dict-main">
+            {shown.map(([title, rows]) => {
+              const open = Boolean(needle) || !closed.has(title)
+              return (
+                <section key={title} id={slug(title)} className="card dict-sec">
+                  <button type="button" className="dict-head" aria-expanded={open} onClick={() => toggle(title)} disabled={Boolean(needle)}>
+                    <h3>{title}</h3><span className="muted">{rows.length} term{rows.length === 1 ? '' : 's'}</span><span className="dict-chev" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                  </button>
+                  {open && (
+                    <dl className="dict">
+                      {rows.map(([t, d]) => (<div key={t} className="dict-row"><dt><Marked text={t} needle={needle} /></dt><dd><Marked text={d} needle={needle} /></dd></div>))}
+                    </dl>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </>
   )
 }

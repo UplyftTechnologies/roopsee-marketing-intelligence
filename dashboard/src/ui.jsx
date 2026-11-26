@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import Popover from './components/Popover'
 
@@ -106,11 +106,11 @@ export function tableToTsv(table) {
   const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
   const cell = (el) => {
     const c = el.cloneNode(true)
-    c.querySelectorAll('.help, .arrow, .sr-only').forEach((n) => n.remove())
+    c.querySelectorAll('.help, .arrow, .sr-only, .no-copy').forEach((n) => n.remove())
     return clean(c.textContent)
   }
   const lines = []
-  table.querySelectorAll('tr').forEach((tr) => {
+  table.querySelectorAll('tr:not(.x-row)').forEach((tr) => {
     const cells = [...tr.children].filter((c) => !c.classList.contains('sel'))
     if (cells.length) lines.push(cells.map(cell).join('\t'))
   })
@@ -272,9 +272,10 @@ const Row = memo(function Row({ r, id, cols, idOf, onRow, rowClass, selectable, 
 
 /** Table with click-to-sort headers and optional row selection.
  *  `scroll`: the table scrolls inside a box (both ways) with the column headings pinned; rows are added as you scroll down.
+ *  `expanded(row)`: optional; what it returns is drawn in a full-width line under that row (left out of Copy).
  *  Columns: { label, key?, sortBy? (field name or fn), num?, render?, cls? }  - sortable when key or sortBy is set.
  *  Client sort by default; pass `sort` ({key, dir}) + `onSort(key)` for server-side sorting of paginated data. */
-export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll, id: tableId }) {
+export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll, id: tableId, expanded }) {
   const [local, setLocal] = useState(null)
   const cc = useColumns(tableId || cols.filter((c) => c.label).map((c) => c.label).join('|').slice(0, 160), cols)
   const vis = cc.visible
@@ -367,8 +368,14 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
         <tbody>
           {data.slice(0, shown).map((r, i) => {
             const id = selectable ? rowId(r) : i
-            return <Row key={id} r={r} id={id} cols={vis} idOf={idOf} onRow={onRow} rowClass={rowClass} selectable={selectable} isSel={selectable ? selected.has(id) : false}
-              onToggle={onToggle} big={count > 150} sig={sig} />
+            const more = expanded?.(r)
+            return (
+              <Fragment key={id}>
+                <Row r={r} id={id} cols={vis} idOf={idOf} onRow={onRow} rowClass={rowClass} selectable={selectable} isSel={selectable ? selected.has(id) : false}
+                  onToggle={onToggle} big={count > 150} sig={sig} />
+                {more ? <tr className="x-row"><td colSpan={vis.length + (selectable ? 1 : 0)}>{more}</td></tr> : null}
+              </Fragment>
+            )
           })}
         </tbody>
       </table>

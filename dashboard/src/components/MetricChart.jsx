@@ -33,7 +33,7 @@ export default function MetricChart({ ts, metric, compare = true, height = 260, 
     <>
       <CartesianGrid stroke="var(--grid)" vertical={false} />
       <XAxis dataKey="date" tickFormatter={day} {...axis} minTickGap={32} />
-      <YAxis {...axis} width={m.kind === 'rate' ? 48 : 56} tickFormatter={m.fmt} allowDecimals={false} />
+      <YAxis {...axis} width={m.kind === 'rate' ? 48 : 56} tickFormatter={m.fmt} allowDecimals={m.kind === 'rate'} />
     </>
   )
   return (

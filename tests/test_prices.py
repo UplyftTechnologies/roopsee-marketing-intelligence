@@ -1,18 +1,24 @@
-"""Price intelligence: the page readers and the matching rules, offline (no network, no database).
+"""Price intelligence: the page readers and the matching rules, offline (no network, no real database).
 
 Run:  .venv\\Scripts\\python -m unittest tests.test_prices -v
 The fixtures are real public product pages saved in Nov 2026 (tests/fixtures/prices). When a site changes its pages and its reader starts
 failing on live pages, save a fresh page here, fix the reader in mi/price_sites.py, and update the expected numbers below.
 """
 import gzip
+import os
 import sys
 import unittest
 from pathlib import Path
 
+os.environ["PRICES_SUPABASE_KEY"] = ""  # these tests never touch the shared price store
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import duckdb  # noqa: E402
+
+from mi import core  # noqa: E402
 from mi import price_sites as P  # noqa: E402
+from mi import prices as R  # noqa: E402
 
 FIX = ROOT / "tests" / "fixtures" / "prices"
 
@@ -47,10 +53,10 @@ class Readers(unittest.TestCase):
         self.assertTrue(r["in_stock"])
         self.assertTrue(r["ean"] and r["ean"].isdigit())
 
-    def test_purplle_sold_out_has_no_price(self):
+    def test_purplle_sold_out_still_gives_its_price(self):
         r = P.read("purplle", page("purplle_soldout"))
         self.assertFalse(r["in_stock"])
-        self.assertIsNone(r["price"])
+        self.assertEqual((r["price"], r["mrp"]), (1425.0, None))  # structured data says 0 and so does the script's MRP: only the price is real
         self.assertRegex(r["ean"] or "", r"^\d{13}$")  # the barcode is there even when it is sold out, so the match can still be made
 
     def test_a_page_without_product_data_is_refused(self):
@@ -130,6 +136,144 @@ class Matching(unittest.TestCase):
 
     def test_the_tira_id_is_not_a_word(self):
         self.assertNotIn("7612648", P.slug_text("https://www.tirabeauty.com/product/axis-y-cream-50-ml-7612648"))
+
+
+class PriceKey(unittest.TestCase):
+    def test_the_key_is_for_the_price_role_only_and_env_keeps_its_other_lines(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import make_price_key as K
+        token = K.make_token("a-secret-for-the-test-only-123456", 1_700_000_000)
+        self.assertEqual(K.role_of(token), "mi_price_writer")
+        out = K.set_lines("# note\nPRODUCT_SUPABASE_URL=https://x\nPRICES_SUPABASE_KEY=old\n", {"PRICES_SUPABASE_KEY": token})
+        self.assertEqual(out, f"# note\nPRODUCT_SUPABASE_URL=https://x\nPRICES_SUPABASE_KEY={token}\n")
+
+    def test_without_a_key_nothing_is_marked_to_be_sent(self):
+        from mi import price_sync
+        self.assertFalse(price_sync.enabled())
+
+
+class BrandsSizesAndRobots(unittest.TestCase):
+    def test_brands_with_signs_are_found_in_links(self):
+        for brand, link in (("Rom&nd", "https://www.tirabeauty.com/product/rom-nd-glasting-balm-3-5-g-123456"), ("Dr. Sheth's", "https://www.tirabeauty.com/product/dr-sheth-s-ceramide-cream-50-g-123456"),
+                            ("L'Oreal Paris", "https://www.purplle.com/product/l-oreal-paris-serum-30-ml"), ("The Face Shop", "https://www.purplle.com/product/the-face-shop-rice-mask")):
+            with self.subTest(brand=brand):
+                self.assertTrue(P.brand_in(brand, P.slug_text(link)))
+        self.assertFalse(P.brand_in("Rom&nd", P.slug_text("https://www.nykaa.com/roman-dial-watch/p/1")))
+        self.assertEqual(P.coverage("Dr. Sheth's Ceramide Cream", "Dr. Sheth's", "dr sheth s ceramide cream 50 g"), (1.0, 1.0))
+
+    def test_a_decimal_size_written_without_its_point_is_the_same_size(self):
+        for size, words in (("0.16g", "brow pencil grey brown 016g qskwfy"), ("9.2ml", "hyper curl mascara very black 92ml abc"), ("3.9g", "creamy matte lipstick touch of spice 3 9 gm 3"),
+                            ("6.1g", "city mini palette 61g xm")):
+            ours = P.sizes_in(size)
+            with self.subTest(size=size):
+                self.assertEqual(P.size_verdict(ours, P.sizes_in(P.fix_sizes(words, ours))), "same")
+
+    def test_another_size_stays_another_size(self):
+        ours = P.sizes_in("9.2ml")
+        for words in ("mascara 6 ml", "mascara 19 2 ml", "mascara 192ml"):
+            with self.subTest(words=words):
+                self.assertEqual(P.size_verdict(ours, P.sizes_in(P.fix_sizes(words, ours))), "different")
+        self.assertEqual(P.fix_sizes("serum 50 ml", P.sizes_in("50ml")), "serum 50 ml")  # whole sizes are left alone
+
+    def test_robots_rules(self):
+        r = P.robots_rules("User-agent: Googlebot\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /*?q*\nDisallow: /search/\n")
+        self.assertFalse(P.robots_allows(r, "https://www.tirabeauty.com/products?q=serum"))
+        self.assertFalse(P.robots_allows(r, "https://www.nykaa.com/search/result"))
+        self.assertTrue(P.robots_allows(r, "https://www.tirabeauty.com/product/serum-123456"))
+        self.assertTrue(P.robots_allows([], "https://x.com/anything"))
+
+
+class RunAndScreen(unittest.TestCase):
+    """The run's reading step, what each shop column says, and your decisions: an in-memory database, no network."""
+    P1 = {"product_id": "P1", "name": "Brand X Glow Serum", "brand": "Brand X", "category": "Face", "type": "Serum", "size": "30ml", "mrp": 1200.0, "price": 1000.0, "link": None, "barcode": None, "image": None}
+    URL = "https://www.nykaa.com/brand-x-glow-serum/p/1"
+
+    def setUp(self):
+        self.old = (core.CON, R.price_catalogue, P.fetch, P.read, P.pause)
+        core.CON = duckdb.connect(":memory:")
+        R.price_init(core.CON)
+        R.price_catalogue = lambda: [self.P1]
+        P.pause = lambda: None
+        self.answers = []  # what each page read gives, in order: a price, None for a sold-out page without one, or an exception
+        P.fetch = lambda url, timeout=40: "page"
+        P.read = self.read
+        R._save_match("P1", "nykaa", url=self.URL, status="matched", method="sheet", confidence=1.0, matched_name=None)
+
+    def tearDown(self):
+        core.CON, R.price_catalogue, P.fetch, P.read, P.pause = self.old
+
+    def read(self, site, body):
+        a = self.answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return {"name": "Brand X Glow Serum", "price": a, "mrp": 1200.0, "offer_price": None, "in_stock": a is not None, "stock_qty": None, "size": "30ml", "discount": None, "ean": None, "variants": []}
+
+    def run_once(self, *answers):
+        self.answers = list(answers)
+        run = core.CON.execute("INSERT INTO price_runs (started_at, status, sites) VALUES (now(), 'running', 'nykaa') RETURNING run_id").fetchone()[0]
+        R.PRICE_JOB.update(stop=False, sites={"nykaa": {"phase": "", "done": 0, "total": 0, "ok": 0, "failed": 0, "error": None}})
+        R._run_site("nykaa", run, [self.P1], None)
+        core.CON.execute("UPDATE price_runs SET status = 'done' WHERE run_id = ?", [run])
+        return run
+
+    def cell(self, site="nykaa"):
+        return R._rows()[0]["sites"][site]
+
+    def test_a_price_counts_even_when_out_of_stock(self):
+        self.run_once(900.0)
+        core.CON.execute("UPDATE price_snapshots SET in_stock = false")
+        row = R._rows()[0]
+        self.assertEqual((row["sites"]["nykaa"]["state"], row["cheapest_price"], row["gap"]), ("priced", 900.0, round(1000 / 900 - 1, 4)))
+        self.assertNotIn("in_stock", row["sites"]["nykaa"])
+
+    def test_the_last_price_stays_with_its_date_when_a_later_read_has_none(self):
+        self.run_once(900.0)
+        self.run_once(None)
+        c = self.cell()
+        self.assertEqual((c["state"], c["price"], c["earlier"]), ("priced", 900.0, True))
+
+    def test_never_priced_is_not_available_and_never_looked_at_is_not_checked(self):
+        self.assertEqual(self.cell()["state"], "unchecked")
+        self.assertEqual(self.cell("tira")["state"], "unchecked")
+        self.run_once(None)
+        self.assertEqual(self.cell()["state"], "not_available")
+        R._save_match("P1", "tira", url=None, status="none", method=None, confidence=0, matched_name=None)
+        self.assertEqual(self.cell("tira")["state"], "not_available")
+
+    def test_a_failed_page_is_tried_once_more(self):
+        self.run_once(RuntimeError("network"), 950.0)
+        self.assertEqual(self.cell()["price"], 950.0)
+        self.assertEqual(core.CON.execute("SELECT count(*) FROM price_snapshots").fetchone()[0], 1)
+
+    def test_a_dead_link_is_forgotten_and_searched_again(self):
+        self.run_once(P.PageGone("HTTP 404"))
+        m = R._matches()[("P1", "nykaa")]
+        self.assertEqual((m["status"], m["url"], m["rejected"], m["checked_at"]), ("none", None, [self.URL], None))
+
+    def test_a_stopped_run_is_continued_not_repeated(self):
+        run = self.run_once(900.0)
+        core.CON.execute("UPDATE price_runs SET status = 'stopped' WHERE run_id = ?", [run])
+        self.run_once()  # nothing left to read: reading a page would fail on the empty answer list
+        self.assertEqual(core.CON.execute("SELECT count(*) FROM price_snapshots").fetchone()[0], 1)
+
+    def test_not_sold_here_and_rejecting_one_of_several(self):
+        cands = [{"url": self.URL, "score": 0.7}, {"url": self.URL + "2", "score": 0.6}]
+        R._save_match("P1", "nykaa", url=self.URL, status="review", method="name", confidence=0.7, matched_name=None, candidates=cands)
+        R.prices_match(R.MatchIn(product_id="P1", site="nykaa", action="reject", url=self.URL))
+        self.assertEqual(self.cell()["state"], "review")          # one suggestion is left
+        R.prices_match(R.MatchIn(product_id="P1", site="nykaa", action="notsold"))
+        self.assertEqual(self.cell()["state"], "not_available")
+        self.assertEqual(len(R._matches()[("P1", "nykaa")]["rejected"]), 2)
+
+    def test_changes_and_history_leave_out_a_rejected_page(self):
+        self.run_once(900.0)
+        self.run_once(800.0)
+        self.assertEqual([(c["before_price"], c["now_price"]) for c in R._changes()], [(900.0, 800.0)])
+        self.assertEqual([p["price"] for p in R.prices_history("P1")["points"]], [900.0, 800.0])  # one point per reading
+        self.assertEqual(len({p["run"] for p in R.prices_history("P1")["points"]}), 2)
+        R.prices_match(R.MatchIn(product_id="P1", site="nykaa", action="reject", url=self.URL))
+        self.assertEqual(R._changes(), [])
+        self.assertEqual(R.prices_history("P1")["points"], [])
 
 
 if __name__ == "__main__":

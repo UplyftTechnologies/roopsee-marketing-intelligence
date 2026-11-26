@@ -11,7 +11,11 @@ Tables (user data like the exclusion rules: a data rebuild never drops them):
   price_snapshots  every page read: price, mrp, offer_price, in_stock, stock_qty, discount, error
   price_runs       one row per Refresh prices run
   price_index      the product pages each site lists (its sitemap), refreshed weekly, for matching
-The comparison uses the REGULAR competitor price (Nykaa's offer price for some customers is a note only) and the latest reading of each product.
+  price_own        our own price of every product at each run
+With sharing on (mi/price_sync.py, docs/price-sync.md) these are a copy of the tables in Supabase that all computers use; the sitemap list stays local.
+The comparison uses the REGULAR competitor price (Nykaa's offer price for some customers is a note only) and the latest price read for each product,
+whether or not it is in stock there (only the price matters). Each shop cell is one of: priced, review, not_available (not found, not sold there,
+or no price ever seen), unchecked (not looked for or not read yet).
 Our price = master_products "Selling Price" / "MRP". The hand-typed competitor prices in the sheet are not used.
 """
 from __future__ import annotations
@@ -25,13 +29,17 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from . import core, price_sites as P
+from . import core, price_sites as P, price_sync as S
 from .core import app, one, q, ratio
 from .db import DB_LOCK
 
 INDEX_MAX_AGE = timedelta(days=7)      # sitemaps are re-read once a week
 RETRY_NONE_AFTER = timedelta(days=7)   # a product not found on a site is looked for again after a week (or when you ask)
 MAX_BLOCKS = 4                          # refusals in a row before a site is stopped for this run
+RESUME_WITHIN = timedelta(hours=6)     # a stopped or interrupted run is continued, not repeated, within this time
+BEAT_SECONDS = 30                      # while sharing: keep the lock and send what has been read, this often
+LOST_AFTER = 4 * 60                    # seconds without reaching Supabase before the run stops (the lock lapses after 5 minutes)
+GONE = "page no longer exists"
 AUTO = 0.85                             # name score for an automatic Nykaa / Tira match (with the same size)
 REVIEW = 0.55                           # lowest name score worth showing in the review queue
 
@@ -44,6 +52,15 @@ CREATE TABLE IF NOT EXISTS price_matches (product_id VARCHAR, site VARCHAR, url 
 CREATE TABLE IF NOT EXISTS price_snapshots (run_id BIGINT, product_id VARCHAR, site VARCHAR, url VARCHAR, fetched_at TIMESTAMP, ok BOOLEAN, error VARCHAR,
   price DOUBLE, mrp DOUBLE, offer_price DOUBLE, in_stock BOOLEAN, stock_qty BIGINT, discount VARCHAR, page_name VARCHAR, page_size VARCHAR);
 CREATE TABLE IF NOT EXISTS price_index (site VARCHAR, url VARCHAR, words VARCHAR, fetched_at TIMESTAMP);
+CREATE TABLE IF NOT EXISTS price_own (run_id BIGINT, product_id VARCHAR, price DOUBLE, mrp DOUBLE, fetched_at TIMESTAMP, synced BOOLEAN);
+CREATE TABLE IF NOT EXISTS price_sync_state (key VARCHAR PRIMARY KEY, value VARCHAR);
+-- columns for sharing, added to tables of earlier versions too
+ALTER TABLE price_runs ADD COLUMN IF NOT EXISTS host VARCHAR;
+ALTER TABLE price_runs ADD COLUMN IF NOT EXISTS remote_id VARCHAR;
+ALTER TABLE price_matches ADD COLUMN IF NOT EXISTS remote_version INTEGER;
+ALTER TABLE price_matches ADD COLUMN IF NOT EXISTS dirty BOOLEAN;
+ALTER TABLE price_matches ADD COLUMN IF NOT EXISTS updated_by VARCHAR;
+ALTER TABLE price_snapshots ADD COLUMN IF NOT EXISTS synced BOOLEAN;
 """
 
 PRICE_JOB = {"running": False, "run_id": None, "started": None, "finished": None, "stop": False, "sites": {}, "error": None, "message": ""}
@@ -52,7 +69,8 @@ _LOCK = threading.Lock()
 
 def price_init(con) -> None:
     con.execute(DDL)
-    con.execute("UPDATE price_runs SET status = 'stopped', message = 'the dashboard was closed during the run' WHERE status = 'running'")
+    # runs of this computer only: a run another computer is doing right now is shown as running until the shared list says otherwise
+    con.execute("UPDATE price_runs SET status = 'stopped', message = 'the dashboard was closed during the run' WHERE status = 'running' AND (host IS NULL OR host = ?)", [S.me()])
 
 
 def _x(sql: str, args=()) -> None:
@@ -97,7 +115,8 @@ def _save_match(pid, site, **f) -> None:
     f.setdefault("rejected", [])
     for k in ("candidates", "rejected"):
         f[k] = json.dumps(f[k])
-    cols = ["url", "status", "method", "confidence", "matched_name", "candidates", "rejected"]
+    cols = ["url", "status", "method", "confidence", "matched_name", "candidates", "rejected", "dirty"]
+    f["dirty"] = S.enabled()
     vals = [f.get(c) for c in cols]
     _x(f"""INSERT INTO price_matches (product_id, site, {', '.join(cols)}, checked_at, updated_at) VALUES (?, ?, {', '.join('?' * len(cols))}, now(), now())
            ON CONFLICT (product_id, site) DO UPDATE SET {', '.join(f'{c} = excluded.{c}' for c in cols)}, checked_at = now(), updated_at = now()""", [pid, site, *vals])
@@ -131,10 +150,11 @@ def _index(site: str, status, stop) -> list[dict]:
 
 def _brand_pages(site: str, brand: str, cache: dict) -> list[dict]:
     """The site's pages whose link contains the brand (looked up once per brand and run)."""
-    k = P.brand_key(brand)
-    if k not in cache:
-        cache[k] = q("SELECT url, words FROM price_index WHERE site = ? AND replace(words, ' ', '') LIKE ?", [site, f"%{k}%"]) if k else []
-    return cache[k]
+    keys = tuple(P.brand_keys(brand))
+    if keys not in cache:
+        cond = " OR ".join(["regexp_replace(words, '[^a-z0-9]', '', 'g') LIKE ?"] * len(keys))
+        cache[keys] = q(f"SELECT url, words FROM price_index WHERE site = ? AND ({cond})", [site, *[f"%{k}%" for k in keys]]) if keys else []
+    return cache[keys]
 
 
 def _candidates(p: dict, pages: list[dict], rejected: list) -> list[dict]:
@@ -144,12 +164,13 @@ def _candidates(p: dict, pages: list[dict], rejected: list) -> list[dict]:
     for r in pages:
         if r["url"] in rejected:
             continue
-        sv = P.size_verdict(ours, P.sizes_in(r["words"]))
+        words = P.fix_sizes(r["words"], ours)
+        sv = P.size_verdict(ours, P.sizes_in(words))
         if sv == "different":
             continue
-        sc = P.score(p["name"], p.get("brand"), r["words"])
+        sc = P.score(p["name"], p.get("brand"), words)
         if sc >= REVIEW:
-            out.append({"url": r["url"], "words": r["words"], "score": sc, "size": sv})
+            out.append({"url": r["url"], "words": words, "score": sc, "size": sv})
     out.sort(key=lambda c: (-c["score"], c["size"] != "same", len(c["words"])))
     return out[:5]
 
@@ -157,12 +178,13 @@ def _candidates(p: dict, pages: list[dict], rejected: list) -> list[dict]:
 # ---------------------------------------------------------------- one site, one run
 def _snapshot(run_id, pid, site, url, got=None, err=None) -> None:
     g = got or {}
-    _x("""INSERT INTO price_snapshots VALUES (?, ?, ?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+    _x("""INSERT INTO price_snapshots (run_id, product_id, site, url, fetched_at, ok, error, price, mrp, offer_price, in_stock, stock_qty, discount, page_name, page_size, synced)
+          VALUES (?, ?, ?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
        [run_id, pid, site, url, err is None, err, g.get("price"), g.get("mrp"), g.get("offer_price"), g.get("in_stock"),
-        int(g["stock_qty"]) if str(g.get("stock_qty") or "").isdigit() else None, g.get("discount"), g.get("name"), g.get("size")])
+        int(g["stock_qty"]) if str(g.get("stock_qty") or "").isdigit() else None, g.get("discount"), g.get("name"), g.get("size"), False if S.enabled() else None])
 
 
-def _run_site(site: str, run_id: int, products: list[dict], only: set | None) -> None:
+def _run_site(site: str, run_id: int, products: list[dict], only: set | None, recheck: bool = False) -> None:
     st = PRICE_JOB["sites"][site]
 
     def status(**k):
@@ -186,7 +208,7 @@ def _run_site(site: str, run_id: int, products: list[dict], only: set | None) ->
             time.sleep(60)  # back off once, then go on
             return None, f"blocked by {P.LABEL[site]} ({e})"
         except P.PageGone as e:
-            return None, f"page no longer exists ({e})"
+            return None, f"{GONE} ({e})"
         except Exception as e:  # layout changed, network ... recorded with the reason, the run goes on
             return None, str(e)[:200]
 
@@ -195,7 +217,8 @@ def _run_site(site: str, run_id: int, products: list[dict], only: set | None) ->
     need = []
     for p in todo:
         m = have.get((p["product_id"], site))
-        if m is None or (m["status"] == "none" and (not m["checked_at"] or datetime.now() - m["checked_at"] > RETRY_NONE_AFTER)):
+        if (m is None or (m["status"] == "none" and (not m["checked_at"] or datetime.now() - m["checked_at"] > RETRY_NONE_AFTER))
+                or (recheck and m["status"] in ("none", "review") and m["method"] != "you")):  # "search again": everything you have not decided
             need.append(p)
     if need:
         status(phase=f"loading the {P.LABEL[site]} product list")
@@ -254,17 +277,33 @@ def _run_site(site: str, run_id: int, products: list[dict], only: set | None) ->
                 _save_match(p["product_id"], site, url=None, status="review" if keep else "none", method="name", confidence=cands[0]["score"], matched_name=None,
                             candidates=[{k: x.get(k) for k in ("url", "score", "size", "page_size", "page_name", "price", "in_stock")} for x in keep], rejected=m.get("rejected") or [])
 
-    # 2. read every matched page that was not read in step 1
+    # 2. read every matched page that was not read in step 1 (or by the stopped run this one continues)
     done_now = {r["product_id"] for r in q("SELECT product_id FROM price_snapshots WHERE run_id = ? AND site = ?", [run_id, site])}
+    if only is None:
+        prev = one("""SELECT run_id, status, started_at FROM price_runs WHERE run_id <> ? AND started_at <= (SELECT started_at FROM price_runs WHERE run_id = ?)
+                      ORDER BY started_at DESC, run_id DESC LIMIT 1""", [run_id, run_id])
+        if prev.get("status") == "stopped" and prev.get("started_at") and datetime.now() - prev["started_at"] < RESUME_WITHIN:
+            done_now |= {r["product_id"] for r in q("SELECT product_id FROM price_snapshots WHERE run_id = ? AND site = ? AND ok", [prev["run_id"], site])}
     byid = {p["product_id"]: p for p in products}
-    pages = [(pid, m) for (pid, s), m in _matches().items() if s == site and m["status"] == "matched" and m["url"] and pid not in done_now
+    pages = [(pid, m, False) for (pid, s), m in _matches().items() if s == site and m["status"] == "matched" and m["url"] and pid not in done_now
              and pid in byid and (only is None or pid in only)]
-    status(phase="reading prices", total=len(pages), done=0)
-    for i, (pid, m) in enumerate(pages, 1):
+    total = len(pages)
+    status(phase="reading prices", total=total, done=0)
+    i = 0
+    while i < len(pages):  # pages that fail once are added to the end and tried one more time
         if stop():
             return
+        pid, m, again = pages[i]
+        i += 1
         url = m["url"]
         got, err = visit(url)
+        gone = bool(err) and err.startswith(GONE)
+        if got is None and not gone and not again:
+            pages.append((pid, m, True))
+            continue
+        if gone and m["method"] != "you":  # a dead link: forget it and look for the product again at the next refresh
+            _save_match(pid, site, url=None, status="none", method=m["method"], confidence=0, matched_name=None, rejected=sorted(set(m.get("rejected") or []) | {url}))
+            _x("UPDATE price_matches SET checked_at = NULL WHERE product_id = ? AND site = ?", [pid, site])
         if got is not None:
             got, size_problem = P.fit_size(got, _our_sizes(byid[pid]))  # the price of OUR size, never another size's
             if size_problem and m["method"] != "you":  # e.g. a sheet link to a page that only sells 59 / 118 ml when ours is 125 ml: ask, do not compare
@@ -274,59 +313,154 @@ def _run_site(site: str, run_id: int, products: list[dict], only: set | None) ->
                                          "price": got.get("price"), "in_stock": got.get("in_stock"), "note": size_problem}], rejected=m.get("rejected") or [])
                 got = None
         _snapshot(run_id, pid, site, url, got, err)
-        status(done=i, ok=st.get("ok", 0) + (err is None), failed=st.get("failed", 0) + (err is not None))
+        status(done=min(st.get("done", 0) + 1, total), ok=st.get("ok", 0) + (err is None), failed=st.get("failed", 0) + (err is not None))
+    failed, read = st.get("failed", 0), st.get("ok", 0) + st.get("failed", 0)
+    if failed >= 10 and failed > 0.3 * read:
+        status(error=f"{failed} of {read} {P.LABEL[site]} pages failed: the site may have changed its pages (see the Refresh log)")
 
 
-def _run(run_id: int, sites: list[str], only: set | None) -> None:
-    products = price_catalogue()
-    _seed_from_sheet(products, _matches())
+def _record_own(run_id: int, products: list[dict]) -> None:
+    """Our own price of every product at this run, so the history graph has our line too."""
+    flag = False if S.enabled() else None
+    with DB_LOCK:
+        cur = core.CON.cursor()
+        for p in products:
+            if p.get("price") is not None:
+                cur.execute("INSERT INTO price_own VALUES (?, ?, ?, ?, now(), ?)", [run_id, p["product_id"], p["price"], p.get("mrp"), flag])
 
-    def one_site(site):
-        try:
-            _run_site(site, run_id, products, only)
-            PRICE_JOB["sites"][site]["phase"] = "stopped" if PRICE_JOB["stop"] else "done"
-        except P.Blocked as e:
-            PRICE_JOB["sites"][site].update(phase="stopped", error=f"{P.LABEL[site]} kept refusing our requests ({e}); try again later")
-        except Exception as e:
-            PRICE_JOB["sites"][site].update(phase="failed", error=f"{type(e).__name__}: {str(e)[:200]}")
 
+def _pull_catalogue() -> None:
+    """Every computer compares the same products: take the latest product sheet before a shared run (the copy here is used if that fails)."""
+    from . import extract
     try:
+        extract.extract_small(core.CON.cursor(), only={"raw_catalog_master"})
+    except Exception as e:
+        PRICE_JOB["message"] = f"using the product sheet already here (could not pull it: {type(e).__name__})"
+
+
+def _beat(token: str, done: threading.Event) -> None:
+    """While a shared run is going: keep the lock and send what has been read. Stops the run if the lock is lost."""
+    reached = time.monotonic()
+    while not done.wait(BEAT_SECONDS):
+        try:
+            if not S.renew(token):
+                PRICE_JOB.update(stop=True, error="Another computer took over the refresh: this one stopped.")
+                return
+            reached = time.monotonic()
+            S.push()
+            S.STATE.update(error=None, last_sync=datetime.now().isoformat(timespec="seconds"))
+        except (S.Unreachable, S.Refused) as e:
+            S.STATE["error"] = str(e)
+            if time.monotonic() - reached > LOST_AFTER:
+                PRICE_JOB.update(stop=True, error="Supabase could not be reached for several minutes: the run stopped, so another computer does not overlap it.")
+                return
+        except Exception as e:  # a local problem must not end the heartbeat
+            S.STATE["error"] = f"{type(e).__name__}: {e}"
+
+
+def _run(run_id: int, sites: list[str], only: set | None, recheck: bool = False, token: str | None = None) -> None:
+    done = threading.Event()
+    beat = None
+    final, summary, message = "failed", {}, None
+    try:
+        if token:
+            beat = threading.Thread(target=_beat, args=(token, done), daemon=True)
+            beat.start()
+            _pull_catalogue()
+        products = price_catalogue()
+        _record_own(run_id, [p for p in products if only is None or p["product_id"] in only])
+        _seed_from_sheet(products, _matches())
+
+        def one_site(site):
+            try:
+                _run_site(site, run_id, products, only, recheck)
+                PRICE_JOB["sites"][site]["phase"] = "stopped" if PRICE_JOB["stop"] else "done"
+            except P.Blocked as e:
+                PRICE_JOB["sites"][site].update(phase="stopped", error=f"{P.LABEL[site]} kept refusing our requests ({e}); try again later")
+            except Exception as e:
+                PRICE_JOB["sites"][site].update(phase="failed", error=f"{type(e).__name__}: {str(e)[:200]}")
+
         with ThreadPoolExecutor(len(sites)) as ex:
             list(ex.map(one_site, sites))
-        summary = one("""SELECT count(*) AS pages, count(*) FILTER (WHERE ok) AS ok, count(*) FILTER (WHERE NOT ok) AS failed FROM price_snapshots WHERE run_id = ?""", [run_id])
-        errs = [v["error"] for v in PRICE_JOB["sites"].values() if v.get("error")]
+        counts = one("""SELECT count(*) AS pages, count(*) FILTER (WHERE ok) AS ok, count(*) FILTER (WHERE NOT ok) AS failed FROM price_snapshots WHERE run_id = ?""", [run_id])
+        errs = [v["error"] for v in PRICE_JOB["sites"].values() if v.get("error")] + ([PRICE_JOB["error"]] if PRICE_JOB["error"] else [])
         final = "stopped" if PRICE_JOB["stop"] else ("done with problems" if errs else "done")
-        _x("UPDATE price_runs SET finished_at = now(), status = ?, summary = ?, message = ? WHERE run_id = ?",
-           [final, json.dumps({**summary, "sites": PRICE_JOB["sites"]}, default=str), "; ".join(errs)[:500] or None, run_id])
+        summary, message = {**counts, "sites": PRICE_JOB["sites"]}, "; ".join(errs)[:500] or None
     except Exception as e:
         PRICE_JOB["error"] = f"{type(e).__name__}: {e}"
-        _x("UPDATE price_runs SET finished_at = now(), status = 'failed', message = ? WHERE run_id = ?", [PRICE_JOB["error"][:500], run_id])
+        message = PRICE_JOB["error"][:500]
     finally:
-        PRICE_JOB.update(running=False, finished=datetime.now().isoformat(timespec="seconds"))
+        done.set()
+        if beat:
+            beat.join(timeout=60)
+        try:
+            _x("UPDATE price_runs SET finished_at = now(), status = ?, summary = ?, message = ? WHERE run_id = ?", [final, json.dumps(summary, default=str) if summary else None, message, run_id])
+            if token:
+                _close_shared(token, final, summary, message)
+        finally:
+            PRICE_JOB.update(running=False, finished=datetime.now().isoformat(timespec="seconds"))
 
 
-def start_price_run(sites=None, only: set | None = None, wait: bool = False) -> dict:
+def _close_shared(token: str, final: str, summary: dict, message: str | None) -> None:
+    """Send the last readings and free the lock. What cannot be sent waits here and goes with the next sync."""
+    try:
+        S.push()
+        S.finish(token, final, summary, message)
+        S.pull()
+        S.read_lock()
+        S.STATE.update(error=None, last_sync=datetime.now().isoformat(timespec="seconds"))
+    except (S.Unreachable, S.Refused) as e:
+        S.STATE["error"] = f"The run is saved here but not all of it has reached Supabase yet ({e}). Press Sync now when you are online."
+
+
+def _take_turn(sites: list[str]) -> tuple[str, str]:
+    """Before a shared run: get up to date and take the lock. Returns (run id in Supabase, lock token); refuses when another computer is refreshing."""
+    try:
+        S.push()
+        S.pull()
+        run = S.new_run_id()
+        got = S.acquire(run, ",".join(sites))
+    except S.Unreachable as e:
+        raise HTTPException(503, f"{e}. A refresh is not started while the shared prices cannot be reached, so computers do not drift apart. Prices already downloaded can still be viewed.")
+    except S.Refused as e:
+        raise HTTPException(502, f"Supabase refused: {e}")
+    if not got.get("ok"):
+        since = S._in(got.get("since"))
+        raise HTTPException(409, f"{got.get('holder') or 'Another computer'} is refreshing prices" + (f" (since {since:%H:%M})" if since else "") + ". Their results appear here when you sync.")
+    return run, got["token"]
+
+
+def start_price_run(sites=None, only: set | None = None, wait: bool = False, recheck: bool = False) -> dict:
     """Start a Refresh prices run in the background (wait=True runs it here, for the command line)."""
     sites = [s for s in (sites or P.SITES) if s in P.SITES]
     with _LOCK:
         if PRICE_JOB["running"]:
             raise HTTPException(409, "Prices are already being refreshed")
         price_catalogue()  # fails early (409) when the sheet must be pulled again
+        remote_id, token = _take_turn(sites) if S.enabled() else (None, None)
         with DB_LOCK:
-            run_id = core.CON.cursor().execute("INSERT INTO price_runs (started_at, status, sites) VALUES (now(), 'running', ?) RETURNING run_id", [",".join(sites)]).fetchone()[0]
-        PRICE_JOB.update(running=True, run_id=run_id, started=datetime.now().isoformat(timespec="seconds"), finished=None, stop=False, error=None,
-                   sites={s: {"phase": "starting", "done": 0, "total": 0, "ok": 0, "failed": 0, "error": None} for s in sites})
+            cur = core.CON.cursor()
+            row = cur.execute("SELECT run_id FROM price_runs WHERE remote_id = ?", [remote_id]).fetchone() if remote_id else None  # already downloaded with the list
+            if row:
+                run_id = row[0]
+                cur.execute("UPDATE price_runs SET started_at = now(), status = 'running', sites = ?, host = ? WHERE run_id = ?", [",".join(sites), S.me(), run_id])
+            else:
+                run_id = cur.execute("INSERT INTO price_runs (started_at, status, sites, host, remote_id) VALUES (now(), 'running', ?, ?, ?) RETURNING run_id",
+                                     [",".join(sites), S.me(), remote_id]).fetchone()[0]
+        PRICE_JOB.update(running=True, run_id=run_id, started=datetime.now().isoformat(timespec="seconds"), finished=None, stop=False, error=None, message="",
+                         sites={s: {"phase": "starting", "done": 0, "total": 0, "ok": 0, "failed": 0, "error": None} for s in sites})
     if wait:
-        _run(run_id, sites, only)
+        _run(run_id, sites, only, recheck, token)
     else:
-        threading.Thread(target=_run, args=(run_id, sites, only), daemon=True).start()
+        threading.Thread(target=_run, args=(run_id, sites, only, recheck, token), daemon=True).start()
     return PRICE_JOB
 
 
 # ---------------------------------------------------------------- API: run control
 @app.post("/api/prices/refresh")
-def prices_refresh(site: str | None = None):
-    return start_price_run([site] if site else None)
+def prices_refresh(site: str | None = None, recheck: bool = False):
+    """recheck = also search again for everything not available or waiting for review (not what you decided yourself)."""
+    return start_price_run([site] if site else None, recheck=recheck)
 
 
 @app.post("/api/prices/stop")
@@ -338,22 +472,48 @@ def prices_stop():
 
 @app.get("/api/prices/status")
 def prices_status():
-    last = one("SELECT * FROM price_runs WHERE status <> 'running' ORDER BY run_id DESC LIMIT 1") if _have("price_runs") else {}
+    last = one("SELECT * FROM price_runs WHERE status <> 'running' ORDER BY started_at DESC, run_id DESC LIMIT 1") if _have("price_runs") else {}
     counts = {r["site"]: r for r in q("""SELECT site, count(*) FILTER (WHERE status = 'matched') AS matched, count(*) FILTER (WHERE status = 'review') AS review,
                                          count(*) FILTER (WHERE status IN ('none', 'rejected')) AS not_found FROM price_matches GROUP BY 1""")} if _have("price_matches") else {}
     try:
         n, need_pull = len(price_catalogue()), False
     except HTTPException:
         n, need_pull = 0, True
-    return {"job": PRICE_JOB, "last_run": last or None, "products": n, "needs_pull": need_pull, "sites": {s: {"label": P.LABEL[s], **counts.get(s, {"matched": 0, "review": 0, "not_found": 0})} for s in P.SITES}}
+    sharing = {"enabled": S.enabled()}
+    if sharing["enabled"] and _have("price_sync_state"):
+        sharing.update(S.STATE, me=S.me(), **S.waiting())
+    return {"job": PRICE_JOB, "last_run": last or None, "products": n, "needs_pull": need_pull, "sharing": sharing,
+            "sites": {s: {"label": P.LABEL[s], **counts.get(s, {"matched": 0, "review": 0, "not_found": 0})} for s in P.SITES}}
+
+
+@app.post("/api/prices/sync")
+def prices_sync():
+    """With sharing on: send what waits on this computer and fetch what others added. The screen calls it when the tab opens."""
+    return S.sync()
+
+
+@app.post("/api/prices/upload")
+def prices_upload():
+    """The first upload, only when you press the button: this computer's history from before sharing was on."""
+    if not S.enabled():
+        raise HTTPException(409, "Sharing is not set up on this computer (see docs/price-sync.md)")
+    if PRICE_JOB["running"]:
+        raise HTTPException(409, "Wait for the price refresh to finish")
+    try:
+        return S.upload_history()
+    except S.Unreachable as e:
+        raise HTTPException(503, f"{e}. Press the button again later: what was sent is not sent twice.")
+    except S.Refused as e:
+        raise HTTPException(502, f"Supabase refused: {e}")
 
 
 @app.get("/api/prices/runs")
 def prices_runs(limit: int = 20):
-    rows = q("SELECT run_id, started_at, finished_at, status, sites, summary, message FROM price_runs ORDER BY run_id DESC LIMIT ?", [max(1, min(limit, 200))])
+    rows = q("SELECT run_id, started_at, finished_at, status, sites, summary, message, host FROM price_runs ORDER BY started_at DESC, run_id DESC LIMIT ?", [max(1, min(limit, 200))])
     for r in rows:
         r["summary"] = json.loads(r["summary"]) if isinstance(r["summary"], str) else r["summary"]
-    errors = q("""SELECT site, error, count(*) AS n, any_value(url) AS example FROM price_snapshots WHERE NOT ok AND run_id = (SELECT max(run_id) FROM price_snapshots)
+    errors = q("""SELECT site, error, count(*) AS n, any_value(url) AS example FROM price_snapshots WHERE NOT ok
+                  AND run_id = (SELECT run_id FROM price_snapshots ORDER BY fetched_at DESC LIMIT 1)
                   GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20""")
     return {"runs": rows, "last_errors": errors}
 
@@ -370,15 +530,17 @@ def prices_review(site: str | None = None, status: str = "review"):
             continue
         p = prods[pid]
         out.append({"product_id": pid, "site": s, "site_label": P.LABEL[s], "name": p["name"], "brand": p["brand"], "size": p["size"], "our_price": p["price"],
-                    "url": m["url"], "method": m["method"], "confidence": m["confidence"], "matched_name": m["matched_name"], "candidates": m["candidates"]})
+                    "url": m["url"], "method": m["method"], "confidence": m["confidence"], "matched_name": m["matched_name"], "candidates": m["candidates"],
+                    "version": m.get("remote_version") or 0, "updated_by": m.get("updated_by")})
     return {"rows": out}
 
 
 class MatchIn(BaseModel):
     product_id: str
     site: str
-    action: str             # confirm | reject | link | clear
+    action: str             # confirm | reject | link | clear | notsold
     url: str | None = None  # for confirm (a candidate) or link (pasted)
+    version: int | None = None  # with sharing: the version of the match the screen showed
 
 
 @app.post("/api/prices/match")
@@ -388,31 +550,74 @@ def prices_match(body: MatchIn):
         raise HTTPException(400, f"site must be one of {list(P.SITES)}")
     if body.product_id not in {p["product_id"] for p in price_catalogue()}:
         raise HTTPException(404, "unknown product")
-    m = _matches().get((body.product_id, body.site)) or {"candidates": [], "rejected": []}
+    if body.action not in ("confirm", "link", "reject", "clear", "notsold"):
+        raise HTTPException(400, "action must be confirm, reject, link, clear or notsold")
     if body.action in ("confirm", "link"):
         u = P.canonical_url(body.url)
         if not u or P.site_of(u) != body.site:
             raise HTTPException(400, f"paste a {P.LABEL[body.site]} product link (https://{P.HOSTS[body.site][0]}/...)")
+    try:
+        S.decide(body.product_id, body.site, body.version, lambda: _apply_decision(body))
+    except S.Conflict as e:
+        who = e.row.get("updated_by") or "Someone else"
+        raise HTTPException(409, f"{who} changed this match just now, so yours was not saved. The list now shows their decision.")
+    except S.Unreachable as e:
+        raise HTTPException(503, f"{e}. Your decision was not saved: try again when you are online.")
+    except S.Refused as e:
+        raise HTTPException(502, f"Supabase refused: {e}")
+    return {"ok": True}
+
+
+def _apply_decision(body: MatchIn) -> None:
+    """Change the local match as the person asked (read fresh: with sharing on it was just updated)."""
+    m = _matches().get((body.product_id, body.site)) or {"candidates": [], "rejected": []}
+    if body.action in ("confirm", "link"):
+        u = P.canonical_url(body.url)
         _save_match(body.product_id, body.site, url=u, status="matched", method="you", confidence=1.0, matched_name=next((c.get("page_name") for c in m["candidates"] if c.get("url") == u), None),
                     candidates=m["candidates"], rejected=[x for x in m["rejected"] if x != u])
     elif body.action == "reject":  # this page is not our product: never propose it again
         bad = body.url or m.get("url")
-        _save_match(body.product_id, body.site, url=None, status="rejected", method="you", confidence=0, matched_name=None,
-                    candidates=[c for c in m["candidates"] if c.get("url") != bad], rejected=sorted(set(m["rejected"]) | ({bad} if bad else set())))
-    elif body.action == "clear":  # forget the match: it is looked for again at the next refresh
+        left = [c for c in m["candidates"] if c.get("url") != bad]
+        still = m.get("status") == "review" and bool(left)  # other suggestions remain: the question stays open
+        _save_match(body.product_id, body.site, url=None, status="review" if still else "rejected", method=m.get("method") if still else "you",
+                    confidence=m.get("confidence") if still else 0, matched_name=None, candidates=left, rejected=sorted(set(m["rejected"]) | ({bad} if bad else set())))
+    elif body.action == "notsold":  # the site does not sell it
+        _save_match(body.product_id, body.site, url=None, status="rejected", method="you", confidence=0, matched_name=None, candidates=[],
+                    rejected=sorted(set(m["rejected"]) | {c["url"] for c in m["candidates"] if c.get("url")}))
+    elif S.enabled():  # clear, shared: a row cannot be removed there, so it goes back to "not found, never looked for"
+        _save_match(body.product_id, body.site, url=None, status="none", method=None, confidence=0, matched_name=None)
+        _x("UPDATE price_matches SET checked_at = NULL WHERE product_id = ? AND site = ?", [body.product_id, body.site])
+    else:  # clear: forget the match, it is looked for again at the next refresh
         _x("DELETE FROM price_matches WHERE product_id = ? AND site = ?", [body.product_id, body.site])
-    else:
-        raise HTTPException(400, "action must be confirm, reject, link or clear")
-    return {"ok": True}
 
 
 # ---------------------------------------------------------------- comparison and analysis
 LATEST = """
 WITH m AS (SELECT * FROM price_matches WHERE status = 'matched'),
-s AS (SELECT * FROM price_snapshots WHERE ok QUALIFY row_number() OVER (PARTITION BY product_id, site ORDER BY fetched_at DESC) = 1)
-SELECT m.product_id, m.site, m.url, m.method, s.fetched_at, s.price, s.mrp, s.offer_price, s.in_stock, s.stock_qty, s.discount, s.page_name
-FROM m LEFT JOIN s ON s.product_id = m.product_id AND s.site = m.site AND s.url = m.url
+r AS (SELECT s.* FROM price_snapshots s JOIN m ON m.product_id = s.product_id AND m.site = s.site AND m.url = s.url),
+p AS (SELECT * FROM r WHERE ok AND price IS NOT NULL QUALIFY row_number() OVER (PARTITION BY product_id, site ORDER BY fetched_at DESC) = 1),
+t AS (SELECT product_id, site, max(fetched_at) AS last_try, max(fetched_at) FILTER (WHERE ok) AS last_ok FROM r GROUP BY 1, 2)
+SELECT m.product_id, m.site, m.url, m.method, p.fetched_at, p.price, p.mrp, p.offer_price, p.discount, p.page_name, t.last_try, t.last_ok
+FROM m LEFT JOIN p ON p.product_id = m.product_id AND p.site = m.site
+LEFT JOIN t ON t.product_id = m.product_id AND t.site = m.site
 """
+
+
+def _cell(match: dict | None, r: dict | None, ours) -> dict:
+    """What one shop's column shows for one product."""
+    if not match:
+        return {"state": "unchecked"}
+    if match["status"] == "review":
+        return {"state": "review"}
+    if match["status"] != "matched":
+        return {"state": "not_available"}
+    r = r or {}
+    if r.get("price") is None:  # read fine but the page has never shown a price: nothing to sell; never read: not checked yet
+        return {"state": "not_available" if r.get("last_ok") else "unchecked", "url": match["url"]}
+    return {"state": "priced", "url": match["url"], "method": match["method"], "price": r["price"], "mrp": r["mrp"], "offer_price": r["offer_price"], "discount_text": r["discount"],
+            "checked": r["fetched_at"], "earlier": bool(r["last_try"] and r["fetched_at"] < r["last_try"]),  # a later read gave no price: this one is older
+            "discount": round(1 - r["price"] / r["mrp"], 4) if r["price"] and r["mrp"] else None,
+            "gap": round(ours / r["price"] - 1, 4) if ours and r["price"] else None}
 
 
 _NAME_MAP: dict = {}  # event product name -> catalogue product id (or None), remembered for the life of the server
@@ -495,26 +700,19 @@ def _rows(d_from=None, d_to=None, include_excluded=False) -> list[dict]:
         for r in q(LATEST):
             latest.setdefault(r["product_id"], {})[r["site"]] = r
     dem = _demand(d_from, d_to, include_excluded)
+    matches = _matches() if _have("price_matches") else {}
     out = []
     for p in prods:
         ours, mrp = p["price"], p["mrp"]
-        sites = {}
-        for s in P.SITES:
-            r = (latest.get(p["product_id"]) or {}).get(s)
-            if not r:
-                continue
-            sites[s] = {"url": r["url"], "method": r["method"], "price": r["price"], "mrp": r["mrp"], "offer_price": r["offer_price"], "in_stock": r["in_stock"],
-                        "stock_qty": r["stock_qty"], "discount_text": r["discount"], "checked": r["fetched_at"],
-                        "discount": round(1 - r["price"] / r["mrp"], 4) if r["price"] and r["mrp"] else None,
-                        "gap": round(ours / r["price"] - 1, 4) if ours and r["price"] and r["in_stock"] else None}
-        live = {s: v["price"] for s, v in sites.items() if v["price"] and v["in_stock"]}
-        cheapest = min(live, key=live.get) if live else None
-        gap = round(ours / live[cheapest] - 1, 4) if ours and cheapest else None
+        sites = {s: _cell(matches.get((p["product_id"], s)), (latest.get(p["product_id"]) or {}).get(s), ours) for s in P.SITES}
+        priced = {s: v["price"] for s, v in sites.items() if v.get("price")}
+        cheapest = min(priced, key=priced.get) if priced else None
+        gap = round(ours / priced[cheapest] - 1, 4) if ours and cheapest else None
         out.append({**{k: p[k] for k in ("product_id", "name", "brand", "category", "type", "size", "image")}, "our_price": ours, "our_mrp": mrp,
                     "our_discount": round(1 - ours / mrp, 4) if ours and mrp else None, "sites": sites, "cheapest_site": cheapest,
-                    "cheapest_price": live.get(cheapest) if cheapest else None, "gap": gap, "position": _position(gap),
-                    "saving_needed": round(ours - live[cheapest], 2) if cheapest and gap and gap > 0 else 0,
-                    "out_of_stock_at": [s for s, v in sites.items() if v["in_stock"] is False], **dem.get(p["product_id"], {"views": 0, "carts": 0, "orders": 0, "units": 0, "revenue": 0.0})})
+                    "cheapest_price": priced.get(cheapest) if cheapest else None, "gap": gap, "position": _position(gap),
+                    "saving_needed": round(ours - priced[cheapest], 2) if cheapest and gap and gap > 0 else 0,
+                    **dem.get(p["product_id"], {"views": 0, "carts": 0, "orders": 0, "units": 0, "revenue": 0.0})})
     return out
 
 
@@ -541,13 +739,14 @@ def prices_analysis(date_from: str | None = None, date_to: str | None = None, in
     k["cheapest_share"] = ratio(k["cheaper"] + k["same"], k["compared"])
     per_site = []
     for s in P.SITES:
-        have = [r for r in rows if s in r["sites"]]
-        gaps = [r["sites"][s]["gap"] for r in have if r["sites"][s]["gap"] is not None]
-        disc = [(r["sites"][s]["discount"], r["our_discount"]) for r in have if r["sites"][s]["discount"] is not None and r["our_discount"] is not None]
-        per_site.append({"site": s, "label": P.LABEL[s], "matched": len(have), "priced": sum(1 for r in have if r["sites"][s]["price"]),
-                         "in_stock": sum(1 for r in have if r["sites"][s]["in_stock"]), "out_of_stock": sum(1 for r in have if r["sites"][s]["in_stock"] is False),
+        cells = [r["sites"][s] for r in rows]
+        have = [(r, r["sites"][s]) for r in rows if r["sites"][s]["state"] == "priced"]
+        gaps = [v["gap"] for _, v in have if v["gap"] is not None]
+        disc = [(v["discount"], r["our_discount"]) for r, v in have if v["discount"] is not None and r["our_discount"] is not None]
+        per_site.append({"site": s, "label": P.LABEL[s], "priced": len(have), "review": sum(c["state"] == "review" for c in cells),
+                         "not_available": sum(c["state"] == "not_available" for c in cells), "unchecked": sum(c["state"] == "unchecked" for c in cells),
                          "median_gap": _med(gaps), "we_dearer": sum(1 for g in gaps if g > 0.01), "we_cheaper": sum(1 for g in gaps if g < -0.01),
-                         "their_discount": _med([a for a, _ in disc]), "our_discount": _med([b for _, b in disc]), "with_offer": sum(1 for r in have if r["sites"][s]["offer_price"])})
+                         "their_discount": _med([a for a, _ in disc]), "our_discount": _med([b for _, b in disc]), "with_offer": sum(1 for _, v in have if v["offer_price"])})
 
     def group(key):
         g = {}
@@ -564,27 +763,26 @@ def prices_analysis(date_from: str | None = None, date_to: str | None = None, in
     at_risk = sorted([r for r in compared if r["position"] == "dearer" and (r["revenue"] or r["views"])], key=lambda r: (-r["revenue"], -r["views"]))[:25]
     sensitive = sorted([r for r in compared if r["position"] == "dearer" and r["views"] >= 20 and ratio(r["carts"], r["views"]) < cart_rate],
                        key=lambda r: -r["views"])[:25]
-    oos = sorted([r for r in rows if r["out_of_stock_at"]], key=lambda r: (-r["revenue"], -r["views"], -len(r["out_of_stock_at"])))[:25]
     return {"kpis": k, "sites": per_site, "by_brand": group("brand")[:40], "by_category": group("category"), "cart_rate": cart_rate,
             "at_risk": [_lite(r) for r in at_risk], "price_sensitive": [{**_lite(r), "cart_rate": ratio(r["carts"], r["views"])} for r in sensitive],
-            "out_of_stock_elsewhere": [_lite(r) for r in oos], "changes": _changes()}
+            "changes": _changes()}
 
 
 def _lite(r: dict) -> dict:
     return {k: r[k] for k in ("product_id", "name", "brand", "size", "our_price", "cheapest_site", "cheapest_price", "gap", "saving_needed", "views", "carts", "orders",
-                              "revenue", "out_of_stock_at", "position")}
+                              "revenue", "position")}
 
 
 def _changes(limit: int = 40) -> list[dict]:
-    """Price and stock changes between each product's last two readings on a site."""
+    """Price changes between each product's last two prices read from its matched page on a site."""
     if not _have("price_snapshots"):
         return []
     names = {p["product_id"]: p for p in price_catalogue()}
-    rows = q("""WITH s AS (SELECT product_id, site, fetched_at, price, in_stock, row_number() OVER (PARTITION BY product_id, site ORDER BY fetched_at DESC) AS n
-                           FROM price_snapshots WHERE ok)
-                SELECT a.product_id, a.site, a.fetched_at, a.price AS now_price, b.price AS before_price, a.in_stock AS now_stock, b.in_stock AS before_stock, b.fetched_at AS before_at
-                FROM s a JOIN s b ON b.product_id = a.product_id AND b.site = a.site AND b.n = 2 WHERE a.n = 1
-                AND (a.price IS DISTINCT FROM b.price OR a.in_stock IS DISTINCT FROM b.in_stock) ORDER BY a.fetched_at DESC""")
+    rows = q("""WITH s AS (SELECT s.product_id, s.site, s.fetched_at, s.price, row_number() OVER (PARTITION BY s.product_id, s.site ORDER BY s.fetched_at DESC) AS n
+                           FROM price_snapshots s JOIN price_matches m ON m.product_id = s.product_id AND m.site = s.site AND m.url = s.url AND m.status = 'matched'
+                           WHERE s.ok AND s.price IS NOT NULL)
+                SELECT a.product_id, a.site, a.fetched_at, a.price AS now_price, b.price AS before_price, b.fetched_at AS before_at
+                FROM s a JOIN s b ON b.product_id = a.product_id AND b.site = a.site AND b.n = 2 WHERE a.n = 1 AND a.price <> b.price ORDER BY a.fetched_at DESC""")
     out = []
     for r in rows:
         p = names.get(r["product_id"]) or {}
@@ -599,6 +797,11 @@ def prices_history(product_id: str):
     p = next((x for x in price_catalogue() if x["product_id"] == product_id), None)
     if not p:
         raise HTTPException(404, "unknown product")
-    rows = q("""SELECT site, fetched_at::DATE AS day, max(fetched_at) AS at, arg_max(price, fetched_at) AS price, arg_max(in_stock, fetched_at) AS in_stock
-                FROM price_snapshots WHERE product_id = ? AND ok GROUP BY 1, 2 ORDER BY 2""", [product_id])
-    return {"product": p, "points": rows}
+    bad = {(s, u) for (pid, s), m in _matches().items() if pid == product_id for u in m["rejected"]}  # pages you (or a dead link) ruled out
+    read = q("""SELECT s.run_id, r.started_at AS run_at, s.site, s.url, s.fetched_at, s.price FROM price_snapshots s LEFT JOIN price_runs r ON r.run_id = s.run_id
+                WHERE s.product_id = ? AND s.ok AND s.price IS NOT NULL ORDER BY s.fetched_at""", [product_id])
+    points = [{"run": r["run_id"], "run_at": r["run_at"] or r["fetched_at"], "site": r["site"], "day": str(r["fetched_at"])[:10], "at": r["fetched_at"], "price": r["price"]}
+              for r in read if (r["site"], r["url"]) not in bad]  # one point per reading; the graph draws one step per refresh
+    own = q("""SELECT o.run_id AS run, coalesce(r.started_at, o.fetched_at) AS run_at, o.fetched_at AS at, o.price FROM price_own o LEFT JOIN price_runs r ON r.run_id = o.run_id
+               WHERE o.product_id = ? ORDER BY o.fetched_at""", [product_id]) if _have("price_own") else []
+    return {"product": p, "points": points, "own": own}

@@ -16,6 +16,7 @@ from fastapi import HTTPException, Query
 
 from .core import _csv, app, one, q
 from .payload import NOISE, event_params, flat_payload, match_score
+from .scores import borrow, scored_events
 from .sessions import _event_details
 
 FIELD_RE = re.compile(r"^[A-Za-z0-9_\-]{1,60}$")
@@ -181,6 +182,32 @@ def events_values(field: str, event: str | None = None, date_from: str | None = 
     return {"field": field, "rows": rows}
 
 
+@app.get("/api/events/params")
+def events_params_by_name(date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, include_dup: bool = False,
+                          key: str | None = None, sample: int = 60):
+    """For every event name: which parameters it carries and whether it has a value, from its latest `sample` events in the dates."""
+    w, a, _ = _where(date_from, date_to, include_excluded, include_dup, key=key)
+    picked = q(f"""SELECT id, event_name FROM (SELECT e.id, e.event_name, row_number() OVER (PARTITION BY e.event_name ORDER BY e.ts DESC) AS rn
+                   FROM events_clean e WHERE {w}) WHERE rn <= ?""", [*a, max(5, min(int(sample), 300))])
+    names = {r["id"]: r["event_name"] for r in picked}
+    stored = q("SELECT id, value, extra_data::VARCHAR AS x FROM raw_event_log WHERE id IN (SELECT unnest(?::VARCHAR[]))", [list(names)]) if names else []
+    seen: dict = {}
+    for r in stored:
+        d = seen.setdefault(names[r["id"]], {"n": 0, "keys": Counter(), "examples": {}, "values": 0, "value_example": None, "scores": 0})
+        flat = flat_payload(r["x"], r["value"])
+        d["n"] += 1
+        for p in event_params(flat, skip=("value",)):
+            d["keys"][p["k"]] += 1
+            d["examples"].setdefault(p["k"], p["v"][:60])
+        v = flat.get("value")
+        if v not in (None, "", [], {}):
+            d["values"] += 1
+            d["value_example"] = d["value_example"] or str(v)[:60]
+        d["scores"] += 1 if match_score(flat) != (None, None) else 0
+    return {name: {"sampled": d["n"], "params": [{"k": k, "share": round(c / d["n"], 4), "example": d["examples"][k]} for k, c in sorted(d["keys"].items(), key=lambda kv: (-kv[1], kv[0]))[:12]],
+                   "value_share": round(d["values"] / d["n"], 4), "value_example": d["value_example"], "score_share": round(d["scores"] / d["n"], 4)} for name, d in seen.items()}
+
+
 # ------------------------------------------------------------------ slice and dice
 @app.get("/api/events/groupby")
 def events_groupby(by: str = "event_name", date_from: str | None = None, date_to: str | None = None, include_excluded: bool = False, include_dup: bool = False,
@@ -237,7 +264,12 @@ def events_rows(date_from: str | None = None, date_to: str | None = None, includ
         st = stored.get(r["id"])
         flat = flat_payload(st["x"], st["value"]) if st else {}
         r["score"], r["score_note"] = match_score(flat)
-        r["params"] = event_params(flat, skip=("search_term",))
+        v = flat.get("value")
+        r["value"] = None if v in (None, "", [], {}) else str(v)[:200]
+        r["params"] = event_params(flat, skip=("search_term", "value"))
+        r["score_from"] = None
+    missing = [r["session_id"] for r in rows if r["score"] is None and not r["score_note"]]
+    borrow(rows, scored_events(missing))
     return {"total": total, "rows": rows, "cols": fields}
 
 

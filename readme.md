@@ -118,8 +118,9 @@ out of stock, price changes and history. **Refresh prices** (on the tab) reads t
   site's product list. Purplle pages carry the barcode, so a Purplle match is automatic only when it equals `bar_code` in the sheet.
   Anything uncertain waits in **Review matches** (confirm, reject or paste the link); decisions are kept.
 - **Our price** is the sheet's Selling Price / MRP. The hand-typed `Nykaa Price` / `Tira Price` / `Broadway Price` columns are not used.
-- **Nothing is written to Supabase**: prices are stored in `data/mi.duckdb` (`price_matches`, `price_snapshots`, `price_runs`, `price_index`),
-  which a data rebuild never drops.
+- **Storage**: prices are stored in `data/mi.duckdb` (`price_matches`, `price_snapshots`, `price_own`, `price_runs`, `price_index`),
+  which a data rebuild never drops. Optionally they are **shared between computers** through Supabase: see [docs/price-sync.md](docs/price-sync.md).
+  That is the only thing the dashboard ever writes to Supabase, it is off unless `PRICES_SUPABASE_KEY` is set, and the key only reaches the `mi_price_*` tables.
 - Pages are fetched with [Scrapling](https://github.com/D4Vinci/Scrapling) (`pip install -r requirements.txt`; no browser download is needed).
   When a site changes its pages, its pages fail with "layout not recognised" in the Refresh log: the readers are in `mi/price_sites.py`,
   and `tests/test_prices.py` checks them on saved pages (`tests/fixtures/prices`).

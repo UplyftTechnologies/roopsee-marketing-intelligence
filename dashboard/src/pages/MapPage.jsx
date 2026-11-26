@@ -8,6 +8,23 @@ const COLORS = { visits: '#3b82f6', checkouts: '#f59e0b', orders: '#16a34a' }
 const LAYER_LABEL = { visits: 'Visits', checkouts: 'Checkouts started', orders: 'Orders' }
 const SHADES = [['visits', 'Visits'], ['checkouts', 'Checkouts started'], ['orders', 'Orders'], ['checkout_rate', 'Checkout rate'], ['order_rate', 'Order rate'], ['revenue_per_visit', 'Revenue per visit']]
 const RATE = new Set(['checkout_rate', 'order_rate', 'revenue_per_visit'])
+const INDIA = [[6.5, 68], [37.2, 97.5]]
+
+/** Where to write a state's name: the middle of its biggest outline, and how big that is (small states are named only when zoomed in). */
+function labelSpot(feature) {
+  let best = { area: 0, at: null }
+  for (const poly of feature.geometry.coordinates) {
+    const ring = poly[0]
+    let a = 0; let x = 0; let y = 0
+    for (let i = 0; i < ring.length - 1; i += 1) {
+      const c = ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]
+      a += c; x += (ring[i][0] + ring[i + 1][0]) * c; y += (ring[i][1] + ring[i + 1][1]) * c
+    }
+    if (Math.abs(a) / 2 > best.area) best = { area: Math.abs(a) / 2, at: [y / (3 * a), x / (3 * a)] }
+  }
+  return best
+}
+
 const MIN_VISITS_FOR_RATE = 30  // a rate from a handful of visits is noise
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const shadeText = (k, v) => (k === 'checkout_rate' || k === 'order_rate' ? pct(v, 1) : k === 'revenue_per_visit' ? inr(v) : num(v))
@@ -29,9 +46,10 @@ function GeoMap({ areas, states, layers, shade, level, basis, focus, onOpen }) {
   open.current = onOpen
 
   useEffect(() => {
-    const m = L.map(el.current, { center: [22.5, 80], zoom: 5, minZoom: 3, zoomSnap: 0.5, worldCopyJump: false })
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }).addTo(m)
-    m.fitBounds([[7, 68], [35.5, 97.5]])
+    // only India: no background map of the world, just our own state outlines, and no panning or zooming away from the country
+    const m = L.map(el.current, { center: [22.5, 82], zoom: 5, zoomSnap: 0.25, maxZoom: 12, maxBounds: [[2, 60], [41, 105]], maxBoundsViscosity: 1, attributionControl: false })
+    m.fitBounds(INDIA)
+    m.setMinZoom(m.getZoom())
     bubbles.current = L.layerGroup().addTo(m)
     map.current = m
     return () => { m.remove(); map.current = null }
@@ -50,7 +68,7 @@ function GeoMap({ areas, states, layers, shade, level, basis, focus, onOpen }) {
       style: (f) => {
         const a = byState.get(f.properties.name)
         const t = max && eligible(a) ? (a[shade] || 0) / max : 0
-        return { color: '#64748b', weight: 0.8, opacity: 0.7, fillColor: '#2563eb', fillOpacity: level === 'state' ? 0.04 + 0.5 * t : 0.03 }
+        return { color: '#64748b', weight: 0.9, opacity: 0.85, fillColor: '#2563eb', fillOpacity: level === 'state' ? 0.07 + 0.5 * t : 0.06 }
       },
       onEachFeature: (f, layer) => {
         const a = byState.get(f.properties.name)
@@ -62,6 +80,25 @@ function GeoMap({ areas, states, layers, shade, level, basis, focus, onOpen }) {
     }).addTo(m)
     outlines.current.bringToBack()
   }, [states, areas, shade, level, basis])
+
+  // state names, written on the map itself
+  useEffect(() => {
+    const m = map.current
+    if (!m || !states) return undefined
+    const names = L.layerGroup().addTo(m)
+    const draw = () => {
+      names.clearLayers()
+      const zoomedIn = m.getZoom() >= 6
+      for (const f of states.features) {
+        const spot = labelSpot(f)
+        if (!spot.at || (!zoomedIn && spot.area < 4)) continue
+        L.marker(spot.at, { interactive: false, keyboard: false, icon: L.divIcon({ className: 'map-state', html: `<span>${esc(f.properties.name)}</span>`, iconSize: [0, 0] }) }).addTo(names)
+      }
+    }
+    draw()
+    m.on('zoomend', draw)
+    return () => { m.off('zoomend', draw); names.remove() }
+  }, [states])
 
   // circles: visits (blue, biggest) under checkouts (amber) under orders (green)
   useEffect(() => {
@@ -159,7 +196,7 @@ export default function MapPage() {
                   {delivery
                     ? 'Orders are the delivered orders of the Orders page, by delivery address. Only the few visitors who gave an address or pincode have a place, so visits and checkouts here are a small part of the total.'
                     : 'Every number comes from the same visits: where they browsed from (the IP address), and whether they started a checkout or ordered. A visitor in Mumbai may have it delivered elsewhere: switch to “Where orders are delivered” for that.'}
-                  {' '}The background map needs an internet connection; the circles do not. Outlines are for orientation only.
+                  {' '}Only India is drawn; outlines are for orientation only.
                   {level === 'state' && RATE.has(shade) ? ` States with fewer than ${MIN_VISITS_FOR_RATE} visits are not shaded by a rate.` : ''}
                 </div>
                 {(un.visits > 0 || un.orders > 0) && (

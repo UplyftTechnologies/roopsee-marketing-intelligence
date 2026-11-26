@@ -1,0 +1,7 @@
+{
+  "name": "price-sync-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "sql": "node test_sql.mjs", "bridge": "node bridge.mjs" },
+  "devDependencies": { "@electric-sql/pglite": "0.2.17" }
+}

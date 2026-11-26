@@ -9,6 +9,7 @@ slim       one-off: remove duplicated fields and tracking plumbing from stored e
 compact    shrink the database file after deleting data (stop the dashboard first)
 purge      python -m mi.cli purge 365 [--yes]   delete raw events older than N days (dry run unless --yes)
 prices     python -m mi.cli prices [nykaa|tira|purplle]   refresh competitor prices (same as the button on the Price intelligence tab)
+prices-check  check the shared price key (read only; docs/price-sync.md)
 
 NOTE: DuckDB allows a single writer. Stop `serve` before running extract/transform from the CLI,
 or just use the "Refresh data" button in the dashboard, which runs the same code inside the server.
@@ -85,6 +86,14 @@ def main(argv: list[str]) -> int:
             extract.purge_old_events(con, days, "--yes" in argv)
         finally:
             con.close()
+        return 0
+    if cmd == "prices-check":
+        from . import core, price_sync
+        try:
+            print(price_sync.check())
+        except (price_sync.Unreachable, price_sync.Refused) as e:
+            print(f"The key does not work: {e}")
+            return 1
         return 0
     if cmd == "prices":
         from . import core, prices

@@ -126,9 +126,11 @@ def extract_events(con, progress=None) -> int:
 OPTIONAL = {"raw_chat_logs"}
 
 
-def extract_small(con, progress=None) -> None:
+def extract_small(con, progress=None, only=None) -> None:
     sb = ReadOnlySupabase()
     for raw, (src, select_override) in SMALL_TABLES.items():
+        if only is not None and raw not in only:
+            continue
         schema = RAW_SCHEMAS[raw]
         if progress:
             progress(f"pulling {src}")

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { KEY_LABEL, dt, tod } from '../api'
 import { Badge, Card, Table } from '../ui'
 import { useQuickExclude } from '../shared'
@@ -94,17 +94,22 @@ function RawData({ e }) {
   const text = e.raw ? JSON.stringify(e.raw, null, 2) : ''
   const det = e.details || []
   return (
-    <div className="tl-all" style={{ display: 'block' }}>
-      <div className="chip-row" style={{ marginBottom: 6 }}>
+    <div className="ev-panel">
+      <div className="chip-row" style={{ marginBottom: 8 }}>
         {e.raw && <button type="button" className={`chip ${view === 'json' ? 'on' : ''}`} onClick={() => setView('json')}>JSON</button>}
         <button type="button" className={`chip ${view === 'plain' ? 'on' : ''}`} onClick={() => setView('plain')}>Readable</button>
         {e.raw && <CopyBtn text={text} title="Copy this event's JSON" />}
       </div>
       {view === 'json'
-        ? <pre className="mono" style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, maxHeight: 360, overflow: 'auto' }}>{text}</pre>
-        : det.length ? <dl style={{ margin: 0, display: 'grid', gap: 3 }}>{det.map((d) => <div key={d.k}><dt>{d.k}</dt><dd>{d.v}</dd></div>)}</dl> : <span className="muted">Nothing else was recorded.</span>}
+        ? <pre className="mono">{text}</pre>
+        : det.length ? <Pairs rows={det} /> : <span className="muted">Nothing else was recorded.</span>}
     </div>
   )
+}
+
+/** Name / value pairs, one per line. */
+function Pairs({ rows }) {
+  return <dl className="kv">{rows.map((d, i) => <Fragment key={`${d.k}-${i}`}><dt>{d.k}</dt><dd>{d.v}</dd></Fragment>)}</dl>
 }
 
 /** The session's events as a table, the way the roopsee.com admin analytics shows them: # · Time · Gap · Page · What happened · Detail, with group chips and counts. */
@@ -112,7 +117,7 @@ export function SessionEventsTable({ events, query, onQuery }) {
   const [cat, setCat] = useState('all')
   const [tech, setTech] = useState(true)
   const [own, setOwn] = useState('')
-  const [open, setOpen] = useState(new Set())
+  const [open, setOpen] = useState({})  // row number -> 'details' | 'raw'
   const q = query ?? own
   const setQ = onQuery ?? setOwn
   if (!events || !events.length) return <div className="empty">No events recorded</div>
@@ -127,14 +132,11 @@ export function SessionEventsTable({ events, query, onQuery }) {
   for (const r of all) counts[r.cat] = (counts[r.cat] || 0) + 1
   const words = norm(q).split(' ').filter(Boolean)
   const rows = all.filter((r) => (cat === 'all' || r.cat === cat) && (!words.length || matches(r.e, words)))
-  const toggle = (n) => setOpen((p) => { const nx = new Set(p); if (nx.has(n)) nx.delete(n); else nx.add(n); return nx })
-  const summary = (e) => {
-    if (e.search_term) return `“${e.search_term}”`
-    if (e.product_name) return `${e.product_name}${e.amount ? ` · ₹${e.amount}` : ''}`
-    const d = (e.details || [])[0]
-    if (d) return String(d.v).length > 70 ? `${String(d.v).slice(0, 67)}…` : d.v
-    return e.amount ? `₹${e.amount}` : '—'
-  }
+  const toggle = (n, what) => setOpen((p) => ({ ...p, [n]: p[n] === what ? null : what }))
+  const pairs = (e) => (e.params?.length ? e.params : e.details || [])
+  const button = (n, what, text) => (
+    <button type="button" className={`row-btn no-copy${open[n] === what ? ' on' : ''}`} onClick={() => toggle(n, what)} aria-expanded={open[n] === what}>{text}</button>
+  )
   return (
     <div>
       <div className="tl-tools">
@@ -143,28 +145,30 @@ export function SessionEventsTable({ events, query, onQuery }) {
         ))}
       </div>
       <div className="tl-tools">
-        <input className="field" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search events, e.g. address, add to cart…" aria-label="Search events" style={{ minWidth: 220 }} />
+        <input className="field search-field" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search events, e.g. address, add to cart…" aria-label="Search events" />
         <label className="toggle"><input type="checkbox" checked={tech} onChange={(e) => setTech(e.target.checked)} /> Show technical names</label>
         <span className="muted">{rows.length === all.length ? `${all.length} events` : `${rows.length} of ${all.length} events`}</span>
         {(words.length > 0 || cat !== 'all') && <button type="button" className="btn small" onClick={() => { setQ(''); setCat('all') }}>Clear</button>}
       </div>
-      <Table scroll rows={rows} empty="No event matches." rowClass={(r) => (r.e.event_key ? 'key-row' : '')} cols={[
+      <Table scroll rows={rows} empty="No event matches." rowClass={(r) => (r.e.event_key ? 'key-row' : '')}
+        expanded={(r) => (open[r.n] === 'raw' ? <RawData e={r.e} /> : open[r.n] === 'details' ? <div className="ev-panel"><Pairs rows={pairs(r.e)} /></div> : null)} cols={[
         { label: '#', cls: 'muted', render: (r) => r.n },
         { label: 'Time', cls: 'nw', render: (r) => tod(r.e.at) },
         { label: 'Gap', cls: 'nw muted', render: (r) => gapText(r.gap) },
         { label: 'Page', cls: 'nw', render: (r) => (r.e.page_type ? cap(r.e.page_type) : r.e.path ? <span className="mono">{pretty(r.e.path).slice(0, 24)}</span> : '–') },
         { label: 'What happened', render: (r) => (r.cat === 'roop' ? <span>💬 {tech ? <span className="mono"><b>{r.e.event_name}</b></span> : <b>Message to Roop</b>}</span>
           : tech ? <span className="mono"><b>{r.e.event_name}</b></span> : <b>{label(r.e)}</b>) },
-        { label: 'Score', num: true, render: (r) => (r.e.score != null ? <b title="Product match score">{r.e.score}</b> : r.e.score_note ? <span className="muted">{r.e.score_note}</span> : <span className="muted">–</span>) },
-        { label: 'Detail', render: (r) => {
-          const det = r.e.details || []
-          const ps = r.e.params || []
+        { label: 'Score', num: true, render: (r) => (r.e.score != null ? <b title={r.e.score_from ? `Not sent with this event: taken from the earlier ${r.e.score_from} of the same product in this visit` : 'Product match score'}>{r.e.score}{r.e.score_from ? <span className="muted">*</span> : null}</b> : r.e.score_note ? <span className="muted">{r.e.score_note}</span> : <span className="muted">–</span>) },
+        { label: 'Detail', cls: 'nw', render: (r) => {
+          const ps = pairs(r.e)
+          const raw = r.e.raw || (r.e.details || []).length > 0
+          if (!ps.length && !raw) return <span className="muted">–</span>
           return (
-            <div>
-              {ps.length ? <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>{ps.slice(0, 4).map((p) => <span key={p.k} className="chip" style={{ cursor: 'default', maxWidth: 220 }} title={`${p.k}: ${p.v}`}><span className="muted">{p.k}:</span> <span className="trunc" style={{ display: 'inline-block', maxWidth: 130, verticalAlign: 'bottom' }}>{p.v}</span></span>)}{ps.length > 4 && <span className="muted">+{ps.length - 4} more</span>}</span> : <span>{summary(r.e)}</span>}
-              {(det.length > 0 || r.e.raw) && <> <button type="button" className="link-btn" onClick={() => toggle(r.n)} aria-expanded={open.has(r.n)} style={{ background: 'none', border: 0, color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit' }}>{open.has(r.n) ? 'hide data' : 'raw data'}</button></>}
-              {open.has(r.n) && <RawData e={r.e} />}
-            </div>
+            <span className="row-btns">
+              {ps.length > 0 && button(r.n, 'details', 'Details')}
+              {raw && button(r.n, 'raw', 'Raw data')}
+              <span hidden>{ps.map((p) => `${p.k}: ${p.v}`).join('; ')}</span>
+            </span>
           )
         } },
       ]} />

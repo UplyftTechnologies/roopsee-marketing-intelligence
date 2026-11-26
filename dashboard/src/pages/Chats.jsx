@@ -121,7 +121,48 @@ export default function Chats() {
   )
 }
 
+const shopperName = (g) => g.name || g.phone10 || (g.kind === 'account' ? `Shopper ${short(g.user_id)}` : g.kind === 'browser' ? `Browser ${short(g.visitor_id)}` : 'Guest')
+
+/** One row per returning shopper; a click opens their chats underneath. */
+function Returning({ groups, total, open, setOpen }) {
+  const [shown, setShown] = useState(() => new Set())
+  const toggle = (k) => setShown((x) => { const n = new Set(x); if (n.has(k)) n.delete(k); else n.add(k); return n })
+  if (!groups.length) return <div className="muted" style={{ marginBottom: 10 }}>No returning shopper matches in these dates.</div>
+  return (
+    <div className="returning">
+      <div className="muted" style={{ fontSize: 12 }}>Returning shoppers ({num(total)}): two or more chats, grouped by account, or by browser (visitor id) when they never logged in</div>
+      {groups.map((g) => {
+        const isOpen = shown.has(g.key)
+        return (
+          <div key={g.key} className="ret-group">
+            <button type="button" className="ret-head" aria-expanded={isOpen} onClick={() => toggle(g.key)}>
+              <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+              <b>{shopperName(g)}</b>
+              <Badge tone={g.kind === 'account' ? 'good' : ''}>{g.kind === 'account' ? 'logged in' : g.kind === 'browser' ? 'same browser' : 'guest'}</Badge>
+              <span>{num(g.n_chats)} chats · {num(g.messages)} messages</span>
+              <span className="muted">{dt(g.first_at)} → {dt(g.last_at)}{g.thumbs_up ? ` · 👍 ${g.thumbs_up}` : ''}{g.thumbs_down ? ` · 👎 ${g.thumbs_down}` : ''}{g.failed ? ` · ${g.failed} failed` : ''}</span>
+            </button>
+            {isOpen && (
+              <div className="ret-chats">
+                <div className="muted mono" style={{ fontSize: 11.5 }}>{g.user_id ? `user ${g.user_id}` : ''}{g.visitor_id ? ` · browser ${g.visitor_id}` : ''}</div>
+                {g.chats.map((c) => (
+                  <button key={c.key} type="button" className={`ret-chat ${open === c.key ? 'on' : ''}`} onClick={() => setOpen(c.key)}>
+                    <span className="nw">{dt(c.updated_at)}</span>
+                    <span className="trunc" title={c.questions[0]}>“{c.questions[0]}”</span>
+                    <span className="muted nw">{c.messages} msg{c.messages === 1 ? '' : 's'}{c.city ? ` · ${c.city}` : ''}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function Conversations({ d, open, setOpen, view, setView, text, setText, f }) {
+  const [grouped, setGrouped] = usePersisted('chats.grouped', true)
   const all = d.conversations
   const counts = useMemo(() => Object.fromEntries(VIEWS.map(([k, , test]) => [k, test ? all.filter(test).length : all.length])), [all])
   const list = useMemo(() => {
@@ -129,6 +170,12 @@ function Conversations({ d, open, setOpen, view, setView, text, setText, f }) {
     const q = text.trim().toLowerCase()
     return all.filter((c) => (!test || test(c)) && (!q || [c.product_name, c.user_id, c.key, c.visitor_id, c.guest_session_id, c.ip, c.city, c.channel, ...(c.sessions || []), ...c.questions].some((v) => String(v || '').toLowerCase().includes(q))))
   }, [all, view, text])
+  const groups = useMemo(() => {  // a shopper shows when any of their chats passes the chosen view and the search
+    const test = VIEWS.find(([k]) => k === view)?.[2]
+    const q = text.trim().toLowerCase()
+    return (d.returning || []).filter((g) => g.chats.some((c) => (!test || test(c)) && (!q || [g.name, g.phone10, g.user_id, g.visitor_id, c.product_name, c.key, c.guest_session_id, c.ip, c.city, c.channel, ...(c.sessions || []), ...c.questions].some((v) => String(v || '').toLowerCase().includes(q)))))
+  }, [d.returning, view, text])
+  const rows = grouped ? list.filter((c) => !c.returning) : list
   return (
     <div className="grid g2">
       <Card title="Conversations" sub={d.conversations_total > all.length ? `The latest ${num(all.length)} of ${num(d.conversations_total)}. Pick fewer days to see the rest.` : 'click one to read it'}
@@ -138,7 +185,10 @@ function Conversations({ d, open, setOpen, view, setView, text, setText, f }) {
           <Search value={text} onChange={setText} placeholder="Filter: question, product, user, session, browser id, city or IP" />
           {VIEWS.map(([k, label]) => <button key={k} type="button" className={`chip ${view === k ? 'on' : ''}`} onClick={() => setView(k)}>{label} ({num(counts[k])})</button>)}
         </div>
-        <Table scroll onRow={(c) => setOpen(c.key)} rowClass={(c) => (open === c.key ? 'active' : '')} rows={list} empty="No chats match." cols={[
+        <label className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}><input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> Group returning shoppers</label>
+        {grouped && <Returning groups={groups} total={d.returning_total || 0} open={open} setOpen={setOpen} />}
+        {grouped && <div className="muted" style={{ fontSize: 12, margin: '10px 0 4px' }}>Shoppers with one chat</div>}
+        <Table scroll onRow={(c) => setOpen(c.key)} rowClass={(c) => (open === c.key ? 'active' : '')} rows={rows} empty="No chats match." cols={[
           { label: 'Last message', cls: 'nw', sortBy: 'updated_at', render: (c) => dt(c.updated_at) },
           { label: 'Shopper', cls: 'nw', sortBy: 'user_id', render: (c) => (c.user_id ? <><b>Shopper {short(c.user_id)}</b> <Badge tone="good">logged in</Badge></> : 'Guest') },
           { label: 'First question', render: (c) => <span className="trunc" style={{ display: 'block', maxWidth: 260 }} title={c.questions[0]}>“{c.questions[0]}”</span> },

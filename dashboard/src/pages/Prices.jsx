@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { api, day, dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { api, dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Search, Table, axis, chartTip } from '../ui'
 
 /** Price intelligence: our catalogue against the live regular prices on Nykaa, Tira and Purplle. Backend: mi/prices.py, mi/price_sites.py */
@@ -17,18 +17,51 @@ const age = (t) => {
 }
 const thumb = (img) => { const s = String(img || '').split(/[,\s]+/).find((x) => x.startsWith('http')); return s || null }
 
-/** One competitor's price in a table cell: price, MRP, discount, stock, Nykaa's offer price as a note, and a link to the page. */
+const STATE_TEXT = { priced: 'Priced', review: 'To review', not_available: 'Not available', unchecked: 'Not checked' }
+
+/** One competitor's price in a table cell: price, MRP, discount, Nykaa's offer price as a note, and a link to the page. Without a price: why. */
 function SiteCell({ v, ours }) {
-  if (!v) return <span className="muted">not matched</span>
-  if (v.price == null && v.in_stock !== false) return <span className="muted" title="matched, not read yet: press Refresh prices">–</span>
+  if (v?.state === 'review') return <Badge tone="warn" title="A possible match is waiting for you in Review matches">To review</Badge>
+  if (v?.state === 'not_available') return <span className="muted" title="Not found on this site, marked as not sold there, or no price shown">Not available</span>
+  if (v?.state !== 'priced') return <span className="muted" title="Not looked for or not read yet: press Refresh prices">Not checked</span>
   return (
     <div style={{ lineHeight: 1.3, minWidth: 92 }}>
-      {v.in_stock === false ? <Badge tone="warn">out of stock</Badge> : (
-        <b style={{ color: ours && v.price ? (ours > v.price * 1.01 ? 'var(--critical)' : ours < v.price * 0.99 ? 'var(--good)' : undefined) : undefined }}>{inr(v.price)}</b>
-      )}
+      <b style={{ color: ours && v.price ? (ours > v.price * 1.01 ? 'var(--critical)' : ours < v.price * 0.99 ? 'var(--good)' : undefined) : undefined }}>{inr(v.price)}</b>
       {v.mrp && v.price && v.mrp > v.price && <span className="muted" style={{ fontSize: 11 }}> <s>{inr(v.mrp)}</s> {pct(v.discount, 0)} off</span>}
       {v.offer_price && <div className="muted" style={{ fontSize: 11 }} title="Nykaa's price for some customers only (e.g. a first order); not used in the comparison">offer {inr(v.offer_price)}</div>}
-      <div style={{ fontSize: 11 }}><a href={v.url} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}>open ↗</a> <span className="muted">{age(v.checked)}</span></div>
+      <div style={{ fontSize: 11 }}><a href={v.url} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}>open ↗</a>{' '}
+        <span className="muted" title={v.earlier ? 'The latest read gave no price, so this is the last one we saw' : undefined}>{v.earlier ? `price from ${dt(v.checked)}` : age(v.checked)}</span></div>
+    </div>
+  )
+}
+
+/** With sharing on: who this computer is, when it last synced, who else is refreshing, and the first upload. */
+function Sharing({ st, onChange }) {
+  const sh = st.sharing || {}
+  const [busy, setBusy] = useState('')
+  const [msg, setMsg] = useState('')
+  const call = async (what, path, text) => {
+    setBusy(what); setMsg('')
+    try { const r = await api(path, { method: 'POST' }); if (text) setMsg(text(r)) } catch (e) { setMsg(e.message) }
+    setBusy(''); onChange()
+  }
+  if (!sh.enabled) return <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Prices are kept on this computer only. To share them between computers, see docs/price-sync.md.</div>
+  const upload = () => {
+    if (!window.confirm(`Send this computer’s earlier price history to Supabase (${num(sh.history)} readings and ${num(sh.history_matches)} matches)? Everyone with the shared key will see it. The key cannot delete it afterwards.`)) return
+    call('upload', '/prices/upload', (r) => `Uploaded ${num(r.readings)} readings and ${num(r.matches)} matches${r.kept_theirs ? ` (${num(r.kept_theirs)} matches already had a newer or personal decision there)` : ''}.`)
+  }
+  const others = sh.holder && !st.job.running
+  return (
+    <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+      <div className="chip-row" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <Badge tone={sh.error ? 'warn' : 'good'}>shared through Supabase</Badge>
+        <span className="muted" style={{ fontSize: 12 }}>this computer is “{sh.me}” · {sh.last_sync ? `last synced ${dt(sh.last_sync)}` : 'not synced yet'}{sh.waiting ? ` · ${num(sh.waiting)} waiting to be sent` : ''}</span>
+        <button type="button" className="btn small" disabled={!!busy} onClick={() => call('sync', '/prices/sync', (r) => (r.ok === false ? r.error : ''))}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
+        {(sh.history > 0 || sh.history_matches > 0) && <button type="button" className="btn small" disabled={!!busy || st.job.running} onClick={upload}>{busy === 'upload' ? 'Uploading…' : `Upload this computer’s history (${num(sh.history)} readings)`}</button>}
+      </div>
+      {others && <div className="banner" style={{ margin: 0 }}><b>{sh.holder}</b>&nbsp;is refreshing prices{sh.holder_since ? ` since ${dt(sh.holder_since)}` : ''}. Press Sync now to see their results.</div>}
+      {sh.error && <div className="banner err" style={{ margin: 0 }}>{sh.error}</div>}
+      {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
     </div>
   )
 }
@@ -37,13 +70,21 @@ function RefreshBar({ st, onChange }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const job = st.job
-  const go = async (path) => { setBusy(true); setErr(''); try { await api(path, { method: 'POST' }); onChange() } catch (e) { setErr(e.message) } setBusy(false) }
+  const go = async (path, params) => { setBusy(true); setErr(''); try { await api(path, { method: 'POST', params }); onChange() } catch (e) { setErr(e.message) } setBusy(false) }
   const last = st.last_run
+  const refresh = (params) => {  // shared: ask before repeating a refresh someone finished a short while ago
+    const hours = last?.finished_at ? (Date.now() - new Date(last.finished_at).getTime()) / 36e5 : null
+    if (st.sharing?.enabled && last?.status?.startsWith('done') && hours != null && hours < 6 && !window.confirm(`Prices were refreshed ${age(last.finished_at)}${last.host ? ` by ${last.host}` : ''}. Refresh again?`)) return
+    go('/prices/refresh', params)
+  }
   return (
     <Card title="Competitor prices" sub="Nykaa, Tira and Purplle product pages, read one page at a time per site with a pause in between (a refresh takes about 15–20 minutes; the first one takes longer, because it also finds every product on each site)"
       right={job.running
         ? <button type="button" className="btn danger" onClick={() => go('/prices/stop')} disabled={busy || job.stop}>{job.stop ? 'Stopping…' : 'Stop'}</button>
-        : <button type="button" className="btn primary" onClick={() => go('/prices/refresh')} disabled={busy || st.needs_pull}>↻ Refresh prices</button>}>
+        : <span className="chip-row">
+          <button type="button" className="btn" onClick={() => refresh({ recheck: true })} disabled={busy || st.needs_pull} title="Refresh prices, and also search again for everything not available or waiting for review (your own decisions are kept)">Search again + refresh</button>
+          <button type="button" className="btn primary" onClick={() => refresh()} disabled={busy || st.needs_pull}>↻ Refresh prices</button>
+        </span>}>
       {st.needs_pull && <div className="banner err" style={{ margin: 0 }}>The product sheet was pulled by an older version. Press <b>Refresh</b> (top right) once, then refresh prices.</div>}
       {err && <div className="banner err" style={{ margin: '0 0 8px' }}>{err}</div>}
       <div className="price-sites">
@@ -57,7 +98,7 @@ function RefreshBar({ st, onChange }) {
                 <div className="price-progress" title={`${p.done} of ${p.total}`}><i style={{ width: `${Math.round((p.done / p.total) * 100)}%` }} /></div>
               )}
               <div className="muted" style={{ fontSize: 12 }}>
-                {p ? `${num(p.done)} / ${num(p.total)} · ${num(p.ok)} read${p.failed ? ` · ${num(p.failed)} failed` : ''}` : `${num(s.matched)} matched · ${num(s.review)} to review · ${num(s.not_found)} not found`}
+                {p ? `${num(p.done)} / ${num(p.total)} · ${num(p.ok)} read${p.failed ? ` · ${num(p.failed)} failed` : ''}` : `${num(s.matched)} matched · ${num(s.review)} to review · ${num(s.not_found)} not available`}
               </div>
               {p?.error && <div style={{ fontSize: 12, color: 'var(--critical)' }}>{p.error}</div>}
             </div>
@@ -69,6 +110,7 @@ function RefreshBar({ st, onChange }) {
           : last ? `Last refresh ${dt(last.finished_at || last.started_at)} (${age(last.finished_at || last.started_at)}): ${last.status}${last.message ? ` · ${last.message}` : ''}` : 'Prices have never been refreshed. Press Refresh prices.'}
         {' '}Our prices are the Selling Price and MRP of the product sheet (master_products). Competitor prices are their regular prices.
       </div>
+      <Sharing st={st} onChange={onChange} />
     </Card>
   )
 }
@@ -79,6 +121,7 @@ function Comparison({ rows, f }) {
   const [pos, setPos] = usePersisted('prices.pos', '')
   const [active, setActive] = usePersisted('prices.active', false)
   const [hist, setHist] = useState(null)
+  const closeHist = useCallback(() => setHist(null), [])
   const brands = useMemo(() => [...new Set(rows.map((r) => r.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [rows])
   const shown = rows.filter((r) => (!brand || r.brand === brand) && (!pos || r.position === pos) && (!active || r.views || r.orders)
     && (!search || `${r.name} ${r.brand} ${r.product_id}`.toLowerCase().includes(search.toLowerCase())))
@@ -107,44 +150,90 @@ function Comparison({ rows, f }) {
         <Chips value={pos} onChange={setPos} options={[{ value: '', label: 'All' }, { value: 'dearer', label: 'We are dearer' }, { value: 'cheaper', label: 'We are cheapest' }, { value: 'same', label: 'Same price' }, { value: 'no_data', label: 'No competitor price' }]} />
         <label className="muted" style={{ fontSize: 12 }}><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Viewed or sold in these dates</label>
       </div>
-      <Card title={`${num(shown.length)} products`} sub="the latest regular price on each site (red = cheaper than us, green = dearer) · our gap = our price against the cheapest in-stock competitor · views and orders are ours, in the dates at the top · click a row for its price history"
+      <Card title={`${num(shown.length)} products`} sub="the latest regular price on each site (red = cheaper than us, green = dearer) · our gap = our price against the cheapest competitor price · views and orders are ours, in the dates at the top · click a product to see its price history graph"
         right={<ExportBtn name="price-comparison" rows={shown} fields={[['Product id', 'product_id'], ['Product', 'name'], ['Brand', 'brand'], ['Size', 'size'], ['Our price', 'our_price'], ['Our MRP', 'our_mrp'],
-          ...SITES.flatMap(([k, l]) => [[`${l} price`, (r) => r.sites[k]?.price ?? ''], [`${l} MRP`, (r) => r.sites[k]?.mrp ?? ''], [`${l} in stock`, (r) => (r.sites[k] ? (r.sites[k].in_stock ? 'yes' : 'no') : '')], [`${l} link`, (r) => r.sites[k]?.url ?? '']]),
+          ...SITES.flatMap(([k, l]) => [[`${l} price`, (r) => r.sites[k]?.price ?? ''], [`${l} MRP`, (r) => r.sites[k]?.mrp ?? ''], [`${l} status`, (r) => STATE_TEXT[r.sites[k]?.state] || ''], [`${l} link`, (r) => r.sites[k]?.url ?? '']]),
           ['Cheapest site', 'cheapest_site'], ['Cheapest price', 'cheapest_price'], ['Our gap', 'gap'], ['Views', 'views'], ['Orders', 'orders'], ['Revenue', 'revenue']]} />}>
         <Table id="prices-compare" scroll rows={shown} cols={cols} onRow={(r) => setHist(r)} empty="No product matches these filters." />
       </Card>
-      {hist && <History product={hist} onClose={() => setHist(null)} />}
+      {hist && <History product={hist} onClose={closeHist} />}
     </>
   )
 }
 
+/** The pop-up of one product: what each shop asks now, and the graph of every price read, one step per refresh. */
 function History({ product, onClose }) {
   const s = useApi('/prices/history', { product_id: product.product_id }, { scoped: false })
+  useEffect(() => {
+    const key = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', key)
+    const was = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', key); document.body.style.overflow = was }
+  }, [onClose])
+  const name = (k) => (k === 'ours' ? 'Roopsee' : SITES.find(([x]) => x === k)?.[1] || k)
   return (
-    <Card title={`Price history: ${product.name}`} sub={`our price today ${inr(product.our_price)} · one point per day and site (the last reading of the day)`} right={<button type="button" className="btn small" onClick={onClose}>Close</button>}>
-      <Loading state={s}>
-        {(d) => {
-          const days = [...new Set(d.points.map((p) => String(p.day)))].sort()
-          const data = days.map((x) => ({ day: x, ours: product.our_price, ...Object.fromEntries(SITES.map(([k]) => [k, d.points.find((p) => p.site === k && String(p.day) === x)?.price ?? null])) }))
-          if (!data.length) return <div className="muted">No readings yet. Press Refresh prices.</div>
-          return (
-            <div style={{ height: 240 }}>
-              <ResponsiveContainer>
-                <LineChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
-                  <CartesianGrid stroke="var(--grid)" vertical={false} />
-                  <XAxis dataKey="day" tickFormatter={day} {...axis} />
-                  <YAxis {...axis} width={56} tickFormatter={(v) => `₹${num(v)}`} domain={['auto', 'auto']} />
-                  <Tooltip {...chartTip} labelFormatter={day} formatter={(v, n) => [inr(v), n === 'ours' ? 'Roopsee (today)' : SITES.find(([k]) => k === n)?.[1] || n]} />
-                  <Legend formatter={(n) => (n === 'ours' ? 'Roopsee (today)' : SITES.find(([k]) => k === n)?.[1] || n)} />
-                  <Line dataKey="ours" stroke="var(--text-muted)" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
-                  {SITES.map(([k]) => <Line key={k} dataKey={k} stroke={COLOR[k]} connectNulls dot isAnimationActive={false} />)}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )
-        }}
-      </Loading>
-    </Card>
+    <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="card modal" role="dialog" aria-modal="true" aria-label={`Price history of ${product.name}`}>
+        <div className="row-between" style={{ alignItems: 'flex-start', gap: 12, padding: 0 }}>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>{product.name}</h3>
+            <div className="muted" style={{ fontSize: 12 }}>{product.brand}{product.size ? ` · ${product.size}` : ''}</div>
+          </div>
+          <button type="button" className="btn small" onClick={onClose} autoFocus>Close ✕</button>
+        </div>
+        <div className="chip-row" style={{ margin: '12px 0', gap: 8, flexWrap: 'wrap' }}>
+          <span className="price-now"><i style={{ background: 'var(--text-primary)' }} /> Roopsee <b>{inr(product.our_price)}</b></span>
+          {SITES.map(([k, label]) => {
+            const v = product.sites[k]
+            return (
+              <span key={k} className="price-now"><i style={{ background: COLOR[k] }} /> {label}{' '}
+                {v?.state === 'priced' ? <><b>{inr(v.price)}</b> <Badge tone={gapTone(v.gap)}>{gapText(v.gap)}</Badge> <a href={v.url} target="_blank" rel="noreferrer noopener">open ↗</a></> : <span className="muted">{STATE_TEXT[v?.state] || 'Not checked'}</span>}
+              </span>
+            )
+          })}
+        </div>
+        <Loading state={s}>
+          {(d) => {
+            const steps = new Map()  // one row of the graph per refresh: our price and each shop's
+            const step = (p) => {
+              const key = p.run ?? p.day
+              if (!steps.has(key)) steps.set(key, { at: p.run_at || p.at || p.day })
+              return steps.get(key)
+            }
+            for (const p of d.points) step(p)[p.site] = p.price
+            for (const p of d.own || []) step(p).ours = p.price
+            const data = [...steps.values()].sort((a, b) => String(a.at).localeCompare(String(b.at)))
+            if (!data.length) return <div className="empty">No price has been read for this product yet. Press <b>Refresh prices</b>.</div>
+            const hasOwn = data.some((x) => x.ours != null)
+            const all = [...data.flatMap((x) => [x.ours, ...SITES.map(([k]) => x[k])]), product.our_price].filter((v) => v != null)
+            const pad = Math.max(5, (Math.max(...all) - Math.min(...all)) * 0.15)
+            return (
+              <>
+                <div style={{ height: 320 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={data} margin={{ left: 0, right: 20, top: 10, bottom: 0 }}>
+                      <CartesianGrid stroke="var(--grid)" vertical={false} />
+                      <XAxis dataKey="at" tickFormatter={dt} {...axis} padding={{ left: 16, right: 16 }} />
+                      <YAxis {...axis} width={60} tickFormatter={(v) => `₹${num(v)}`} domain={[Math.max(0, Math.floor(Math.min(...all) - pad)), Math.ceil(Math.max(...all) + pad)]} />
+                      <Tooltip {...chartTip} labelFormatter={dt} formatter={(v, n) => [inr(v), name(n)]} />
+                      <Legend formatter={name} />
+                      {!hasOwn && product.our_price != null && <ReferenceLine y={product.our_price} stroke="var(--text-primary)" strokeDasharray="5 4" label={{ value: 'our price today', position: 'insideTopLeft', fontSize: 11, fill: 'var(--text-muted)' }} />}
+                      {hasOwn && <Line dataKey="ours" stroke="var(--text-primary)" strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 3 }} connectNulls isAnimationActive={false} />}
+                      {SITES.map(([k]) => <Line key={k} dataKey={k} stroke={COLOR[k]} strokeWidth={2} dot={{ r: 3.5 }} connectNulls isAnimationActive={false} />)}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  One point per price refresh ({num(data.length)} so far). Shop prices are their regular prices.
+                  {data.length < 2 ? ' The lines appear after the next refresh.' : ''}{!hasOwn ? ' Our own price is recorded from the next refresh on; until then the dashed line is today’s.' : ''}
+                </div>
+              </>
+            )
+          }}
+        </Loading>
+      </div>
+    </div>
   )
 }
 
@@ -169,12 +258,12 @@ function Analysis() {
               <Kpi label="Products compared" value={num(k.compared)} note={`of ${num(k.products)} in the product sheet`} />
               <Kpi label="We are cheapest (or equal)" value={pct(k.cheapest_share, 0)} note={`${num(k.cheaper)} cheaper · ${num(k.same)} same`} />
               <Kpi label="We are dearer" value={num(k.dearer)} note={`${num(k.dearer_10)} by more than 10%`} />
-              <Kpi label="Typical gap" value={gapText(k.median_gap)} note="our price against the cheapest in-stock competitor (median)" />
+              <Kpi label="Typical gap" value={gapText(k.median_gap)} note="our price against the cheapest competitor (median)" />
             </div>
-            <Card title="Against each site" sub="products matched and read on each site · gap = our price against that site's (median) · discount = (MRP − price) / MRP on the same products">
+            <Card title="Against each site" sub="products priced on each site · gap = our price against that site's (median) · discount = (MRP − price) / MRP on the same products">
               <Table id="prices-sites" rows={d.sites} cols={[
-                { label: 'Site', key: 'label' }, { label: 'Matched', num: true, render: (r) => num(r.matched) }, { label: 'In stock', num: true, render: (r) => num(r.in_stock) },
-                { label: 'Out of stock', num: true, render: (r) => num(r.out_of_stock) }, { label: 'Our typical gap', num: true, render: (r) => <Badge tone={gapTone(r.median_gap)}>{gapText(r.median_gap)}</Badge> },
+                { label: 'Site', key: 'label' }, { label: 'Priced', num: true, render: (r) => num(r.priced) }, { label: 'To review', num: true, render: (r) => num(r.review) },
+                { label: 'Not available', num: true, render: (r) => num(r.not_available) }, { label: 'Not checked', num: true, hidden: true, render: (r) => num(r.unchecked) }, { label: 'Our typical gap', num: true, render: (r) => <Badge tone={gapTone(r.median_gap)}>{gapText(r.median_gap)}</Badge> },
                 { label: 'We are dearer', num: true, render: (r) => num(r.we_dearer) }, { label: 'We are cheaper', num: true, render: (r) => num(r.we_cheaper) },
                 { label: 'Their discount', num: true, render: (r) => pct(r.their_discount, 0) }, { label: 'Our discount', num: true, render: (r) => pct(r.our_discount, 0) },
                 { label: 'With an offer price', num: true, hidden: true, render: (r) => num(r.with_offer) }]} />
@@ -203,15 +292,11 @@ function Analysis() {
                   { label: 'We are dearer', num: true, render: (r) => num(r.dearer) }]} />
               </Card>
             </div>
-            <div className="grid g2">
-              <Card title="Out of stock elsewhere" sub="a competitor has run out: a chance to promote these">
-                <Table id="prices-oos" scroll rows={d.out_of_stock_elsewhere} empty="Every matched competitor page is in stock." cols={productCols([
-                  { label: 'Out of stock at', render: (r) => r.out_of_stock_at.map((x) => SITES.find(([k]) => k === x)?.[1]).join(', ') }, { label: 'Views', num: true, sortBy: 'views', render: (r) => num(r.views) }])} />
-              </Card>
-              <Card title="What changed since the previous reading" sub="price or stock changes between the last two readings of a product on a site, biggest first">
+            <div>
+              <Card title="What changed since the previous reading" sub="price changes between the last two prices read for a product on a site, biggest first">
                 <Table id="prices-changes" scroll rows={d.changes} empty="No change yet (it needs two refreshes)." cols={[
                   { label: 'Product', render: (r) => <div className="trunc" style={{ maxWidth: 260 }} title={r.name}>{r.name}</div> }, { label: 'Site', key: 'site_label' },
-                  { label: 'Before', num: true, render: (r) => (r.before_stock === false ? 'out of stock' : inr(r.before_price)) }, { label: 'Now', num: true, render: (r) => (r.now_stock === false ? 'out of stock' : inr(r.now_price)) },
+                  { label: 'Before', num: true, render: (r) => inr(r.before_price) }, { label: 'Now', num: true, render: (r) => inr(r.now_price) },
                   { label: 'Change', num: true, sortBy: (r) => r.change ?? null, render: (r) => (r.change == null ? '–' : <Badge tone={r.change < 0 ? 'bad' : 'good'}>{gapText(r.change)}</Badge>) },
                   { label: 'Seen', cls: 'nw', render: (r) => dt(r.fetched_at) }]} />
               </Card>
@@ -232,7 +317,15 @@ function Review({ onChange }) {
   const s = useApi('/prices/review', { site: site || undefined, status, rev }, { scoped: false })
   const act = async (r, action, url) => {
     setErr('')
-    try { await api('/prices/match', { method: 'POST', body: { product_id: r.product_id, site: r.site, action, url } }); setRev((x) => x + 1); onChange() } catch (e) { setErr(e.message) }
+    try { await api('/prices/match', { method: 'POST', body: { product_id: r.product_id, site: r.site, action, url, version: r.version } }) } catch (e) { setErr(e.message) }
+    setRev((x) => x + 1); onChange()  // also after a refusal: the list then shows what the others decided
+  }
+  const sure = (r) => { const c = r.candidates?.[0]; return c && !c.note && c.page_name && c.score >= 0.85 && (c.page_size || c.size) === 'same' }
+  const confirmAll = async (list) => {
+    if (!window.confirm(`Confirm the first suggestion of ${list.length} products (same size, name match 85% or more)? Check a few of them first: confirmed matches are not guessed again.`)) return
+    setErr('')
+    try { for (const r of list) await api('/prices/match', { method: 'POST', body: { product_id: r.product_id, site: r.site, action: 'confirm', url: r.candidates[0].url, version: r.version } }) } catch (e) { setErr(e.message) }
+    setRev((x) => x + 1); onChange()
   }
   return (
     <>
@@ -243,7 +336,8 @@ function Review({ onChange }) {
       {err && <div className="banner err">{err}</div>}
       <Loading state={s}>
         {(d) => (
-          <Card title={`${num(d.rows.length)} ${status === 'review' ? 'matches to check' : status === 'none' ? 'products not found' : status === 'rejected' ? 'rejected' : 'matched'}`}
+          <Card right={status === 'review' && d.rows.some(sure) ? <button type="button" className="btn small" onClick={() => confirmAll(d.rows.filter(sure))}>Confirm {num(d.rows.filter(sure).length)} strong matches</button> : null}
+            title={`${num(d.rows.length)} ${status === 'review' ? 'matches to check' : status === 'none' ? 'products not found' : status === 'rejected' ? 'rejected' : 'matched'}`}
             sub={status === 'review' ? 'we are not sure these are the same product (name or size do not fully agree): confirm the right one, reject it, or paste the right link. Your decision is kept and never guessed again.'
               : status === 'none' ? 'no page with the same brand, name and size was found; paste the link if the site sells it (it is looked for again after a week)'
                 : status === 'matched' ? 'how each match was made: link in the sheet, barcode (Purplle), name and size, or you' : 'pages you said are not our product; clear one to let it be found again'}>
@@ -253,7 +347,7 @@ function Review({ onChange }) {
                   const key = `${r.product_id}|${r.site}`
                   return (
                     <div key={key} className="review-row">
-                      <div className="review-ours"><Badge>{r.site_label}</Badge> <b>{r.name}</b><div className="muted" style={{ fontSize: 12 }}>{r.brand}{r.size ? ` · ${r.size}` : ''} · ours {inr(r.our_price)}</div></div>
+                      <div className="review-ours"><Badge>{r.site_label}</Badge> <b>{r.name}</b><div className="muted" style={{ fontSize: 12 }}>{r.brand}{r.size ? ` · ${r.size}` : ''} · ours {inr(r.our_price)}{r.updated_by ? ` · last changed by ${r.updated_by}` : ''}</div></div>
                       <div className="review-cands">
                         {status === 'matched' ? (
                           <div className="review-cand"><a href={r.url} target="_blank" rel="noreferrer noopener">{r.matched_name || r.url}</a> <span className="muted">· {r.method === 'sheet' ? 'link in the sheet' : r.method === 'you' ? 'set by you' : r.method === 'barcode' ? 'same barcode' : `name and size (${pct(r.confidence, 0)})`}</span>
@@ -261,7 +355,7 @@ function Review({ onChange }) {
                         ) : (r.candidates || []).filter((c) => c.page_name || status === 'review').slice(0, 3).map((c) => (
                           <div key={c.url} className="review-cand">
                             <a href={c.url} target="_blank" rel="noreferrer noopener">{c.page_name || c.url.replace(/^https:\/\/[^/]+/, '')}</a>
-                            <span className="muted"> · {pct(c.score, 0)} name match · size {c.page_size || c.size}{c.price ? ` · ${inr(c.price)}` : ''}{c.in_stock === false ? ' · out of stock' : ''}</span>
+                            <span className="muted"> · {pct(c.score, 0)} name match · size {c.page_size || c.size}{c.price ? ` · ${inr(c.price)}` : ''}</span>
                             {c.note && <Badge tone="warn" title="This page does not sell our size, so its price is not compared until you decide">{c.note}</Badge>}
                             {status !== 'rejected' && <><button type="button" className="btn small primary" onClick={() => act(r, 'confirm', c.url)}>Same product</button>
                               <button type="button" className="btn small" onClick={() => act(r, 'reject', c.url)}>Not it</button></>}
@@ -271,6 +365,7 @@ function Review({ onChange }) {
                           <form className="chip-row" onSubmit={(e) => { e.preventDefault(); act(r, 'link', paste[key]) }}>
                             <input className="field" style={{ flex: 1, minWidth: 260 }} placeholder={`Paste the ${r.site_label} product link…`} value={paste[key] || ''} onChange={(e) => setPaste({ ...paste, [key]: e.target.value })} />
                             <button type="submit" className="btn small" disabled={!paste[key]}>Use this link</button>
+                            {status !== 'rejected' && <button type="button" className="btn small" onClick={() => act(r, 'notsold')} title="Shows “Not available” and stops looking for it on this site">Not sold here</button>}
                             {status === 'rejected' && <button type="button" className="btn small" onClick={() => act(r, 'clear')}>Look again</button>}
                           </form>
                         )}
@@ -295,7 +390,7 @@ function Log() {
         <>
           <Card title="Refresh runs" sub="every Refresh prices run, newest first">
             <Table id="prices-runs" rows={d.runs} empty="No run yet." cols={[
-              { label: 'Started', cls: 'nw', render: (r) => dt(r.started_at) }, { label: 'Finished', cls: 'nw', render: (r) => (r.finished_at ? dt(r.finished_at) : '–') },
+              { label: 'Started', cls: 'nw', render: (r) => dt(r.started_at) }, { label: 'Computer', cls: 'nw', render: (r) => r.host || 'this one' }, { label: 'Finished', cls: 'nw', render: (r) => (r.finished_at ? dt(r.finished_at) : '–') },
               { label: 'Status', render: (r) => <Badge tone={r.status === 'done' ? 'good' : r.status === 'running' ? 'warn' : 'bad'}>{r.status}</Badge> },
               { label: 'Pages read', num: true, render: (r) => num(r.summary?.ok) }, { label: 'Failed', num: true, render: (r) => num(r.summary?.failed) },
               { label: 'Note', render: (r) => <span className="muted">{r.message || ''}</span> }]} />
@@ -318,6 +413,10 @@ export default function Prices() {
   const st = useApi('/prices/status', { rev: stRev + rev }, { scoped: false })
   const cmp = useApi('/prices/compare', { rev })
   const running = !!st.data?.job?.running
+  const shared = !!st.data?.sharing?.enabled
+  useEffect(() => {  // opening the tab: fetch what other computers added
+    if (shared) api('/prices/sync', { method: 'POST' }).catch(() => {}).then(() => setRev((x) => x + 1))
+  }, [shared])
   useEffect(() => {  // while a run is going: progress every 4 s, the numbers every 30 s as prices come in, and once more when it ends
     if (!running) return undefined
     const a = setInterval(() => setStRev((x) => x + 1), 4000)

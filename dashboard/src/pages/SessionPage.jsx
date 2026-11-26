@@ -48,12 +48,18 @@ export default function SessionPage() {
         <div className="sc static"><span className="sc-label">Orders placed</span><span className="sc-value">{num(orders.length)}</span><span className="sc-note">{orders.length ? inr(orders.reduce((a, o) => a + (o.total || 0), 0)) : 'none'}</span></div>
       </div>
 
-      <Card title={`Events in this session (${num(events.length)})`} sub="Oldest first. The gap is the time since the event before it. 💬 rows are messages to Roop. Click “raw data” on a row to see everything recorded for it.">
-        <SessionEventsTable events={events} query={evq} onQuery={setEvq} />
-      </Card>
+      <div className="sess-layout">
+        <div className="sess-main">
+          <Card title={`Events in this session (${num(events.length)})`} sub="Oldest first. Gap is the time since the event before. “Details” and “Raw data” show what was recorded with a row.">
+            <SessionEventsTable key={id} events={events} query={evq} onQuery={setEvq} />
+          </Card>
+        </div>
 
-      <div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, alignItems: 'start' }}>
+        <aside className="sess-side" aria-label="About this visit">
+          <Card title="Who" right={person.person_key && <button type="button" className="btn small" onClick={() => f.go('person', { key: person.person_key })}>View full profile →</button>}>
+            <Facts rows={[['Person', who], ['Phone', x.phone10], ['Email', person.email], ['Segment', person.segment], ['All sessions', person.sessions ? num(person.sessions) : null],
+              ['Browser id', <span className="mono" key="b">{x.visitor_key}</span>], ['User id', x.user_id && <span className="mono" key="u">{x.user_id}</span>]]} />
+          </Card>
           {chats.length > 0 && (
             <Card title="Roop chat in this visit" sub="what they asked Roop, the skin-care assistant">
               {chats.map((c) => (
@@ -86,10 +92,6 @@ export default function SessionPage() {
               </div>
             </Card>
           )}
-          <Card title="Who" right={person.person_key && <button type="button" className="btn small" onClick={() => f.go('person', { key: person.person_key })}>View full profile →</button>}>
-            <Facts rows={[['Person', who], ['Phone', x.phone10], ['Email', person.email], ['Segment', person.segment], ['All sessions', person.sessions ? num(person.sessions) : null],
-              ['Browser id', <span className="mono" key="b">{x.visitor_key}</span>], ['User id', x.user_id && <span className="mono" key="u">{x.user_id}</span>]]} />
-          </Card>
           <AddressCard data={addresses} />
           <Card title="Where they came from">
             <Facts rows={[['Channel', x.channel], ['Source / medium', `${x.source} / ${x.medium}`], ['Campaign', x.campaign !== '(not set)' ? x.campaign : null], ['Ad content', extra.utm_content], ['Search term', extra.utm_term],
@@ -123,7 +125,7 @@ export default function SessionPage() {
                 { label: 'Items', render: (o) => <span className="trunc" style={{ display: 'block', maxWidth: 170 }} title={o.items}>{o.items || '–'}</span> }]} rows={orders} />
             </Card>
           )}
-        </div>
+        </aside>
       </div>
     </>
   )

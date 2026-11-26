@@ -9,6 +9,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+
+os.environ["PRICES_SUPABASE_KEY"] = ""  # the tests never touch the shared price store
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -827,9 +829,9 @@ class PriceTab(unittest.TestCase):
         self.assertEqual(len(rows), len(api.price_catalogue()))
         self.assertEqual(len({r["product_id"] for r in rows}), len(rows))
 
-    def test_the_gap_is_against_the_cheapest_in_stock_competitor(self):
+    def test_the_gap_is_against_the_cheapest_competitor_price(self):
         for r in api.prices_compare(**self.R)["rows"]:
-            live = [v["price"] for v in r["sites"].values() if v["price"] and v["in_stock"]]
+            live = [v["price"] for v in r["sites"].values() if v.get("price")]
             with self.subTest(product=r["product_id"]):
                 if not live or not r["our_price"]:
                     self.assertIsNone(r["gap"])
@@ -851,7 +853,7 @@ class PriceTab(unittest.TestCase):
         self.assertEqual(one("SELECT count(*) AS n FROM price_snapshots WHERE ok AND (price <= 0 OR mrp <= 0)")["n"], 0)
         for r in api.prices_compare(**self.R)["rows"]:
             v = r["sites"].get("nykaa")
-            if v and v["offer_price"] and v["in_stock"] and r["cheapest_site"] == "nykaa":
+            if v and v.get("offer_price") and r["cheapest_site"] == "nykaa":
                 self.assertEqual(r["cheapest_price"], v["price"])
 
     def test_bad_decisions_are_refused(self):
@@ -863,3 +865,105 @@ class PriceTab(unittest.TestCase):
                      dict(product_id=pid, site="tira", action="delete-everything")):
             with self.subTest(body=body), self.assertRaises(HTTPException):
                 api.prices_match(api.MatchIn(**body))
+
+
+class SessionScores(unittest.TestCase):
+    """A product match score borrowed for an event that arrived without one."""
+
+    def event(self, at, name, key=None, product="Glow Serum", score=None, session="s1", path=None, note=None):
+        return {"session_id": session, "at": at, "event_name": name, "event_key": key, "product_name": product, "path": path, "score": score, "score_note": note}
+
+    def test_it_comes_from_the_latest_earlier_event_of_the_same_product_in_the_same_visit(self):
+        from mi.scores import borrow
+        sources = [self.event(1, "clicked_product_card", score=70.0), self.event(3, "product_detail_data_loaded", score=81.7), self.event(9, "viewed_product_image", score=99.0),
+                   self.event(2, "clicked_product_card", score=10.0, product="Other"), self.event(4, "clicked_product_card", score=11.0, session="s2")]
+        t = self.event(5, "clicked_add_to_cart_product_detail", key="add_to_cart")
+        borrow([t], sources)
+        self.assertEqual((t["score"], t["score_from"]), (81.7, "product_detail_data_loaded"))
+
+    def test_the_product_page_address_identifies_the_product_too(self):
+        from mi.scores import borrow
+        t = self.event(5, "clicked_add_to_cart_product_detail", product=None, path="/products/abc-1")
+        borrow([t], [self.event(1, "page_viewed_product_detail", product="Product", path="/products/abc-1", score=55.0)])
+        self.assertEqual(t["score"], 55.0)
+
+    def test_nothing_is_invented(self):
+        from mi.scores import borrow
+        own = self.event(5, "clicked_add_to_cart", key="add_to_cart", score=60.0)
+        later = self.event(1, "clicked_add_to_cart", key="add_to_cart", product="Late")
+        unrelated = self.event(8, "ui_clicked")
+        not_scorable = self.event(8, "clicked_add_to_cart", key="add_to_cart", note="not scorable")
+        sources = [self.event(3, "clicked_product_card", score=90.0), self.event(6, "clicked_product_card", score=80.0, product="Late")]
+        borrow([own, later, unrelated, not_scorable], sources)
+        self.assertEqual([own["score"], later["score"], unrelated["score"], not_scorable["score"]], [60.0, None, None, None])
+
+    def test_event_rows_mark_a_borrowed_score(self):
+        d = api.events_rows(date_from="2026-10-22", date_to="2026-11-20", key="add_to_cart", limit=500, include_excluded=False, include_dup=False, event=None, search=None,
+                            payload=[], session=None, person=None, channel=None, cols=None, sort="ts", direction="desc", offset=0)
+        for r in d["rows"]:
+            if r["score_from"]:
+                self.assertIsNotNone(r["score"])
+            self.assertNotIn("value", [p["k"] for p in r["params"]])  # the value has its own column
+
+    def test_parameters_by_event_name(self):
+        d = api.events_params_by_name(date_from="2026-10-22", date_to="2026-11-20", include_excluded=False, include_dup=False, key=None, sample=20)
+        self.assertTrue(d)
+        for name, x in d.items():
+            with self.subTest(event=name):
+                self.assertTrue(0 < x["sampled"] <= 20)
+                self.assertTrue(0 <= x["value_share"] <= 1 and all(0 < p["share"] <= 1 for p in x["params"]))
+
+
+class SpeedVisits(unittest.TestCase):
+    R = dict(date_from="2026-10-22", date_to="2026-11-20")
+
+    def test_the_list_matches_the_counts(self):
+        d = api.speed_sessions(**self.R)
+        m = d["summary"]
+        self.assertEqual(d["total"], m["affected"])
+        self.assertEqual(len({r["session_id"] for r in d["rows"]}), len(d["rows"]))
+        self.assertLessEqual(m["affected"], m["visits"])
+        for k in d["labels"]:
+            with self.subTest(problem=k):
+                one_kind = api.speed_sessions(problem=k, **self.R)
+                self.assertEqual(one_kind["total"], m[k])
+                self.assertTrue(all(k in r["problems"] for r in one_kind["rows"]))
+
+    def test_every_listed_visit_really_had_a_problem(self):
+        for r in api.speed_sessions(limit=25, **self.R)["rows"]:
+            n = one("""SELECT (SELECT count(*) FROM pain_events WHERE session_id = ? AND stage = 'speed')
+                            + (SELECT count(*) FROM events_clean WHERE session_id = ? AND event_name = 'page_load_sample' AND load_ms > 3000) AS n""", [r["session_id"], r["session_id"]])["n"]
+            self.assertGreater(n, 0)
+
+    def test_unknown_problem_is_refused(self):
+        from fastapi import HTTPException
+        with self.assertRaises(HTTPException):
+            api.speed_sessions(problem="nope", **self.R)
+
+
+class ReturningChats(unittest.TestCase):
+    def test_groups_hold_two_or_more_chats_and_each_chat_once(self):
+        d = api.chats(date_from="2026-10-22", date_to="2026-11-20", include_excluded=False, compare=False)
+        if not d.get("ready"):
+            self.skipTest("no chat data")
+        keys = [c["key"] for g in d["returning"] for c in g["chats"]]
+        self.assertEqual(len(keys), len(set(keys)))
+        for g in d["returning"]:
+            with self.subTest(shopper=g["key"]):
+                self.assertGreaterEqual(g["n_chats"], 2)
+                self.assertEqual(g["messages"], sum(c["messages"] for c in g["chats"]))
+        for c in d["conversations"]:
+            self.assertEqual(c["returning"], c["key"] in set(keys))
+        if d["conversations_total"] <= 300:
+            self.assertEqual(len(keys) + sum(1 for c in d["conversations"] if not c["returning"]), d["conversations_total"])
+
+    def test_a_guest_chat_joins_the_account_of_its_browser(self):
+        from mi.chats import _group_shoppers
+        conv = lambda k, user=None, guest=None, sessions=(), at=1: {"key": k, "user_id": user, "guest_session_id": guest, "sessions": list(sessions), "started_at": at, "updated_at": at,
+                                                                    "messages": 1, "failed": 0, "thumbs_up": 0, "thumbs_down": 0}
+        sess = {"a": {"visitor_key": "test-browser-one"}, "b": {"visitor_key": "test-browser-one"}, "c": {"visitor_key": "test-browser-two"}}
+        convs = [conv("1", guest="g1", sessions=["a"]), conv("2", guest="g2", sessions=["b"], at=2), conv("3", guest="g3", sessions=["c"])]
+        groups = _group_shoppers(convs, sess)
+        self.assertEqual([(g["kind"], g["n_chats"], g["visitor_id"]) for g in groups], [("browser", 2, "test-browser-one")])
+        self.assertEqual([c["returning"] for c in convs], [True, True, False])
+

@@ -216,11 +216,13 @@ def session_detail(session_id: str):
         fl = flat_payload(r["x"], r["value"]) if r else {}
         e["score"], e["score_note"] = match_score(fl)
         e["params"] = event_params(fl)
+    from .scores import borrow
+    borrow(events, events)  # an add to cart sent without a score takes it from the earlier view / click of the same product in this visit
     from .chats import session_chats  # local import: chats.py imports nothing from here, but api.py loads both
     chats = session_chats(session_id)
     for c in chats:  # Roop chat messages are part of what the visitor did: show them in the timeline, in time order
         events.append({"at": c["at"], "event_name": "assistant_chat", "event_key": "roop_chat", "page_type": None, "path": "Roop chat", "product_name": None, "brand": None, "amount": None,
-                       "search_term": str(c["question"] or "")[:100], "city_n": None, "ip": None, "score": None, "score_note": None, "params": [], "raw": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in c.items() if v is not None},
+                       "search_term": str(c["question"] or "")[:100], "city_n": None, "ip": None, "score": None, "score_note": None, "score_from": None, "params": [], "raw": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in c.items() if v is not None},
                        "details": [{"k": "Asked", "v": c["question"]}, {"k": "Roop replied" if not c["error"] else "No answer", "v": c["reply"] if not c["error"] else c["error"]}]
                        + ([{"k": "Rated", "v": "helpful" if c["rating"] == 1 else "not helpful"}] if c["rating"] else [])})
     if chats:

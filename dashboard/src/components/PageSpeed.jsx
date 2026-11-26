@@ -1,11 +1,12 @@
-import { num, pct, useApi } from '../api'
+import { num, pct, useApi, useFilters } from '../api'
 import { Badge, Card, Table } from '../ui'
 
 const sec = (ms) => (ms == null ? '–' : `${(ms / 1000).toFixed(1)}s`)
 const tone = (ms) => (ms == null ? '' : ms > 4000 ? 'bad' : ms > 2500 ? 'warn' : 'good')
 
 /** Page load speed, from the load time the tracker reports on every page load. */
-export default function PageSpeed() {
+export default function PageSpeed({ linked = true }) {
+  const f = useFilters()
   const s = useApi('/performance')
   const d = s.data
   const cols = (first, key) => [
@@ -16,7 +17,8 @@ export default function PageSpeed() {
     { label: 'Over 3s', num: true, sortBy: 'slow_share', render: (r) => pct(r.slow_share, 0) },
   ]
   return (
-    <Card title="Page speed" sub="how long pages take to load for visitors. Typical = half of loads are faster. Slow pages lose shoppers before they see a product.">
+    <Card title="Page speed" sub="how long pages take to load for visitors. Typical = half of loads are faster. Slow pages lose shoppers before they see a product."
+      right={linked ? <button type="button" className="btn small" onClick={() => f.go('speed')}>See affected visits →</button> : null}>
       {s.error && <div className="muted">Could not load: {s.error}</div>}
       {!d && !s.error && <div className="skeleton" style={{ height: 160 }} />}
       {d && !d.overall?.samples && <div className="empty">No load-time samples in this date range.</div>}

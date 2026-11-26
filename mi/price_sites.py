@@ -10,7 +10,8 @@ Where each site keeps its numbers (checked in the Nov 2026 feasibility test; if 
   tira     window.APP_DATA .reduxData.catalog.product_meta: price.effective (price) / price.marked (MRP), sellable, sizes[].is_available /
            quantity, discount ("10% OFF"); product_details: name, attributes["pack-size"]. The page also carries placeholder template
            products (e.g. "Hess Inc", ₹1,199): never read prices from anywhere else.
-  purplle  JSON-LD Product: offers.price / availability (SoldOut = out of stock), sku "PPLB<barcode>"; MRP from the page script (mrp:"599",ourPrice:467).
+  purplle  JSON-LD Product: offers.price / availability, sku "PPLB<barcode>"; MRP from the page script (mrp:"599",ourPrice:467), which also keeps
+           the price of a sold-out product.
 """
 from __future__ import annotations
 
@@ -40,9 +41,67 @@ class PageGone(Exception):
     """404 / 410: the product page no longer exists."""
 
 
+# ---------------------------------------------------------------- robots.txt
+_ROBOTS: dict = {}  # host -> its rules, read once per server run
+
+
+def robots_rules(text: str) -> list[tuple[bool, str]]:
+    """(allowed, path pattern) pairs of the `User-agent: *` group."""
+    rules, star, in_rules = [], False, False
+    for raw in str(text or "").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if ":" not in line:
+            continue
+        k, v = (x.strip() for x in line.split(":", 1))
+        k = k.lower()
+        if k == "user-agent":
+            if in_rules:
+                star, in_rules = False, False
+            star = star or v == "*"
+        elif k in ("allow", "disallow"):
+            in_rules = True
+            if star and v:
+                rules.append((k == "allow", v))
+    return rules
+
+
+def robots_allows(rules: list, url: str) -> bool:
+    """The longest matching rule wins (Allow wins a tie); * matches anything and a final $ means the end of the address."""
+    path = re.sub(r"^https?://[^/]+", "", url) or "/"
+    best = None
+    for allow, rule in rules:
+        rx = re.escape(rule).replace(r"\*", ".*")
+        if rx.endswith(r"\$"):
+            rx = rx[:-2] + "$"
+        if re.match(rx, path) and (best is None or len(rule) > best[1] or (len(rule) == best[1] and allow)):
+            best = (allow, len(rule))
+    return True if best is None else best[0]
+
+
+def _allowed(url: str, timeout: int) -> bool:
+    m = re.match(r"(https?://[^/]+)", url)
+    if not m or url.endswith("/robots.txt"):
+        return True
+    host = m.group(1)
+    if host not in _ROBOTS:
+        try:
+            _ROBOTS[host] = robots_rules(_get(f"{host}/robots.txt", timeout))
+        except PageGone:
+            _ROBOTS[host] = []  # the site has no robots.txt
+        except Exception:
+            return True  # could not be read this time: the page request itself will show whether the site is reachable; asked again next time
+    return robots_allows(_ROBOTS[host], url)
+
+
 # ---------------------------------------------------------------- fetching
 def fetch(url: str, timeout: int = 40) -> str:
-    """The page body. Raises Blocked / PageGone, or RuntimeError for anything else (network, 5xx)."""
+    """The page body, if the site's robots.txt allows it. Raises Blocked / PageGone, or RuntimeError for anything else (network, 5xx)."""
+    if not _allowed(url, timeout):
+        raise RuntimeError("the site's robots.txt does not allow this page")
+    return _get(url, timeout)
+
+
+def _get(url: str, timeout: int) -> str:
     from scrapling.fetchers import Fetcher  # imported here so the dashboard starts even without Scrapling installed
     logging.getLogger("scrapling").setLevel(logging.WARNING)
     last = None
@@ -163,7 +222,8 @@ def read_purplle(body: str) -> dict:
     m = re.search(r"\bmrp:\s*\"?([\d.]+)\"?\s*,\s*ourPrice:\s*\"?([\d.]+)", body)
     sku = str(ld.get("sku") or "")
     ean = re.match(r"PPLB(\d{8,14})", sku)
-    return {"name": ld.get("name"), "price": _num(off.get("price")) if in_stock else None, "mrp": _num(m.group(1)) if m else None, "offer_price": None,
+    price = (_num(off.get("price")) if in_stock else None) or (_num(m.group(2)) if m else None)  # sold out: structured data says 0, the script keeps it
+    return {"name": ld.get("name"), "price": price, "mrp": _num(m.group(1)) if m else None, "offer_price": None,
             "in_stock": in_stock, "stock_qty": None, "size": None, "discount": None, "ean": ean.group(1) if ean else None}
 
 
@@ -263,15 +323,40 @@ def tokens(text) -> set:
     return {t for t in norm(text).split() if t not in STOP and not (t.isdigit() and len(t) > 4)}
 
 
-def brand_key(brand) -> str:
-    return re.sub(r"\s+", "", norm(re.sub(r"(?i)^the\s+", "", str(brand or ""))))
+def _alnum(text) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text))
+
+
+def brand_keys(brand) -> list[str]:
+    """The ways a brand can be spelled inside a link, letters and digits only."""
+    base = re.sub(r"(?i)^the\s+", "", str(brand or ""))
+    forms = (base, base.replace("&", ""), base.replace("&", " n "))
+    return sorted({_alnum(norm(f)) for f in forms} - {""})
+
+
+def _brand_words(brand) -> set:
+    b = str(brand or "")
+    forms = (b, re.sub(r"['\u2019&.]", " ", b))
+    return {w for f in forms for w in norm(f).replace(".", " ").split()} | set(norm(b).split())
+
+
+def fix_sizes(words: str, ours: set) -> str:
+    """A link drops the decimal point of a size: our 9.2 ml is written 92ml or 9-2-ml. Put the point back (only for OUR sizes),
+    so the page is not thrown out as another size. The page itself is still checked when it is opened."""
+    for v, u in ours:
+        if v == int(v):
+            continue
+        whole, part = f"{v:g}".split(".")
+        units = "|".join(sorted((k for k, x in UNIT.items() if x == u), key=len, reverse=True))
+        words = re.sub(rf"(?<![\d.])(?:{whole} {part}|{whole}{part}) ?({units})\b", rf"{v:g} \1", words)
+    return words
 
 
 def coverage(our_name: str, brand: str, their_text: str) -> tuple[float, float]:
     """(share of OUR name's words found in theirs, share of THEIR words found in ours). Brand and sizes are left out (compared separately);
     plain numbers stay, so "8% toner" and "10% toner" differ. Our sheet names often add a description ("... For Oily Skin"), so the second
     share is the telling one: when every word of their title is in our name, it is the same product (given the same brand and size)."""
-    b = set(norm(brand).split())
+    b = _brand_words(brand)
     sizeish = re.compile(r"\d+(\.\d+)?(" + "|".join(UNIT) + r")?")
 
     def keep(t):
@@ -301,5 +386,5 @@ def same_product(our_name: str, brand: str, their_name: str, size: str) -> bool:
 
 
 def brand_in(brand: str, their_text: str) -> bool:
-    k = brand_key(brand)
-    return bool(k) and k in re.sub(r"\s+", "", their_text)
+    text = _alnum(their_text)
+    return any(k in text for k in brand_keys(brand))

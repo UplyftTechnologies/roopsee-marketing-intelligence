@@ -15,6 +15,7 @@ const Cohorts = lazy(() => import('./pages/Cohorts'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const Deeper = lazy(() => import('./pages/Deeper'))
 const MapPage = lazy(() => import('./pages/MapPage'))
+const SpeedPage = lazy(() => import('./pages/SpeedPage'))
 const Prices = lazy(() => import('./pages/Prices'))
 const Events = lazy(() => import('./pages/Events'))
 const Logins = lazy(() => import('./pages/Logins'))
@@ -40,6 +41,7 @@ const NAV = [
   ['funnel', 'Funnel & checkout', 'funnel', 'Where people drop off, who to follow up', Funnel, 'Reports'],
   ['journeys', 'Journeys', 'route', 'Every journey: purchase, checkout, login, quiz, search, Roop and delivery, and each visit', Journeys, 'Reports'],
   ['painpoints', 'Pain points', 'alert', 'What went wrong from login to payment, and who got stuck', PainPoints, 'Reports'],
+  ['speed', 'Page speed', 'gauge', 'How fast pages load, and every visit that hit a slow or broken moment', SpeedPage, 'Reports'],
   ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Reports'],
   ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Reports'],
   ['deeper', 'Ads & landing pages', 'image', 'What the visits each ad and landing product brought did, and ad → skin concern → products', Deeper, 'Reports'],
