@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api, dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Search, Table, axis, chartTip } from '../ui'
@@ -18,10 +18,12 @@ const age = (t) => {
 const thumb = (img) => { const s = String(img || '').split(/[,\s]+/).find((x) => x.startsWith('http')); return s || null }
 
 const STATE_TEXT = { priced: 'Priced', review: 'To review', not_available: 'Not available', unchecked: 'Not checked' }
+const unusualPrice = (price, ours) => price > 0 && (price <= 1 || ours >= 10 * price)
 
 /** One competitor's price in a table cell: price, MRP, discount, Nykaa's offer price as a note, and a link to the page. Without a price: why. */
-function SiteCell({ v, ours }) {
-  if (v?.state === 'review') return <Badge tone="warn" title="A possible match is waiting for you in Review matches">To review</Badge>
+function SiteCell({ v, ours, onReview }) {
+  const review = (e) => { e.stopPropagation(); onReview() }
+  if (v?.state === 'review') return <button type="button" className="btn small" onClick={review}>Review match</button>
   if (v?.state === 'not_available') return <span className="muted" title="Not found on this site, marked as not sold there, or no price shown">Not available</span>
   if (v?.state !== 'priced') return <span className="muted" title="Not looked for or not read yet: press Refresh prices">Not checked</span>
   return (
@@ -31,6 +33,7 @@ function SiteCell({ v, ours }) {
       {v.offer_price && <div className="muted" style={{ fontSize: 11 }} title="Nykaa's price for some customers only (e.g. a first order); not used in the comparison">offer {inr(v.offer_price)}</div>}
       <div style={{ fontSize: 11 }}><a href={v.url} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}>open ↗</a>{' '}
         <span className="muted" title={v.earlier ? 'The latest read gave no price, so this is the last one we saw' : undefined}>{v.earlier ? `price from ${dt(v.checked)}` : age(v.checked)}</span></div>
+      {unusualPrice(v.price, ours) && <button type="button" className="btn small price-check" onClick={review} title="Verify the price and product variant">Check reading</button>}
     </div>
   )
 }
@@ -55,11 +58,11 @@ function Sharing({ st, onChange }) {
     <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
       <div className="chip-row" style={{ gap: 10, flexWrap: 'wrap' }}>
         <Badge tone={sh.error ? 'warn' : 'good'}>shared through Supabase</Badge>
-        <span className="muted" style={{ fontSize: 12 }}>this computer is “{sh.me}” · {sh.last_sync ? `last synced ${dt(sh.last_sync)}` : 'not synced yet'}{sh.waiting ? ` · ${num(sh.waiting)} waiting to be sent` : ''}</span>
-        <button type="button" className="btn small" disabled={!!busy} onClick={() => call('sync', '/prices/sync', (r) => (r.ok === false ? r.error : ''))}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
+        <span className="muted" style={{ fontSize: 12 }}>This computer is “{sh.me}” · {sh.last_sync ? `Last shared sync ${dt(sh.last_sync)}` : 'Waiting for first sync'}{sh.waiting ? ` · ${num(sh.waiting)} waiting to be sent` : ''}</span>
+        <button type="button" className="btn small" disabled={!!busy} onClick={() => call('sync', '/prices/sync', (r) => (r.ok === false ? r.error : ''))}>{busy === 'sync' ? 'Syncing…' : 'Sync shared prices and matches'}</button>
         {(sh.history > 0 || sh.history_matches > 0) && <button type="button" className="btn small" disabled={!!busy || st.job.running} onClick={upload}>{busy === 'upload' ? 'Uploading…' : `Upload this computer’s history (${num(sh.history)} readings)`}</button>}
       </div>
-      {others && <div className="banner" style={{ margin: 0 }}><b>{sh.holder}</b>&nbsp;is refreshing prices{sh.holder_since ? ` since ${dt(sh.holder_since)}` : ''}. Press Sync now to see their results.</div>}
+      {others && <div className="banner" style={{ margin: 0 }}><b>{sh.holder}</b>&nbsp;is refreshing prices{sh.holder_since ? ` since ${dt(sh.holder_since)}` : ''}. Sync shared prices and matches to see their results.</div>}
       {sh.error && <div className="banner err" style={{ margin: 0 }}>{sh.error}</div>}
       {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
     </div>
@@ -78,14 +81,14 @@ function RefreshBar({ st, onChange }) {
     go('/prices/refresh', params)
   }
   return (
-    <Card title="Competitor prices" sub="Nykaa, Tira and Purplle product pages, read one page at a time per site with a pause in between (a refresh takes about 15–20 minutes; the first one takes longer, because it also finds every product on each site)"
+    <Card title="Competitor prices" sub="Regular prices on Nykaa, Tira and Purplle. Report dates apply to Roopsee activity. A competitor-price refresh usually takes 15–20 minutes."
       right={job.running
         ? <button type="button" className="btn danger" onClick={() => go('/prices/stop')} disabled={busy || job.stop}>{job.stop ? 'Stopping…' : 'Stop'}</button>
         : <span className="chip-row">
           <button type="button" className="btn" onClick={() => refresh({ recheck: true })} disabled={busy || st.needs_pull} title="Refresh prices, and also search again for everything not available or waiting for review (your own decisions are kept)">Search again + refresh</button>
-          <button type="button" className="btn primary" onClick={() => refresh()} disabled={busy || st.needs_pull}>↻ Refresh prices</button>
+          <button type="button" className="btn primary" onClick={() => refresh()} disabled={busy || st.needs_pull}>Refresh competitor prices</button>
         </span>}>
-      {st.needs_pull && <div className="banner err" style={{ margin: 0 }}>The product sheet was pulled by an older version. Press <b>Refresh</b> (top right) once, then refresh prices.</div>}
+      {st.needs_pull && <div className="banner err" style={{ margin: 0 }}>The product sheet was pulled by an older version. Use <b>Refresh dashboard</b>, then refresh competitor prices.</div>}
       {err && <div className="banner err" style={{ margin: '0 0 8px' }}>{err}</div>}
       <div className="price-sites">
         {SITES.map(([k, label]) => {
@@ -107,15 +110,14 @@ function RefreshBar({ st, onChange }) {
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
         {job.running ? `Running since ${dt(job.started)}. You can keep using the dashboard; prices appear as they are read.`
-          : last ? `Last refresh ${dt(last.finished_at || last.started_at)} (${age(last.finished_at || last.started_at)}): ${last.status}${last.message ? ` · ${last.message}` : ''}` : 'Prices have never been refreshed. Press Refresh prices.'}
-        {' '}Our prices are the Selling Price and MRP of the product sheet (master_products). Competitor prices are their regular prices.
+          : last ? `Last competitor-price run ${dt(last.finished_at || last.started_at)} (${age(last.finished_at || last.started_at)}) · ${last.status}${last.message ? ` · ${last.message}` : ''}` : 'Use Refresh competitor prices to collect the first readings.'}
       </div>
       <Sharing st={st} onChange={onChange} />
     </Card>
   )
 }
 
-function Comparison({ rows, f }) {
+function Comparison({ rows, f, onReview }) {
   const [search, setSearch] = usePersisted('prices.search', '')
   const [brand, setBrand] = usePersisted('prices.brand', '')
   const [pos, setPos] = usePersisted('prices.pos', '')
@@ -127,13 +129,15 @@ function Comparison({ rows, f }) {
     && (!search || `${r.name} ${r.brand} ${r.product_id}`.toLowerCase().includes(search.toLowerCase())))
   const cols = [
     { label: 'Product', sortBy: 'name', render: (r) => (
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 230, maxWidth: 330 }}>
+      <div className="price-product-name">
         {thumb(r.image) ? <img src={thumb(r.image)} alt="" loading="lazy" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, flex: 'none', background: 'var(--surface-2)' }} /> : null}
         <div style={{ minWidth: 0 }}><div className="trunc" title={r.name}>{r.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{r.brand}{r.size ? ` · ${r.size}` : ''}</div></div>
       </div>
     ) },
     { label: 'Our price', num: true, sortBy: 'our_price', render: (r) => <div style={{ lineHeight: 1.3 }}><b>{inr(r.our_price)}</b>{r.our_mrp > r.our_price ? <div className="muted" style={{ fontSize: 11 }}><s>{inr(r.our_mrp)}</s> {pct(r.our_discount, 0)} off</div> : null}</div> },
-    ...SITES.map(([k, label]) => ({ label, sortBy: (r) => r.sites[k]?.price ?? null, render: (r) => <SiteCell v={r.sites[k]} ours={r.our_price} /> })),
+    ...SITES.map(([k, label]) => ({ label, sortBy: (r) => r.sites[k]?.price ?? null, render: (r) => (
+      <SiteCell v={r.sites[k]} ours={r.our_price} onReview={() => onReview({ productId: r.product_id, site: k, status: r.sites[k].state === 'review' ? 'review' : 'matched' })} />
+    ) })),
     { label: 'Cheapest', cls: 'nw', sortBy: 'cheapest_price', render: (r) => (r.cheapest_site ? <span>{inr(r.cheapest_price)} <span className="muted">{SITES.find(([k]) => k === r.cheapest_site)?.[1]}</span></span> : <span className="muted">–</span>) },
     { label: 'Our gap', num: true, sortBy: (r) => r.gap ?? null, render: (r) => <Badge tone={gapTone(r.gap)}>{gapText(r.gap)}</Badge> },
     { label: 'Views', num: true, sortBy: 'views', render: (r) => num(r.views) },
@@ -150,11 +154,11 @@ function Comparison({ rows, f }) {
         <Chips value={pos} onChange={setPos} options={[{ value: '', label: 'All' }, { value: 'dearer', label: 'We are dearer' }, { value: 'cheaper', label: 'We are cheapest' }, { value: 'same', label: 'Same price' }, { value: 'no_data', label: 'No competitor price' }]} />
         <label className="muted" style={{ fontSize: 12 }}><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Viewed or sold in these dates</label>
       </div>
-      <Card title={`${num(shown.length)} products`} sub="the latest regular price on each site (red = cheaper than us, green = dearer) · our gap = our price against the cheapest competitor price · views and orders are ours, in the dates at the top · click a product to see its price history graph"
+      <Card title={`${num(shown.length)} ${shown.length === 1 ? 'product' : 'products'}`} sub="Our gap compares Roopsee with the lowest competitor price. Select a product to see its price history."
         right={<ExportBtn name="price-comparison" rows={shown} fields={[['Product id', 'product_id'], ['Product', 'name'], ['Brand', 'brand'], ['Size', 'size'], ['Our price', 'our_price'], ['Our MRP', 'our_mrp'],
           ...SITES.flatMap(([k, l]) => [[`${l} price`, (r) => r.sites[k]?.price ?? ''], [`${l} MRP`, (r) => r.sites[k]?.mrp ?? ''], [`${l} status`, (r) => STATE_TEXT[r.sites[k]?.state] || ''], [`${l} link`, (r) => r.sites[k]?.url ?? '']]),
           ['Cheapest site', 'cheapest_site'], ['Cheapest price', 'cheapest_price'], ['Our gap', 'gap'], ['Views', 'views'], ['Orders', 'orders'], ['Revenue', 'revenue']]} />}>
-        <Table id="prices-compare" scroll rows={shown} cols={cols} onRow={(r) => setHist(r)} empty="No product matches these filters." />
+        <Table id="prices-compare" scroll pinFirst rows={shown} cols={cols} onRow={(r) => setHist(r)} empty="No product matches these filters." />
       </Card>
       {hist && <History product={hist} onClose={closeHist} />}
     </>
@@ -164,23 +168,39 @@ function Comparison({ rows, f }) {
 /** The pop-up of one product: what each shop asks now, and the graph of every price read, one step per refresh. */
 function History({ product, onClose }) {
   const s = useApi('/prices/history', { product_id: product.product_id }, { scoped: false })
+  const panel = useRef(null)
   useEffect(() => {
-    const key = (e) => { if (e.key === 'Escape') onClose() }
+    const returnFocus = document.activeElement
+    const dialog = panel.current
+    dialog?.querySelector('button')?.focus()
+    const key = (e) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Tab' || !dialog) return
+      const focusable = [...dialog.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]')]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        e.preventDefault()
+        if (e.shiftKey) last.focus()
+        else first.focus()
+      }
+    }
     document.addEventListener('keydown', key)
     const was = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.removeEventListener('keydown', key); document.body.style.overflow = was }
+    return () => { document.removeEventListener('keydown', key); document.body.style.overflow = was; returnFocus?.focus({ preventScroll: true }) }
   }, [onClose])
   const name = (k) => (k === 'ours' ? 'Roopsee' : SITES.find(([x]) => x === k)?.[1] || k)
   return (
     <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="card modal" role="dialog" aria-modal="true" aria-label={`Price history of ${product.name}`}>
+      <div className="card modal" role="dialog" aria-modal="true" aria-label={`Price history of ${product.name}`} ref={panel}>
         <div className="row-between" style={{ alignItems: 'flex-start', gap: 12, padding: 0 }}>
           <div style={{ minWidth: 0 }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>{product.name}</h3>
             <div className="muted" style={{ fontSize: 12 }}>{product.brand}{product.size ? ` · ${product.size}` : ''}</div>
           </div>
-          <button type="button" className="btn small" onClick={onClose} autoFocus>Close ✕</button>
+          <button type="button" className="btn small" onClick={onClose}>Close</button>
         </div>
         <div className="chip-row" style={{ margin: '12px 0', gap: 8, flexWrap: 'wrap' }}>
           <span className="price-now"><i style={{ background: 'var(--text-primary)' }} /> Roopsee <b>{inr(product.our_price)}</b></span>
@@ -308,69 +328,126 @@ function Analysis() {
   )
 }
 
-function Review({ onChange }) {
-  const [site, setSite] = usePersisted('prices.review.site', '')
-  const [status, setStatus] = usePersisted('prices.review.status', 'review')
+function Review({ onChange, shared, target }) {
+  const [site, setSite] = usePersisted('prices.review.site', target?.site || '', !!target)
+  const [status, setStatus] = usePersisted('prices.review.status', target?.status || 'review', !!target)
+  const [search, setSearch] = usePersisted('prices.review.search', target?.productId || '', !!target)
   const [rev, setRev] = useState(0)
   const [paste, setPaste] = useState({})
+  const [editing, setEditing] = useState('')
+  const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
+  const [saved, setSaved] = useState('')
   const s = useApi('/prices/review', { site: site || undefined, status, rev }, { scoped: false })
+  const disabled = !!busy || s.loading
+  const refresh = () => { setRev((x) => x + 1); onChange() }
+  const send = (r, action, url) => api('/prices/match', {
+    method: 'POST', body: { product_id: r.product_id, site: r.site, action, url, version: r.version },
+  })
   const act = async (r, action, url) => {
+    if (disabled) return
+    const key = `${r.product_id}|${r.site}`
+    setBusy(key)
     setErr('')
-    try { await api('/prices/match', { method: 'POST', body: { product_id: r.product_id, site: r.site, action, url, version: r.version } }) } catch (e) { setErr(e.message) }
-    setRev((x) => x + 1); onChange()  // also after a refusal: the list then shows what the others decided
+    setSaved('')
+    try {
+      await send(r, action, url)
+      setSaved(action === 'link' || action === 'confirm'
+        ? `${shared ? 'Match saved and synced' : 'Match saved locally'}. Use Refresh competitor prices to check the link.`
+        : shared ? 'Decision saved and synced.' : 'Decision saved locally.')
+      setPaste((current) => ({ ...current, [key]: '' }))
+      setEditing('')
+    } catch (error) { setErr(error.message) }
+    finally { setBusy(''); refresh() }
   }
   const sure = (r) => { const c = r.candidates?.[0]; return c && !c.note && c.page_name && c.score >= 0.85 && (c.page_size || c.size) === 'same' }
   const confirmAll = async (list) => {
-    if (!window.confirm(`Confirm the first suggestion of ${list.length} products (same size, name match 85% or more)? Check a few of them first: confirmed matches are not guessed again.`)) return
+    if (disabled || !window.confirm(`Confirm the first suggestion for ${list.length} shown products with the same size and a name match of 85% or more?`)) return
+    setBusy('batch')
     setErr('')
-    try { for (const r of list) await api('/prices/match', { method: 'POST', body: { product_id: r.product_id, site: r.site, action: 'confirm', url: r.candidates[0].url, version: r.version } }) } catch (e) { setErr(e.message) }
-    setRev((x) => x + 1); onChange()
+    setSaved('')
+    let completed = 0
+    try {
+      for (const r of list) {
+        await send(r, 'confirm', r.candidates[0].url)
+        completed += 1
+      }
+      setSaved(`${num(completed)} matches ${shared ? 'saved and synced' : 'saved locally'}. Use Refresh competitor prices to check the links.`)
+    } catch (error) { setErr(`${completed ? `${num(completed)} matches saved. ` : ''}${error.message}`) }
+    finally { setBusy(''); refresh() }
   }
+  const needle = search.trim().toLowerCase()
+  const rows = s.data?.rows || []
+  const shown = rows.filter((r) => !needle || [r.name, r.brand, r.product_id, r.matched_name, r.url].some((value) => value?.toLowerCase().includes(needle)))
+  const strong = status === 'review' ? shown.filter(sure) : []
   return (
     <>
-      <div className="chip-row">
+      <div className="review-toolbar chip-row">
+        <Search value={search} onChange={setSearch} placeholder="Search matches by product, brand or SKU" />
+        <select className="field" value={site} onChange={(e) => setSite(e.target.value)} aria-label="Retailer">
+          <option value="">All retailers</option>
+          {SITES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
         <Chips value={status} onChange={setStatus} options={[{ value: 'review', label: 'To review' }, { value: 'none', label: 'Not found' }, { value: 'rejected', label: 'Rejected' }, { value: 'matched', label: 'Matched' }]} />
-        <Chips value={site} onChange={setSite} options={[{ value: '', label: 'All sites' }, ...SITES.map(([value, label]) => ({ value, label }))]} />
+        {search && <button type="button" className="btn small" onClick={() => setSearch('')}>Clear search</button>}
       </div>
-      {err && <div className="banner err">{err}</div>}
+      {err && <div className="banner err" role="alert">{err}</div>}
+      {saved && <div className="banner" role="status">{saved}</div>}
       <Loading state={s}>
-        {(d) => (
-          <Card right={status === 'review' && d.rows.some(sure) ? <button type="button" className="btn small" onClick={() => confirmAll(d.rows.filter(sure))}>Confirm {num(d.rows.filter(sure).length)} strong matches</button> : null}
-            title={`${num(d.rows.length)} ${status === 'review' ? 'matches to check' : status === 'none' ? 'products not found' : status === 'rejected' ? 'rejected' : 'matched'}`}
-            sub={status === 'review' ? 'we are not sure these are the same product (name or size do not fully agree): confirm the right one, reject it, or paste the right link. Your decision is kept and never guessed again.'
-              : status === 'none' ? 'no page with the same brand, name and size was found; paste the link if the site sells it (it is looked for again after a week)'
-                : status === 'matched' ? 'how each match was made: link in the sheet, barcode (Purplle), name and size, or you' : 'pages you said are not our product; clear one to let it be found again'}>
-            {d.rows.length === 0 ? <div className="empty">Nothing here.</div> : (
-              <div className="review-list">
-                {d.rows.map((r) => {
+        {() => (
+          <Card right={strong.length > 0 ? <button type="button" className="btn small" disabled={disabled} onClick={() => confirmAll(strong)}>{busy === 'batch' ? 'Saving…' : `Confirm ${num(strong.length)} strong matches`}</button> : null}
+            title={`${num(shown.length)} of ${num(rows.length)} retailer matches`}
+            sub={status === 'review' ? 'Compare the size and variant before confirming a suggested link.'
+              : status === 'none' ? 'Paste a product link if this retailer carries the matching size and variant.'
+                : status === 'matched' ? 'Check the saved link or replace it with the correct product page.' : 'Paste the correct link or let the next price refresh look again.'}>
+            {shown.length === 0 ? <div className="empty">No matches in this view. Try another status, retailer or search term.</div> : (
+              <div className="review-list" aria-busy={s.loading || !!busy}>
+                {shown.map((r) => {
                   const key = `${r.product_id}|${r.site}`
+                  const matched = status === 'matched'
+                  const rowBusy = busy === key
                   return (
-                    <div key={key} className="review-row">
-                      <div className="review-ours"><Badge>{r.site_label}</Badge> <b>{r.name}</b><div className="muted" style={{ fontSize: 12 }}>{r.brand}{r.size ? ` · ${r.size}` : ''} · ours {inr(r.our_price)}{r.updated_by ? ` · last changed by ${r.updated_by}` : ''}</div></div>
+                    <article key={key} className="review-row">
+                      <div className="review-ours">
+                        <span className="muted review-label">Roopsee</span>
+                        <b>{r.name}</b>
+                        <div className="muted">{[r.brand, r.size || 'Size unavailable', inr(r.our_price)].filter(Boolean).join(' · ')}</div>
+                        <div className="mono muted">{r.product_id}</div>
+                      </div>
                       <div className="review-cands">
-                        {status === 'matched' ? (
-                          <div className="review-cand"><a href={r.url} target="_blank" rel="noreferrer noopener">{r.matched_name || r.url}</a> <span className="muted">· {r.method === 'sheet' ? 'link in the sheet' : r.method === 'you' ? 'set by you' : r.method === 'barcode' ? 'same barcode' : `name and size (${pct(r.confidence, 0)})`}</span>
-                            <button type="button" className="btn small" onClick={() => act(r, 'reject', r.url)}>Not this product</button></div>
+                        <span className="muted review-label">{r.site_label}</span>
+                        {matched ? (
+                          <div className="review-cand">
+                            <a href={r.url} target="_blank" rel="noreferrer noopener">{r.matched_name || 'Open saved product page'} ↗</a>
+                            <span className="muted">{r.method === 'sheet' ? 'Catalog link' : r.method === 'you' ? 'Manual match' : r.method === 'barcode' ? 'Same barcode' : `Name and size (${pct(r.confidence, 0)})`}{r.updated_by ? ` · Updated by ${r.updated_by}` : ''}</span>
+                            <div className="chip-row">
+                              <button type="button" className="btn small" disabled={disabled} onClick={() => { setEditing(key); setPaste((current) => ({ ...current, [key]: r.url || '' })) }}>Update link</button>
+                              <button type="button" className="btn small" disabled={disabled} onClick={() => act(r, 'reject', r.url)}>Not this product</button>
+                            </div>
+                          </div>
                         ) : (r.candidates || []).filter((c) => c.page_name || status === 'review').slice(0, 3).map((c) => (
                           <div key={c.url} className="review-cand">
-                            <a href={c.url} target="_blank" rel="noreferrer noopener">{c.page_name || c.url.replace(/^https:\/\/[^/]+/, '')}</a>
-                            <span className="muted"> · {pct(c.score, 0)} name match · size {c.page_size || c.size}{c.price ? ` · ${inr(c.price)}` : ''}</span>
-                            {c.note && <Badge tone="warn" title="This page does not sell our size, so its price is not compared until you decide">{c.note}</Badge>}
-                            {status !== 'rejected' && <><button type="button" className="btn small primary" onClick={() => act(r, 'confirm', c.url)}>Same product</button>
-                              <button type="button" className="btn small" onClick={() => act(r, 'reject', c.url)}>Not it</button></>}
+                            <a href={c.url} target="_blank" rel="noreferrer noopener">{c.page_name || c.url.replace(/^https:\/\/[^/]+/, '')} ↗</a>
+                            <div className="chip-row">
+                              <span className="muted">{pct(c.score, 0)} name match · Size {c.page_size || c.size || 'unknown'}{c.price ? ` · ${inr(c.price)}` : ''}</span>
+                              {c.note && <Badge tone="warn">{c.note}</Badge>}
+                            </div>
+                            {status !== 'rejected' && <div className="chip-row"><button type="button" className="btn small primary" disabled={disabled} onClick={() => act(r, 'confirm', c.url)}>Same product</button>
+                              <button type="button" className="btn small" disabled={disabled} onClick={() => act(r, 'reject', c.url)}>Not it</button></div>}
                           </div>
                         ))}
-                        {status !== 'matched' && (
-                          <form className="chip-row" onSubmit={(e) => { e.preventDefault(); act(r, 'link', paste[key]) }}>
-                            <input className="field" style={{ flex: 1, minWidth: 260 }} placeholder={`Paste the ${r.site_label} product link…`} value={paste[key] || ''} onChange={(e) => setPaste({ ...paste, [key]: e.target.value })} />
-                            <button type="submit" className="btn small" disabled={!paste[key]}>Use this link</button>
-                            {status !== 'rejected' && <button type="button" className="btn small" onClick={() => act(r, 'notsold')} title="Shows “Not available” and stops looking for it on this site">Not sold here</button>}
-                            {status === 'rejected' && <button type="button" className="btn small" onClick={() => act(r, 'clear')}>Look again</button>}
+                        {(!matched || editing === key) && (
+                          <form className="review-url chip-row" onSubmit={(e) => { e.preventDefault(); if (paste[key]?.trim()) act(r, 'link', paste[key].trim()) }}>
+                            <input className="field" type="text" inputMode="url" aria-label={`${r.site_label} product link for ${r.name}`} autoFocus={matched}
+                              placeholder={`Paste the ${r.site_label} product link…`} value={paste[key] || ''} onChange={(e) => setPaste({ ...paste, [key]: e.target.value })} />
+                            <button type="submit" className="btn small" disabled={disabled || !paste[key]?.trim()}>{rowBusy ? 'Saving…' : 'Use this link'}</button>
+                            {matched && <button type="button" className="btn small" disabled={disabled} onClick={() => setEditing('')}>Cancel</button>}
+                            {!matched && status !== 'rejected' && <button type="button" className="btn small" disabled={disabled} onClick={() => act(r, 'notsold')}>Not sold here</button>}
+                            {status === 'rejected' && <button type="button" className="btn small" disabled={disabled} onClick={() => act(r, 'clear')}>Look again</button>}
                           </form>
                         )}
                       </div>
-                    </div>
+                    </article>
                   )
                 })}
               </div>
@@ -407,6 +484,7 @@ function Log() {
 
 export default function Prices() {
   const f = useFilters()
+  const [reviewTarget, setReviewTarget] = useState(null)
   const [tab, setTab] = usePersisted('prices.tab', 'compare')
   const [stRev, setStRev] = useState(0)   // the run's progress
   const [rev, setRev] = useState(0)       // the numbers (comparison, analysis, log)
@@ -427,12 +505,12 @@ export default function Prices() {
   return (
     <>
       <Loading state={st}>{(d) => <RefreshBar st={d} onChange={() => setRev((x) => x + 1)} />}</Loading>
-      <div className="chip-row" role="tablist" aria-label="Price intelligence">
-        <Chips value={tab} onChange={setTab} options={[{ value: 'compare', label: 'Comparison' }, { value: 'analysis', label: 'Analysis' }, { value: 'review', label: `Review matches${review ? ` (${review})` : ''}` }, { value: 'log', label: 'Refresh log' }]} />
+      <div className="chip-row" role="group" aria-label="Price intelligence view">
+        <Chips value={tab} onChange={(next) => { setReviewTarget(null); setTab(next) }} options={[{ value: 'compare', label: 'Comparison' }, { value: 'analysis', label: 'Analysis' }, { value: 'review', label: `Review matches${review ? ` (${review})` : ''}` }, { value: 'log', label: 'Refresh log' }]} />
       </div>
-      {tab === 'compare' && <Loading state={cmp}>{(d) => <Comparison rows={d.rows} f={f} />}</Loading>}
+      {tab === 'compare' && <Loading state={cmp}>{(d) => <Comparison rows={d.rows} f={f} onReview={(target) => { setReviewTarget(target); setTab('review') }} />}</Loading>}
       {tab === 'analysis' && <Analysis key={rev} />}
-      {tab === 'review' && <Review onChange={() => setRev((x) => x + 1)} />}
+      {tab === 'review' && <Review target={reviewTarget} shared={shared} onChange={() => setRev((x) => x + 1)} />}
       {tab === 'log' && <Log key={rev} />}
     </>
   )

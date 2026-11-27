@@ -10,7 +10,7 @@ export default function SessionPage() {
   const id = f.prefill?.key
   const [evq, setEvq] = useState('')
   const s = useApi(`/sessions/${encodeURIComponent(id || '')}`, {}, { scoped: false })
-  if (s.error) return <div className="banner err">Could not load this session: {s.error} <button className="btn small" onClick={() => f.go('sessions')}>Back to Sessions</button></div>
+  if (s.error) return <div className="banner err">Could not load this session. {s.error} <button className="btn small" onClick={f.back}>Back to {f.backLabel}</button></div>
   if (!s.data) return <div className="skeleton" style={{ height: 320 }} />
   const { session: x, events, pages, event_types: types, extra, orders, addresses, duplicates_hidden: hiddenDups, chats = [], person, prev, next } = s.data
   const who = person.name || (person.is_registered ? 'Registered user' : 'Anonymous browser')
@@ -21,7 +21,7 @@ export default function SessionPage() {
   return (
     <>
       <div className="profile-head">
-        <button type="button" className="icon-btn" onClick={() => f.go('sessions')} aria-label="Back to Sessions" title="Back to Sessions"><Icon name="left" /></button>
+        <button type="button" className="pill-btn" onClick={f.back}><Icon name="left" size={16} />{f.backLabel}</button>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h2 style={{ fontSize: 20 }}>{dt(x.started_at)} <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}>· {dur(x.duration_s)}</span></h2>
           <div className="muted mono" style={{ fontSize: 12 }}>{x.session_id} <CopyBtn text={x.session_id} title="Copy session id" /></div>

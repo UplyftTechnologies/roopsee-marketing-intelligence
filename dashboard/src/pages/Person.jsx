@@ -51,7 +51,7 @@ export default function Person() {
   const f = useFilters()
   const key = f.prefill?.key
   const s = useApi('/person', { key }, { scoped: false })
-  if (s.error) return <div className="banner err">Could not load this person: {s.error} <button className="btn small" onClick={() => f.go('users')}>Back to Users</button></div>
+  if (s.error) return <div className="banner err">Could not load this person. {s.error} <button className="btn small" onClick={f.back}>Back to {f.backLabel}</button></div>
   if (!s.data) return <div className="skeleton" style={{ height: 320 }} />
   const d = s.data
   const p = d.profile || {}
@@ -69,7 +69,7 @@ export default function Person() {
   return (
     <>
       <div className="profile-head">
-        <button type="button" className="icon-btn" onClick={() => f.go('users')} aria-label="Back to Users" title="Back to Users"><Icon name="left" /></button>
+        <button type="button" className="pill-btn" onClick={f.back}><Icon name="left" size={16} />{f.backLabel}</button>
         <div className="avatar" aria-hidden>{(p.name || (p.is_registered ? 'U' : '?')).slice(0, 1).toUpperCase()}</div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h2 style={{ fontSize: 20 }}>{name}</h2>

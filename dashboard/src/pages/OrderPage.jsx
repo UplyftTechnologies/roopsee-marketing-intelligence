@@ -10,7 +10,7 @@ export default function OrderPage() {
   const f = useFilters()
   const id = f.prefill?.key
   const s = useApi(`/orders/${encodeURIComponent(id || '')}`, {}, { scoped: false })
-  if (s.error) return <div className="banner err">Could not load this order: {s.error} <button className="btn small" onClick={() => f.go('orders')}>Back to Orders</button></div>
+  if (s.error) return <div className="banner err">Could not load this order. {s.error} <button className="btn small" onClick={f.back}>Back to {f.backLabel}</button></div>
   if (!s.data) return <div className="skeleton" style={{ height: 320 }} />
   const { order: o, items, timeline, customer, other_orders: others, session } = s.data
   const t0 = timeline.length ? new Date(timeline[0].at).getTime() : 0
@@ -19,7 +19,7 @@ export default function OrderPage() {
   return (
     <>
       <div className="profile-head">
-        <button type="button" className="icon-btn" onClick={() => f.go('orders')} aria-label="Back to Orders" title="Back to Orders"><Icon name="left" /></button>
+        <button type="button" className="pill-btn" onClick={f.back}><Icon name="left" size={16} />{f.backLabel}</button>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h2 style={{ fontSize: 20 }}>{inr(o.total)} <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}>· {dt(o.ts)}</span></h2>
           <div className="muted mono" style={{ fontSize: 12 }}>{o.order_id} <CopyBtn text={o.order_id} title="Copy order id" /></div>

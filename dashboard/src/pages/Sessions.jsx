@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { dt, dur, inr, num, useApi, useFilters, usePersisted } from '../api'
+import { dt, dur, inr, num, useApi, useFilters, usePageOffset, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import { STAGE, STAGE_TONE } from '../shared'
 import BulkExclude from '../components/BulkExclude'
@@ -76,15 +76,16 @@ export default function Sessions() {
   const [sort, setSort] = usePersisted('sessions.sort', sh?.sort ?? { key: 'started_at', dir: 'desc' }, fresh)
   const [limit, setLimit] = usePersisted('sessions.limit', 50)
   const [panel, setPanel] = usePersisted('sessions.panel', false)
-  const [offset, setOffset] = useState(0)
   const [sel, setSel] = useState(new Set())
   const pins = pincode.split(/[\s,]+/).filter((x) => /^\d{6}$/.test(x)).join(',')
   const counts = useApi('/sessions/counts')
-  const s = useApi('/sessions', {
+  const filters = {
     search, channel: channel === 'All' ? undefined : channel, has: has.join(',') || undefined, lacks: lacks.join(',') || undefined, match,
-    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, ad: ad || undefined, adset: adset || undefined, campaign_id: campaignId || undefined, landing_product: landing || undefined, ad_match: adMatch || undefined, region: region || undefined, city: city || undefined, delivery_state: dState || undefined, delivery_city: dCity || undefined, sort: sort.key, direction: sort.dir, limit, offset,
-  })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, ad, adset, campaignId, landing, adMatch, region, city, dState, dCity, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
+    only_excluded: only === 'excluded' || undefined, pincode: pins || undefined, event: event.trim() || undefined, ad: ad || undefined, adset: adset || undefined, campaign_id: campaignId || undefined, landing_product: landing || undefined, ad_match: adMatch || undefined, region: region || undefined, city: city || undefined, delivery_state: dState || undefined, delivery_city: dCity || undefined, sort: sort.key, direction: sort.dir, limit,
+  }
+  const [offset, setOffset] = usePageOffset('sessions', [filters, f.from, f.to, f.includeExcluded, f.deviceType])
+  const s = useApi('/sessions', { ...filters, offset })
+  useEffect(() => { setSel(new Set()) }, [search, channel, has, lacks, match, only, pins, event, ad, adset, campaignId, landing, adMatch, region, city, dState, dCity, sort, limit, f.from, f.to, f.includeExcluded, f.deviceType])
   const activePreset = PRESETS.find(([, , h, l, m]) => same(h, has) && same(l, lacks) && (h.length < 2 || m === match))?.[0]
   const stateOf = (k) => (has.includes(k) ? 'did' : lacks.includes(k) ? 'not' : 'any')
   const setFlag = (k, st) => {
@@ -119,7 +120,7 @@ export default function Sessions() {
         <Search value={search} onChange={setSearch} placeholder="Search session id, IP, phone, name, email, city, campaign, pincode, or an event name (add_to_cart)…" />
         <Chips value={only} onChange={setOnly} options={[{ value: 'counted', label: 'Normal view' }, { value: 'excluded', label: 'Only hidden (excluded)' }]} />
         <button type="button" className={`btn ${nFilters ? 'primary' : ''}`} aria-expanded={panel} onClick={() => setPanel(!panel)}>
-          Filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
+          Session filters{nFilters ? ` · ${nFilters}` : ''} {panel ? '▴' : '▾'}
         </button>
         {(nFilters > 0 || search) && <button type="button" className="btn" onClick={clearAll}>Clear all</button>}
         <ShareLink tab="sessions" state={{ search, channel, has, lacks, match, only, pincode, event, ad, adset, campaignId, landing, adMatch, region, city, dState, dCity, sort }} />

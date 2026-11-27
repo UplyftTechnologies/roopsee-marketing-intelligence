@@ -50,11 +50,6 @@ export const DEVICE_OPTIONS = [
 export const SALES_OPTIONS = [['', 'All sales'], ['paid_or_cod', 'Paid or cash on delivery'], ['confirmed', 'Confirmed payments only']]
 export const shareLink = (tab, state) => `${location.origin}${location.pathname}#${tab}?s=${encodeShare(state)}`
 
-/** Forget the remembered filters of one page (keys are `mi:<page>.<name>`). */
-export function clearPersisted(page) {
-  try { Object.keys(sessionStorage).filter((k) => k.startsWith(`mi:${page}.`)).forEach((k) => sessionStorage.removeItem(k)) } catch { /* ignore */ }
-}
-
 /** Global filters shared by every tab. `tick` bumps after a refresh/exclusion apply so views reload. */
 export const FilterCtx = createContext(null)
 export const useFilters = () => useContext(FilterCtx)
@@ -63,6 +58,7 @@ export const useFilters = () => useContext(FilterCtx)
 export function useApi(path, extra = {}, { scoped = true } = {}) {
   const f = useFilters()
   const [state, setState] = useState({ data: null, loading: true, error: null })
+  const [attempt, setAttempt] = useState(0)
   const dev = scoped && f.deviceApplies ? f.deviceType || '' : ''
   const sales = scoped && f.salesApplies ? f.salesBasis || '' : ''
   const key = JSON.stringify([path, extra, scoped ? [f.from, f.to, f.includeExcluded, dev, sales] : null, f.tick])
@@ -77,8 +73,16 @@ export function useApi(path, extra = {}, { scoped = true } = {}) {
       .catch((error) => live && setState({ data: null, loading: false, error: error.message }))
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
-  return state
+  }, [key, attempt])
+  return { ...state, retry: () => setAttempt((n) => n + 1) }
+}
+
+/** Keep a list's page for the same filters so returning from a detail can restore the same rows. */
+export function usePageOffset(key, filters) {
+  const scope = JSON.stringify(filters)
+  const [last, setLast] = usePersisted(`${key}.page`, null)
+  const offset = last?.scope === scope ? last.offset : 0
+  return [offset, (next) => setLast({ scope, offset: next })]
 }
 
 const nf = new Intl.NumberFormat('en-IN')

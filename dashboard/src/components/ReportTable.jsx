@@ -35,7 +35,8 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
   const d = s.data
   const dimLabel = dimensions.find((x) => x[0] === dimension)?.[1] || ''
   const onHead = (key) => { if (sort === key) setDirection(direction === 'desc' ? 'asc' : 'desc'); else { setSort(key); setDirection(key === 'dim' ? 'asc' : 'desc') } }
-  const arrow = (key) => (sort === key ? <span className="arrow">{direction === 'desc' ? '▼' : '▲'}</span> : null)
+  const arrow = (key) => (sort === key ? <span className="arrow" aria-hidden="true">{direction === 'desc' ? '▼' : '▲'}</span> : null)
+  const sortState = (key) => sort === key ? (direction === 'desc' ? 'descending' : 'ascending') : undefined
   const drill = DRILL[dimension]
   const max = d ? Math.max(1, ...d.rows.map((r) => r.sessions)) : 1
   const exportFields = [[dimLabel, 'dim'], ...COLS.map(([k, label]) => [label, k])]
@@ -62,9 +63,9 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
             <table className="rt">
               <thead>
                 <tr>
-                  <th className={`sortable ${sort === 'dim' ? 'sorted' : ''}`} onClick={() => onHead('dim')}>{dimLabel}{arrow('dim')}</th>
+                  <th scope="col" className="sortable" aria-sort={sortState('dim')}><button type="button" className="table-sort" onClick={() => onHead('dim')}>{dimLabel}{arrow('dim')}</button></th>
                   {cols.map(([k, label, help]) => (
-                    <th key={k} className={`num sortable ${sort === k ? 'sorted' : ''}`} onClick={() => onHead(k)} title={GLOSSARY[help]}>{label}{arrow(k)}</th>
+                    <th key={k} scope="col" className="num sortable" aria-sort={sortState(k)} title={GLOSSARY[help]}><button type="button" className="table-sort" onClick={() => onHead(k)}>{label}{arrow(k)}</button></th>
                   ))}
                 </tr>
               </thead>
@@ -76,7 +77,8 @@ export default function ReportTable({ title = 'Traffic', sub, defaultDimension =
                 )}
                 {d.rows.length === 0 && <tr><td colSpan={cols.length + 1}><div className="empty">No rows match. Try a wider date range, a lower minimum, or clear the search.</div></td></tr>}
                 {d.rows.map((r) => (
-                  <tr key={r.dim} className={drill ? 'click' : ''} onClick={drill ? () => f.go('sessions', drill(r.dim)) : undefined} title={drill ? 'Open these sessions' : undefined}>
+                  <tr key={r.dim} className={drill ? 'click' : ''} onClick={drill ? () => f.go('sessions', drill(r.dim)) : undefined} title={drill ? 'Open these sessions' : undefined}
+                    tabIndex={drill ? 0 : undefined} onKeyDown={drill ? (e) => { if (e.key === 'Enter') f.go('sessions', drill(r.dim)) } : undefined}>
                     <td className="dimcell" title={r.dim}>{r.dim}</td>
                     {cols.map(([k, , , cell]) => <td key={k} className="num">{cell(r, max)}</td>)}
                   </tr>

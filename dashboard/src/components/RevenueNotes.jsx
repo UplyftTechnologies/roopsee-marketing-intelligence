@@ -11,7 +11,7 @@ export function RevenueSplit({ kpis }) {
       <div>
         <b>Of {inr(kpis.revenue)} revenue:</b>{' '}
         {parts.filter(([, v]) => v > 0).map(([label, v], i) => <span key={label}>{i > 0 ? ' · ' : ''}<b>{inr(v)}</b> <span className="muted">{label}</span></span>)}
-        <div className="muted" style={{ fontSize: 12 }}>Every valid sale counts as revenue when it is placed. Use <b>Sales counted</b> at the top to see only paid sales.</div>
+        <div className="muted" style={{ fontSize: 12 }}>Revenue includes valid orders when placed. For paid sales only, choose <b>Confirmed payments only</b> under Report filters.</div>
       </div>
       <div className="spacer" />
       <button type="button" className="btn small" onClick={() => f.go('orders')}>Open Orders →</button>

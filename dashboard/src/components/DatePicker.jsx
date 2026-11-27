@@ -7,7 +7,7 @@ export default function DatePicker({ presets, active, from, to, rangeText, prevT
   const [cf, setCf] = useState(from)
   const [ct, setCt] = useState(to)
   return (
-    <Popover align="right" width={330} trigger={({ open, toggle }) => (
+    <Popover align="right" width={330} label="Report date range" trigger={({ open, toggle }) => (
       <button type="button" className="pill-btn" aria-expanded={open} aria-haspopup="dialog" onClick={() => { setCf(from); setCt(to); toggle() }}>
         <Icon name="calendar" size={18} />
         <span>{active || 'Custom'}<small> · {rangeText}</small></span>

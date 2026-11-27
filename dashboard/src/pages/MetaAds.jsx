@@ -321,7 +321,6 @@ export default function MetaAds() {
           const b = o.blended
           return (
             <>
-              <label className="chk" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> <b>Only active ads</b> <span className="muted" style={{ fontSize: 12 }}>hides paused, archived and deleted campaigns, ad sets and ads in the tables below · the totals above stay for everything</span></label>
               <ScorecardStrip>
                 {CARDS.map((k) => <Scorecard key={k} metric={k} kpis={t} prev={o.prev} compare={f.compare} spark={METRICS[k].series ? o.current[METRICS[k].series] : undefined} active={metric === k} onClick={METRICS[k].series ? () => setMetric(k) : undefined} />)}
               </ScorecardStrip>
@@ -358,6 +357,11 @@ export default function MetaAds() {
                 </div>
               )}
 
+              <label className="toggle">
+                <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+                <b>Show active campaigns and ads only</b>
+                <span className="muted">Applies to the campaign tables below.</span>
+              </label>
               <Levels campaigns={o.campaigns} active={active} />
 
               {(active ? o.wasted.filter((r) => isActive(r.status)) : o.wasted).length > 0 && (

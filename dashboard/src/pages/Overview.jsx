@@ -64,12 +64,9 @@ export default function Overview() {
           <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
             {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 280 }} />}
           </Card>
-          <ReportTable title="Where traffic comes from" sub="Group by channel, campaign, device, place… Click a row to see its sessions." />
+          <ReportTable title="Where traffic comes from" sub="Group visits by channel, campaign, device or location. Orders here are credited to their tracked session. The scorecards use order dates." />
           <Card title="When people visit"><Heatmap hours={hours} /></Card>
           <PageSpeed />
-          <div className="muted" style={{ fontSize: 12 }}>
-            Scorecards and the chart use the order date; the table credits an order to the session it was placed in, so the two can differ slightly.
-          </div>
         </>
       )}
     </Loading>

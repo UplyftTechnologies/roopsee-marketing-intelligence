@@ -42,20 +42,19 @@ export default function Home() {
     <Loading state={ins}>
       {({ kpis, prev, insights }) => (
         <>
-          <ScorecardStrip>
+          <ScorecardStrip className="home-metrics">
             {CARDS.map((k) => (
               <Scorecard key={k} metric={k} kpis={kpis} prev={prev} compare={f.compare} spark={ts.data?.current[METRICS[k].series]} active={metric === k} onClick={() => setMetric(k)} />
             ))}
           </ScorecardStrip>
           <RevenueSplit kpis={kpis} />
-          <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
-            {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} height={230} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 250 }} />}
-          </Card>
-
           <div className="grid g2">
             <Attention insights={insights} />
             <Working insights={insights} />
           </div>
+          <Card title={METRICS[metric].label} sub="Click a tile above to change the chart">
+            {ts.data ? <MetricChart ts={ts.data} metric={metric} compare={f.compare} height={230} ranges={{ cur: f.rangeText, prev: f.prevText }} note={(!f.to || f.to === f.meta?.range?.last) ? 'The latest day may be incomplete' : undefined} /> : <div className="skeleton" style={{ height: 250 }} />}
+          </Card>
 
           <Card title="Recent logins" sub="the latest people to log in, new accounts and returning customers"
             right={<button className="btn small" onClick={() => f.go('logins')}>See all logins →</button>}>

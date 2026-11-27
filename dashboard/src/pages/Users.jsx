@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { dt, inr, num, useApi, useFilters, usePersisted } from '../api'
+import { dt, inr, num, useApi, useFilters, usePageOffset, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, nextSort } from '../ui'
 import BulkExclude from '../components/BulkExclude'
 import ShareLink from '../components/ShareLink'
@@ -16,12 +16,13 @@ export default function Users() {
   const [segment, setSegment] = usePersisted('users.segment', sh?.segment ?? '', !!sh)
   const [preset, setPreset] = usePersisted('users.preset', sh?.preset ?? '', !!sh)
   const [sort, setSort] = usePersisted('users.sort', sh?.sort ?? { key: 'last_seen', dir: 'desc' }, !!sh)
-  const [offset, setOffset] = useState(0)
   const [sel, setSel] = useState(new Set())
   const [limit, setLimit] = usePersisted('users.limit', 50)
   const counts = useApi('/users/counts')
-  const s = useApi('/users', { search, segment: segment || undefined, preset: preset || undefined, sort: sort.key, direction: sort.dir, limit, offset })
-  useEffect(() => { setOffset(0); setSel(new Set()) }, [search, segment, preset, sort, limit])
+  const filters = { search, segment: segment || undefined, preset: preset || undefined, sort: sort.key, direction: sort.dir, limit }
+  const [offset, setOffset] = usePageOffset('users', [filters, f.from, f.to, f.includeExcluded])
+  const s = useApi('/users', { ...filters, offset })
+  useEffect(() => { setSel(new Set()) }, [search, segment, preset, sort, limit])
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const toggleAll = (ids, on) => setSel((p) => { const n = new Set(p); ids.forEach((i) => (on ? n.add(i) : n.delete(i))); return n })
 

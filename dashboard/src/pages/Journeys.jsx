@@ -262,7 +262,7 @@ export default function Journeys() {
         const spec = d.journeys.find((j) => j.key === tab)
         return (
           <>
-            <div className="chip-row" role="tablist" aria-label="Journeys"><Chips value={tab} onChange={(v) => { setTab(v); setHow(false) }} options={tabs} /></div>
+            <div className="chip-row" role="group" aria-label="Journey view"><Chips value={tab} onChange={(v) => { setTab(v); setHow(false) }} options={tabs} /></div>
             {tab === 'presets' ? <JourneyPresets />
               : tab === 'explore' ? <Explorer meta={d.journeys} />
               : tab === 'after_order' ? <AfterOrder spec={spec} how={how} setHow={setHow} />

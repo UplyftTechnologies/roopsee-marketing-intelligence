@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import { DEVICE_OPTIONS, FilterCtx, SALES_OPTIONS, api, clearPersisted, decodeShare, num } from './api'
+import { DEVICE_OPTIONS, FilterCtx, SALES_OPTIONS, api, decodeShare, encodeShare, num } from './api'
 import Icon from './components/Icon'
 import Popover from './components/Popover'
 import DatePicker from './components/DatePicker'
@@ -37,27 +37,27 @@ const Dictionary = lazy(() => import('./pages/Dictionary'))
 // [key, label, icon, one-line description (tooltip + page subtitle), component, group]
 const NAV = [
   ['home', 'Home', 'home', 'What matters right now', Home, ''],
-  ['performance', 'Performance', 'chart', 'Traffic, orders and trends over time', Overview, 'Reports'],
-  ['orders', 'Orders', 'receipt', 'Every order, payments, delivery and order analytics', Orders, 'Reports'],
-  ['funnel', 'Funnel & checkout', 'funnel', 'Where people drop off, who to follow up', Funnel, 'Reports'],
-  ['journeys', 'Journeys', 'route', 'Every journey: purchase, checkout, login, quiz, search, Roop and delivery, and each visit', Journeys, 'Reports'],
-  ['painpoints', 'Pain points', 'alert', 'What went wrong from login to payment, and who got stuck', PainPoints, 'Reports'],
-  ['speed', 'Page speed', 'gauge', 'How fast pages load, and every visit that hit a slow or broken moment', SpeedPage, 'Reports'],
-  ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Reports'],
-  ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Reports'],
-  ['deeper', 'Ads & landing pages', 'image', 'What the visits each ad and landing product brought did, and ad → skin concern → products', Deeper, 'Reports'],
-  ['map', 'Map', 'map', 'Visits, checkouts started and orders on a map, by state, city and pincode', MapPage, 'Reports'],
-  ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where from', Cohorts, 'Reports'],
-  ['basket', 'Basket & AOV', 'basket', 'What people buy and how to raise order value', Basket, 'Reports'],
-  ['products', 'Products', 'tag', 'Roopsee catalog and offer prices', Products, 'Reports'],
-  ['prices', 'Price intelligence', 'tag', 'Our prices against Nykaa, Tira and Purplle, and what to reprice', Prices, 'Reports'],
-  ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],
-  ['audiences', 'Audiences', 'target', 'Who you can reach, and with what', Audiences, 'Grow'],
-  ['sessions', 'Sessions', 'list', 'Every visit, with a full event timeline', Sessions, 'Explore'],
-  ['events', 'Events', 'pulse', 'Every tracked event, from event names down to payload fields', Events, 'Explore'],
-  ['logins', 'Logins', 'login', 'Every login: who, how, new or returning', Logins, 'Explore'],
-  ['chats', 'Roop chats', 'chat', 'What shoppers ask Roop, and what it answers', Chats, 'Explore'],
-  ['users', 'Users', 'users', 'People and where they are in the journey', Users, 'Explore'],
+  ['performance', 'Performance', 'chart', 'Traffic, orders and trends over time', Overview, 'Overview'],
+  ['products', 'Products', 'tag', 'Roopsee catalog and offer prices', Products, 'Catalog & pricing'],
+  ['prices', 'Price intelligence', 'trend', 'Compare Roopsee with Nykaa, Tira and Purplle', Prices, 'Catalog & pricing'],
+  ['orders', 'Orders', 'receipt', 'Orders, payments and delivery', Orders, 'Sales & checkout'],
+  ['funnel', 'Funnel & checkout', 'funnel', 'Where shoppers drop off', Funnel, 'Sales & checkout'],
+  ['journeys', 'Journeys', 'route', 'Shopper journeys across purchase, login, quiz and support', Journeys, 'Sales & checkout'],
+  ['basket', 'Basket & AOV', 'basket', 'What people buy and how to raise order value', Basket, 'Sales & checkout'],
+  ['campaigns', 'Campaigns', 'megaphone', 'Which ads and sources are working', Campaigns, 'Acquisition'],
+  ['meta', 'Meta Ads', 'trend', 'Spend from Meta joined to your orders', MetaAds, 'Acquisition'],
+  ['deeper', 'Ads & landing pages', 'image', 'What shoppers do after arriving from an ad', Deeper, 'Acquisition'],
+  ['map', 'Map', 'map', 'Visits, checkouts and orders by location', MapPage, 'Acquisition'],
+  ['users', 'Users', 'users', 'People and where they are in the journey', Users, 'Customers'],
+  ['audiences', 'Audiences', 'target', 'Find audiences to reach', Audiences, 'Customers'],
+  ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where they are from', Cohorts, 'Customers'],
+  ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Customers'],
+  ['logins', 'Logins', 'login', 'Login activity and account sign-ups', Logins, 'Customers'],
+  ['chats', 'Roop chats', 'chat', 'What shoppers ask Roop', Chats, 'Customers'],
+  ['sessions', 'Sessions', 'list', 'Visits and their event timelines', Sessions, 'Diagnostics'],
+  ['events', 'Events', 'pulse', 'Tracked events and their recorded fields', Events, 'Diagnostics'],
+  ['painpoints', 'Pain points', 'alert', 'Where shoppers encountered problems', PainPoints, 'Diagnostics'],
+  ['speed', 'Page speed', 'gauge', 'Slow and broken visits', SpeedPage, 'Diagnostics'],
   ['exclusions', 'Exclusions', 'ban', 'Remove internal, test and bot traffic', Exclusions, 'Admin'],
   ['data', 'Data & ETL', 'database', 'Refresh data, tracking health', DataPage, 'Admin'],
   ['dictionary', 'Data dictionary', 'book', 'How every number is worked out', Dictionary, 'Admin'],
@@ -68,10 +68,15 @@ const EXTRA = [
   ['session', 'Session', 'list', 'Everything about one session', SessionPage, 'Sessions'],
   ['order', 'Order', 'receipt', 'Everything about one order', OrderPage, 'Orders'],
 ]
+const DETAIL_TABS = { person: 'users', session: 'sessions', order: 'orders' }
+const routeLabel = (key) => [...NAV, ...EXTRA].find(([route]) => route === key)?.[1] || key
 function parseHash() {
-  const [path, query = ''] = decodeURIComponent(location.hash.slice(1)).split('?')
+  const [path, query = ''] = location.hash.slice(1).split('?')
   const [a, ...rest] = path.split('/')
-  if ((a === 'person' || a === 'session' || a === 'order') && rest.length) return { tab: a, prefill: { key: rest.join('/') } }
+  if (DETAIL_TABS[a] && rest.length) {
+    try { return { tab: a, prefill: { key: decodeURIComponent(rest.join('/')) } } }
+    catch { return { tab: DETAIL_TABS[a], prefill: {} } }
+  }
   const share = decodeShare(new URLSearchParams(query).get('s'))  // a shared link carries the dates and filters
   return { tab: NAV.some((n) => n[0] === a) ? a : 'home', prefill: share ? { share } : {} }
 }
@@ -102,6 +107,11 @@ export default function App() {
   const [menu, setMenu] = useState(false)
   const inited = useRef(false)
   const topbarRef = useRef(null)
+  const mainRef = useRef(null)
+  const menuButtonRef = useRef(null)
+  const railRef = useRef(null)
+  const detailOrigin = useRef(null)
+  const restoreScroll = useRef(0)
   useEffect(() => {  // the sticky bar can wrap on small screens; tables pin their headings just below it
     const el = topbarRef.current
     if (!el) return undefined
@@ -112,16 +122,64 @@ export default function App() {
     return () => ro?.disconnect()
   }, [])
 
-  const go = (key, pre = {}) => { setPrefill(pre); setTab(key); setNavKey((k) => k + 1); setMenu(false); window.scrollTo(0, 0) }
+  const go = (key, pre = {}, scroll = 0) => {
+    if (DETAIL_TABS[key] && !DETAIL_TABS[tab]) detailOrigin.current = { tab, scroll: window.scrollY }
+    if (!DETAIL_TABS[key]) detailOrigin.current = null
+    restoreScroll.current = scroll
+    setPrefill(pre)
+    setTab(key)
+    setNavKey((k) => k + 1)
+    setMenu(false)
+    if (!scroll) window.scrollTo(0, 0)
+  }
+  const backTab = DETAIL_TABS[tab] && (detailOrigin.current?.tab || DETAIL_TABS[tab])
+  const back = () => go(backTab, {}, detailOrigin.current?.scroll || 0)
   useEffect(() => {
-    const h = ['person', 'session', 'order'].includes(tab) && prefill.key ? `${tab}/${prefill.key}` : tab
-    lastHash.current = h
-    location.hash = ['person', 'session', 'order'].includes(tab) && prefill.key ? `${tab}/${encodeURIComponent(prefill.key)}` : tab
+    const top = restoreScroll.current
+    const main = mainRef.current
+    restoreScroll.current = 0
+    if (!top || !main) return undefined
+    const scrollBack = () => {
+      if (document.documentElement.scrollHeight - window.innerHeight < top) return
+      window.scrollTo(0, top)
+      observer.disconnect()
+    }
+    const observer = new ResizeObserver(scrollBack)
+    observer.observe(main)
+    const timeout = setTimeout(() => { observer.disconnect(); if (window.scrollY === 0) window.scrollTo(0, top) }, 5000)
+    return () => { observer.disconnect(); clearTimeout(timeout) }
+  }, [navKey])
+  useEffect(() => {
+    if (!menu) return undefined
+    const rail = railRef.current
+    const activeItem = rail?.querySelector('[aria-current="page"]') || rail?.querySelector('.rail-item')
+    activeItem?.focus()
+    const onEscape = (event) => {
+      if (event.key !== 'Escape') return
+      setMenu(false)
+      menuButtonRef.current?.focus()
+    }
+    document.addEventListener('keydown', onEscape)
+    return () => document.removeEventListener('keydown', onEscape)
+  }, [menu])
+  useEffect(() => {
+    const hash = DETAIL_TABS[tab] && prefill.key ? `${tab}/${encodeURIComponent(prefill.key)}`
+      : prefill.share ? `${tab}?s=${encodeShare(prefill.share)}` : tab
+    lastHash.current = hash
+    if (location.hash.slice(1) !== hash) location.hash = hash
   }, [tab, prefill])
   useEffect(() => {
     const onHash = () => {
-      if (decodeURIComponent(location.hash.slice(1)) === lastHash.current) return
+      if (location.hash.slice(1) === lastHash.current) return
       const n = parseHash()
+      if (!DETAIL_TABS[n.tab]) detailOrigin.current = null
+      if (n.prefill.share) {
+        const shared = n.prefill.share
+        if ('from' in shared) { setFrom(shared.from || ''); setTo(shared.to || '') }
+        setHideInternal(shared.hide ?? true)
+        setDeviceType(shared.device || '')
+        setSalesBasis(shared.sales || '')
+      }
       setPrefill(n.prefill); setTab(n.tab); setNavKey((k) => k + 1)
     }
     window.addEventListener('hashchange', onHash)
@@ -138,13 +196,16 @@ export default function App() {
   useEffect(() => { loadMeta() }, [tick])
   const [clock, setClock] = useState(Date.now())
   const [doneMsg, setDoneMsg] = useState('')
+  const [refreshError, setRefreshError] = useState('')
+  const [startingRefresh, setStartingRefresh] = useState(false)
   const startN = useRef(null)
   useEffect(() => { const t = setInterval(() => setClock(Date.now()), 60000); return () => clearInterval(t) }, [])
   useEffect(() => {
     if (!meta?.job?.running) return undefined
     if (startN.current === null) startN.current = meta.raw_events?.n ?? 0
     const t = setInterval(async () => {
-      const j = await api('/jobs')
+      const j = await api('/jobs').catch(() => null)
+      if (!j) return
       if (!j.running) {
         clearInterval(t)
         const m = await api('/meta').catch(() => null)
@@ -185,6 +246,7 @@ export default function App() {
   const railActive = tab === 'person' ? 'users' : tab === 'session' ? 'sessions' : tab === 'order' ? 'orders' : tab
   const Page = cur[4]
   const isProducts = tab === 'products'
+  const showEventFreshness = !isProducts && tab !== 'prices'
   const dateless = tab === 'loyalty' || tab === 'audiences'
   // pages built on people or campaigns (not on visits) cannot be narrowed by device
   // the pages that show revenue and orders can count only paid sales
@@ -199,16 +261,32 @@ export default function App() {
   const crossesUpgrade = !noDates && tc && ((from ? from < tc : first && first < tc) || (compare && prevStart && prevStart < tc))
   const upgradeText = tc ? `Tracking was upgraded on ${fmt(tc)}. Session counts, bounce rate and session length from before that date are not comparable with after it.` : ''
 
-  const ctx = useMemo(() => ({ from, to, includeExcluded: !hideInternal, deviceType, deviceApplies, salesBasis, salesApplies, compare: compare && canCompare, tick, bump: () => setTick((x) => x + 1), meta, reloadMeta: loadMeta, go, prefill, rangeText, prevText }),
-    [from, to, hideInternal, deviceType, deviceApplies, salesBasis, salesApplies, compare, canCompare, tick, meta, prefill, rangeText, prevText])
-  const changed = (hideInternal ? 0 : 1) + (deviceType && deviceApplies ? 1 : 0) + (salesBasis && salesApplies ? 1 : 0)
-  const startRefresh = async () => { await api('/refresh', { method: 'POST', params: { mode: 'full' } }); loadMeta() }
+  const ctx = useMemo(() => ({ from, to, includeExcluded: !hideInternal, deviceType, deviceApplies, salesBasis, salesApplies, compare: compare && canCompare, tick, bump: () => setTick((x) => x + 1), meta, reloadMeta: loadMeta, go, back, backLabel: routeLabel(backTab), prefill, rangeText, prevText }),
+    [tab, backTab, from, to, hideInternal, deviceType, deviceApplies, salesBasis, salesApplies, compare, canCompare, tick, meta, prefill, rangeText, prevText])
+  const activeFilters = [
+    !hideInternal && ['All traffic', () => setHideInternal(true)],
+    deviceApplies && deviceType && [DEVICE_OPTIONS.find(([key]) => key === deviceType)?.[1] || deviceType, () => setDeviceType('')],
+    salesApplies && salesBasis && [SALES_OPTIONS.find(([key]) => key === salesBasis)?.[1] || salesBasis, () => setSalesBasis('')],
+  ].filter(Boolean)
+  const showReportFilters = !isProducts && !['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab)
+  const startRefresh = async () => {
+    setStartingRefresh(true)
+    setRefreshError('')
+    try {
+      const nextJob = await api('/refresh', { method: 'POST', params: { mode: 'full' } })
+      setMeta((current) => ({ ...current, job: nextJob }))
+      await loadMeta()
+    } catch (error) { setRefreshError(error.message) }
+    finally { setStartingRefresh(false) }
+  }
   let lastGroup = null
 
   return (
     <FilterCtx.Provider value={ctx}>
       <div className={`app ${collapsed ? 'collapsed' : ''}`}>
-        <aside className={`rail ${menu ? 'open' : ''}`} aria-label="Main navigation">
+        <a className="skip-content" href="#main-content" onClick={(e) => { e.preventDefault(); mainRef.current?.focus() }}>Skip to content</a>
+        {menu && <button type="button" className="rail-backdrop" tabIndex={-1} aria-label="Close navigation" onClick={() => { setMenu(false); menuButtonRef.current?.focus() }} />}
+        <aside className={`rail ${menu ? 'open' : ''}`} aria-label="Main navigation" id="main-navigation" ref={railRef}>
           <div className="rail-brand"><div className="logo">R</div><div><b>Roopsee</b><small>Marketing Intelligence</small></div></div>
           <nav>
             {NAV.map(([k, label, icon, desc, , group]) => {
@@ -217,7 +295,7 @@ export default function App() {
               return (
                 <div key={k}>
                   {header}
-                  <button type="button" className={`rail-item ${railActive === k ? 'active' : ''}`} onClick={() => { clearPersisted(k); go(k) }} title={`${label} – ${desc}`} aria-current={railActive === k ? 'page' : undefined}>
+                  <button type="button" className={`rail-item ${railActive === k ? 'active' : ''}`} onClick={() => { go(k); if (menu) menuButtonRef.current?.focus() }} title={desc} aria-label={label} aria-current={railActive === k ? 'page' : undefined}>
                     <Icon name={icon} /><span className="rail-label">{label}</span>
                   </button>
                 </div>
@@ -242,26 +320,30 @@ export default function App() {
 
         <div className="main">
           <header className="topbar2" ref={topbarRef}>
-            <button type="button" className="icon-btn menu-btn2" onClick={() => setMenu(!menu)} aria-label="Open menu"><Icon name="menu" /></button>
-            <div className="page-title"><h1>{cur[1]}</h1><span className="crumb" title={cur[3]}>{cur[5] ? `${cur[5]} · ` : ''}{cur[3]}</span></div>
-            <div style={{ flex: 1 }} />
-            {job?.running
-              ? <span className="badge warn" role="status">Refreshing: {job.message || 'working'} · {Math.max(0, Math.round((Date.now() - new Date(job.started).getTime()) / 1000))}s</span>
-              : !isProducts && lastEvent && <span className={`badge ${freshTone}`} title={`Newest event ${lastEvent.toLocaleString('en-IN')}${meta?.last_transform ? ` · tables rebuilt ${new Date(meta.last_transform).toLocaleString('en-IN')}` : ''}. Press Refresh to pull newer data.`}>Data {ageText}</span>}
-            {doneMsg && <span className="badge good" role="status">{doneMsg}</span>}
-            {job?.error && <span className="badge bad" title={job.error}>last refresh failed: {String(job.error).slice(0, 60)}</span>}
+            <div className="report-heading">
+              <button type="button" className="icon-btn menu-btn2" ref={menuButtonRef} onClick={() => setMenu(!menu)} aria-label={menu ? 'Close menu' : 'Open menu'} aria-expanded={menu} aria-controls="main-navigation"><Icon name="menu" /></button>
+              <div className="page-title"><h1>{cur[1]}</h1><span className="crumb" title={cur[3]}>{cur[5] ? `${cur[5]} · ` : ''}{cur[3]}</span></div>
+              <div className="report-status">
+                {job?.running
+                  ? <span className="badge warn" role="status">Refreshing dashboard · {job.message || 'working'}</span>
+                  : showEventFreshness && lastEvent && <span className={`badge ${freshTone}`} title={`Latest site event ${lastEvent.toLocaleString('en-IN')}`}>Site activity {ageText}</span>}
+                {doneMsg && <span className="badge good" role="status">{doneMsg}</span>}
+                {job?.error && <span className="badge bad" title={job.error}>Dashboard refresh failed</span>}
+                {crossesUpgrade && !hideUpgrade && (
+                  <span className="badge info upgrade-chip" title={upgradeText}><Icon name="info" size={14} />Tracking changed
+                    <button type="button" className="chip-x" aria-label="Hide tracking note" title="Hide tracking note" onClick={() => { setHideUpgrade(true); try { localStorage.setItem('mi:hide-upgrade', tc) } catch { /* ignore */ } }}>×</button></span>
+                )}
+              </div>
+            </div>
+            <div className="report-controls">
             {!noDates && (
               <DatePicker presets={presets} active={active} from={from} to={to} rangeText={rangeText} prevText={prevText} compare={compare} setCompare={setCompare}
                 setRange={(f, t) => { setFrom(f); setTo(t) }} first={first} last={last} canCompare={canCompare} note={crossesUpgrade ? upgradeText : null} />
             )}
-            {crossesUpgrade && !hideUpgrade && (
-              <span className="badge info upgrade-chip" title={upgradeText}><Icon name="info" size={14} />Tracking changed {fmt(tc)}
-                <button type="button" className="chip-x" aria-label="Hide this note" title="Hide this note" onClick={() => { setHideUpgrade(true); try { localStorage.setItem('mi:hide-upgrade', tc) } catch { /* ignore */ } }}>×</button></span>
-            )}
-            {!isProducts && !['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab) && (
-              <Popover align="right" width={320} trigger={({ open, toggle }) => (
+            {showReportFilters && (
+              <Popover align="right" width={320} label="Report filters" trigger={({ open, toggle }) => (
                 <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Hidden traffic, devices and which sales count">
-                  <Icon name="sliders" size={17} />Filters{changed > 0 ? <span className="count-badge">{changed}</span> : <small>default</small>}<Icon name="chevron" size={16} />
+                  <Icon name="sliders" size={17} />Report filters{activeFilters.length > 0 && <span className="count-badge">{activeFilters.length}</span>}<Icon name="chevron" size={16} />
                 </button>
               )}>
                 {(close) => (
@@ -291,19 +373,26 @@ export default function App() {
                         <small className="muted">All sales = every valid order when it is placed. Cash on delivery is counted before the cash is collected.</small>
                       </>
                     )}
-                    {changed > 0 && <><div className="pop-sep" /><button type="button" className="pop-item" onClick={() => { setHideInternal(true); setDeviceType(''); setSalesBasis('') }}>Reset to default</button></>}
+                    {activeFilters.length > 0 && <><div className="pop-sep" /><button type="button" className="pop-item" onClick={() => activeFilters.forEach(([, remove]) => remove())}>Reset report filters</button></>}
                   </div>
                 )}
               </Popover>
             )}
-            <button type="button" className="pill-btn" disabled={job?.running} onClick={startRefresh} title="Pull new events from Supabase (read-only) and rebuild everything">
-              <Icon name="refresh" size={18} />{job?.running ? 'Updating…' : 'Refresh'}
+            <button type="button" className="pill-btn" disabled={job?.running || startingRefresh} onClick={startRefresh} title="Pull site activity and the product catalog, then rebuild the reports">
+              <Icon name="refresh" size={18} />{job?.running || startingRefresh ? 'Updating…' : 'Refresh dashboard'}
             </button>
+            </div>
+            {showReportFilters && activeFilters.length > 0 && (
+              <div className="report-filter-summary" aria-label="Active report filters">
+                {activeFilters.map(([label, remove]) => <button type="button" key={label} className="chip" onClick={remove} aria-label={`Remove report filter ${label}`}>{label} <span aria-hidden="true">×</span></button>)}
+              </div>
+            )}
           </header>
-          {!isProducts && freshTone === 'bad' && !job?.running && <div className="notice" role="note"><Icon name="info" size={18} />The data is {ageText} old, so recent activity is missing. Press Refresh to pull the latest events.</div>}
+          {refreshError && <div className="notice" role="alert"><Icon name="alert" size={18} />Could not refresh the dashboard. {refreshError}</div>}
+          {showEventFreshness && freshTone === 'bad' && !job?.running && <div className="notice" role="note"><Icon name="info" size={18} />The latest site activity is {ageText}. Use Refresh dashboard to pull newer events.</div>}
           {!isProducts && deviceType && !deviceApplies && !['exclusions', 'data', 'dictionary'].includes(tab) && <div className="notice" role="note"><Icon name="info" size={18} />The device filter does not apply to this page: it is built on people or campaigns, not on single visits.</div>}
           {dateless && <div className="notice" role="note"><Icon name="info" size={18} />All-time view: the date range does not apply to this page.</div>}
-          <main className="page" key={navKey}>
+          <main className="page" key={navKey} id="main-content" tabIndex={-1} ref={mainRef}>
             {!isProducts && meta && !meta.ready
               ? <div className="banner err">No analytics tables yet. Run <span className="mono">python3 run.py</span> or press “Refresh”.</div>
               : <Suspense fallback={<div className="skeleton" style={{ height: 320 }} />}><Page /></Suspense>}

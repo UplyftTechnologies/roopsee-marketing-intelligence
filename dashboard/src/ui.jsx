@@ -89,7 +89,7 @@ export const Skeleton = () => (
 )
 
 export const Loading = ({ state, children }) => {
-  if (state.error) return <div className="banner err">Could not load: {state.error}</div>
+  if (state.error) return <div className="banner err" role="alert">Could not load this data. {state.error} {state.retry && <button type="button" className="btn small" onClick={state.retry}>Try again</button>}</div>
   if (!state.data) return <Skeleton />
   return children(state.data)
 }
@@ -215,7 +215,7 @@ export function ColumnsMenu({ cc }) {
   const [name, setName] = useState('')
   if (!cc.worth) return null
   return (
-    <Popover width={300} trigger={({ open, toggle }) => (
+    <Popover width={300} label="Table columns" trigger={({ open, toggle }) => (
       <button type="button" className={`btn small cols-btn${open ? ' on' : ''}`} onClick={toggle} aria-expanded={open} title="Choose which columns to show in this table">
         ▦ Columns{cc.changed || cc.pickable.some((c) => c.hidden) ? <span className="cols-count">{cc.shown}/{cc.total}</span> : null}
       </button>
@@ -275,7 +275,7 @@ const Row = memo(function Row({ r, id, cols, idOf, onRow, rowClass, selectable, 
  *  `expanded(row)`: optional; what it returns is drawn in a full-width line under that row (left out of Copy).
  *  Columns: { label, key?, sortBy? (field name or fn), num?, render?, cls? }  - sortable when key or sortBy is set.
  *  Client sort by default; pass `sort` ({key, dir}) + `onSort(key)` for server-side sorting of paginated data. */
-export function Table({ cols, rows, onRow, empty = 'Nothing here for this selection. Try a wider date range or turn off “Hide internal & bot traffic”.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll, id: tableId, expanded }) {
+export function Table({ cols, rows, onRow, empty = 'No rows match. Try clearing filters or widening the date range.', rowClass, selectable, selected, onToggle, onToggleAll, rowId, sort, onSort, scroll, id: tableId, expanded, pinFirst = false }) {
   const [local, setLocal] = useState(null)
   const cc = useColumns(tableId || cols.filter((c) => c.label).map((c) => c.label).join('|').slice(0, 160), cols)
   const vis = cc.visible
@@ -349,17 +349,18 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
       return slot ? createPortal(btn, slot) : <div className="copy-row">{btn}</div>
     })()}
     <div className={`table-wrap${scroll ? ' scroll' : ''}`} ref={wrap}>
-      <table>
+      <table className={pinFirst && !selectable ? 'pin-first-column' : undefined}>
         <thead>
           <tr>
             {selectable && <th className="sel"><input type="checkbox" aria-label="Select all rows" checked={allOn} onChange={(e) => onToggleAll(ids, e.target.checked)} /></th>}
             {vis.map((c) => {
               const d = dirOf(c)
-              const can = !!sortOf(c)
+              const can = c.label && !!sortOf(c)
+              const label = can ? <button type="button" className="table-sort" onClick={() => click(c)}>{c.label}{d && <span className="arrow" aria-hidden="true">{d === 'asc' ? '▲' : '▼'}</span>}</button> : c.label
               return (
-                <th key={idOf(c)} className={`${c.num ? 'num' : ''} ${can ? 'sortable' : ''} ${d ? 'sorted' : ''}`} onClick={can ? () => click(c) : undefined}
+                <th key={idOf(c)} scope="col" className={`${c.num ? 'num' : ''} ${can ? 'sortable' : ''} ${d ? 'sorted' : ''}`}
                   aria-sort={d ? (d === 'asc' ? 'ascending' : 'descending') : undefined} title={can ? 'Click to sort' : undefined}>
-                  {c.label}{c.help && <> <Help id={c.help} /></>}{d && <span className="arrow">{d === 'asc' ? '▲' : '▼'}</span>}
+                  {label}{c.help && <> <Help id={c.help} /></>}
                 </th>
               )
             })}
@@ -409,7 +410,7 @@ export function ExportBtn({ rows, fields: allFields, name, preferenceKey = 'mi.e
   }
   return (
     <span className="export-grp" ref={ref}>
-      <button className="btn small" onClick={go} title="Download the rows loaded on this screen as a CSV file">Export CSV ({rows.length.toLocaleString('en-IN')} rows)</button>
+      <button type="button" className="btn small" onClick={go} title="Download the rows loaded on this screen as a CSV file">Export CSV ({rows.length.toLocaleString('en-IN')} {rows.length === 1 ? 'row' : 'rows'})</button>
       <label className="muted export-follow" title="When ticked, the CSV leaves out the columns you hid with the Columns button"><input type="checkbox" checked={follow} onChange={(e) => { setFollow(e.target.checked); store.set(preferenceKey, e.target.checked) }} /> shown columns only</label>
     </span>
   )
@@ -451,7 +452,7 @@ export function Chips({ options, value, onChange }) {
       {options.map((o) => {
         const v = typeof o === 'string' ? o : o.value
         const l = typeof o === 'string' ? o : o.label
-        return <button key={v} className={`chip ${value === v ? 'on' : ''}`} disabled={typeof o !== 'string' && o.disabled} onClick={() => onChange(v)}>{l}</button>
+        return <button type="button" key={v} className={`chip ${value === v ? 'on' : ''}`} aria-pressed={value === v} disabled={typeof o !== 'string' && o.disabled} onClick={() => onChange(v)}>{l}</button>
       })}
     </div>
   )
@@ -460,9 +461,19 @@ export function Chips({ options, value, onChange }) {
 /** Debounced search box. */
 export function Search({ value, onChange, placeholder }) {
   const [v, setV] = useState(value || '')
+  const timer = useRef(null)
+  useEffect(() => {
+    setV(value || '')
+    return () => clearTimeout(timer.current)
+  }, [value])
   return (
-    <input className="field search-field" style={{ minWidth: 340 }} placeholder={placeholder} aria-label={placeholder} type="search" value={v}
-      onChange={(e) => { setV(e.target.value); clearTimeout(Search.t); Search.t = setTimeout(() => onChange(e.target.value), 350) }} />
+    <input className="field search-field" placeholder={placeholder} aria-label={placeholder} type="search" value={v}
+      onChange={(e) => {
+        const next = e.target.value
+        setV(next)
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => onChange(next), 350)
+      }} />
   )
 }
 

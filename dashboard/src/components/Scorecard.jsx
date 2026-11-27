@@ -33,4 +33,4 @@ export function Scorecard({ metric, kpis, prev, spark, active, onClick, compare 
   )
 }
 
-export const ScorecardStrip = ({ children }) => <div className="scorecards" role="group" aria-label="Key metrics">{children}</div>
+export const ScorecardStrip = ({ children, className = '' }) => <div className={`scorecards ${className}`} role="group" aria-label="Key metrics">{children}</div>

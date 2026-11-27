@@ -1,6 +1,5 @@
-import { useState } from 'react'
-import { dt, inr, num, pct, useApi, useFilters } from '../api'
-import { Badge, Card, Chips, ExportBtn, Loading, Table } from '../ui'
+import { dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
+import { Badge, Card, Chips, ExportBtn, Kpi, Loading, Table } from '../ui'
 
 const RAMP = ['var(--seq-250)', 'var(--seq-300)', 'var(--seq-350)', 'var(--seq-400)', 'var(--seq-500)', 'var(--seq-600)']
 const OUTCOME = {
@@ -11,16 +10,23 @@ const CHANNELS = ['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic 
 
 export default function Funnel() {
   const f = useFilters()
-  const [channel, setChannel] = useState(f.prefill?.channel || 'All')
+  const [channel, setChannel] = usePersisted('funnel.channel', f.prefill?.channel || 'All', !!f.prefill?.channel)
   const s = useApi('/funnel', { channel: channel === 'All' ? undefined : channel })
   return (
     <>
-      <Chips options={CHANNELS} value={channel} onChange={setChannel} />
+      <div role="group" aria-label="Funnel traffic channel"><Chips options={CHANNELS} value={channel} onChange={setChannel} /></div>
       <Loading state={s}>
         {(d) => {
           const top = d.stages[0].sessions || 1
+          const checkout = d.stages[3]
+          const ordered = d.stages[5]
           return (
             <>
+              <div className="kpis">
+                <Kpi label="Sessions" value={num(d.stages[0].sessions)} help="sessions" />
+                <Kpi label="Reached checkout" value={num(checkout.sessions)} note={`${pct(checkout.of_first, 1)} of sessions`} />
+                <Kpi label="Sessions that ordered" value={num(ordered.sessions)} note={`${pct(ordered.of_first, 2)} of sessions`} />
+              </div>
               <Card title="Purchase funnel" sub="share of sessions that reached each step (each step = a session that did the action)">
                 {d.stages.map((st, i) => (
                   <div className="fn-row" key={st.stage}>
@@ -30,7 +36,7 @@ export default function Funnel() {
                   </div>
                 ))}
                 <div className="muted" style={{ marginTop: 6 }}>
-                  Tracked order sessions: {num(d.stages[5].sessions)} · orders in the database for this range: <b>{num(d.actual_orders)}</b> (some orders – COD, older sessions – have no tracked checkout events).
+                  {num(ordered.sessions)} tracked sessions placed an order. The order database recorded <b>{num(d.actual_orders)} valid orders</b> across all channels in this date range.
                 </div>
               </Card>
 
@@ -43,7 +49,7 @@ export default function Funnel() {
                     ]} />
                   <div className="muted" style={{ marginTop: 8 }}>{d.quiz.quiz_done <= d.quiz.quiz_start ? `Quiz completion ${pct(d.quiz.quiz_done / (d.quiz.quiz_start || 1), 0)} · ` : 'Older tracking logged completions without a start event · '}quiz → cart {pct(d.quiz.quiz_to_cart / (d.quiz.quiz_done || 1), 0)}</div>
                 </Card>
-                <Card title="Checkout outcomes" sub="sessions that reached checkout or payment">
+                <Card title="Checkout outcomes" sub="Sessions that reached checkout or payment across all channels in the selected dates.">
                   <Table cols={[
                     { label: 'Outcome', sortBy: 'outcome', render: (r) => <Badge tone={OUTCOME[r.outcome]?.[1]}>{OUTCOME[r.outcome]?.[0] || r.outcome}</Badge> },
                     { label: 'Sessions', sortBy: 'sessions', num: true, render: (r) => num(r.sessions) },

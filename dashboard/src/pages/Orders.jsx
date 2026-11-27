@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { dt, inr, num, pct, useApi, useFilters, usePersisted } from '../api'
+import { dt, inr, num, pct, useApi, useFilters, usePageOffset, usePersisted } from '../api'
 import { Badge, Card, Chips, ExportBtn, Loading, Pager, Search, Table, axis, chartTip, nextSort } from '../ui'
 import { Heatmap } from './Overview'
 import { METRICS } from '../metrics'
@@ -38,10 +38,10 @@ function OrdersTable() {
   const [coupon, setCoupon] = usePersisted('orders.coupon', sh?.coupon ?? '', !!sh)
   const [search, setSearch] = usePersisted('orders.search', sh?.search ?? '', !!sh)
   const [sort, setSort] = usePersisted('orders.sort', sh?.sort ?? { key: 'ts', dir: 'desc' }, !!sh)
-  const [offset, setOffset] = useState(0)
   const [limit, setLimit] = usePersisted('orders.limit', sh?.limit ?? 25, !!sh)
-  const s = useApi('/orders', { scope, status: status.join(',') || undefined, payment: payment.join(',') || undefined, coupon: coupon || undefined, search, sort: sort.key, direction: sort.dir, limit, offset })
-  useEffect(() => setOffset(0), [scope, status, payment, coupon, search, sort, limit])
+  const filters = { scope, status: status.join(',') || undefined, payment: payment.join(',') || undefined, coupon: coupon || undefined, search, sort: sort.key, direction: sort.dir, limit }
+  const [offset, setOffset] = usePageOffset('orders', [filters, f.from, f.to, f.includeExcluded, f.deviceType, f.salesBasis])
+  const s = useApi('/orders', { ...filters, offset })
   return (
     <>
       <div className="chip-row">
@@ -54,7 +54,7 @@ function OrdersTable() {
       <Loading state={s}>
         {({ rows, total, summary, options }) => (
           <>
-            <Card title="Filters" sub="pick any combination">
+            <Card title="Order filters" sub="Filter by status, payment method or coupon">
               <MultiPick label="Status" options={options.statuses} value={status} onChange={setStatus} />
               <div style={{ marginTop: 6 }}><MultiPick label="Payment" options={options.payment_methods} value={payment} onChange={setPayment} /></div>
               <div className="chip-row" style={{ marginTop: 6 }}>

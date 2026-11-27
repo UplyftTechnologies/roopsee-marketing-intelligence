@@ -1,16 +1,15 @@
 import RoopUsage from '../components/RoopUsage'
-import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { inr, num, pct, useApi, useFilters } from '../api'
-import { Badge, Card, Chips, ExportBtn, Loading, RateBar, Table, axis, chartTip, verdictTone } from '../ui'
+import { inr, num, pct, useApi, useFilters, usePersisted } from '../api'
+import { Badge, Card, Chips, ExportBtn, Kpi, Loading, RateBar, Table, axis, chartTip, verdictTone } from '../ui'
 import UtmHealth from '../components/UtmHealth'
 
 const CH = ['All', 'Paid Google', 'Paid Meta', 'MyGate Partner', 'Organic Search', 'Organic Social', 'Direct', 'Referral']
 
 export default function Campaigns() {
   const f = useFilters()
-  const [channel, setChannel] = useState(f.prefill?.channel || 'All')
-  const [min, setMin] = useState(30)
+  const [channel, setChannel] = usePersisted('campaigns.channel', f.prefill?.channel || 'All', !!f.prefill?.channel)
+  const [min, setMin] = usePersisted('campaigns.min', 30)
   const s = useApi('/campaigns', { min_sessions: min })
   return (
     <Loading state={s}>
@@ -27,6 +26,10 @@ export default function Campaigns() {
               <label className="toggle">Min sessions
                 <select className="field" value={min} onChange={(e) => setMin(+e.target.value)}>{[1, 10, 30, 100, 300].map((n) => <option key={n}>{n}</option>)}</select>
               </label>
+            </div>
+            <div className="kpis">
+              <Kpi label="Campaigns shown" value={num(shown.length)} note={`At least ${num(min)} sessions per campaign`} />
+              <Kpi label="Site-wide cart rate" value={pct(base, 2)} help="cartRate" note="Benchmark for this report’s date range" />
             </div>
             {rec && rec.orders_other > 0 && (
               <div className="banner" role="note">
