@@ -847,9 +847,10 @@ m AS (
   SELECT lower(c.id) AS id, c.created_at AS ts, timezone('Asia/Kolkata', c.created_at) AS ts_ist, timezone('Asia/Kolkata', c.created_at)::DATE AS date_ist,
     coalesce(nullif(c.conversation_id, ''), 'single:' || c.id) AS conversation, lower(c.user_id) AS user_id, nullif(c.guest_session_id, '') AS guest_session_id,
     c.intent, c.user_message AS question, c.reply, c.product_ids, c.product_id, coalesce(c.has_profile, false) AS has_profile, c.model, c.latency_ms, c.error,
-    c.rating, c.prompt_tokens, c.completion_tokens,
+    c.rating, c.prompt_tokens, c.completion_tokens, c.outcome, c.product_reference,
     {topic} AS topic,
-    (c.error IS NULL AND regexp_matches(coalesce(c.reply, ''), {_q(CHAT_COULD_NOT_ANSWER)}, 'i')) AS could_not_answer,
+    (c.error IS NULL AND CASE WHEN c.outcome IS NOT NULL THEN c.outcome = 'product_information_gap'
+      ELSE regexp_matches(coalesce(c.reply, ''), {_q(CHAT_COULD_NOT_ANSWER)}, 'i') END) AS could_not_answer,
     CASE WHEN c.error IS NOT NULL THEN {fail} END AS failure,
     (coalesce(c.prompt_tokens, 0) > 0 OR coalesce(c.completion_tokens, 0) > 0) AS has_tokens,
     {cost} AS cost_usd

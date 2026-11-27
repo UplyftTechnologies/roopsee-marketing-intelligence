@@ -16,6 +16,7 @@ const Sessions = lazy(() => import('./pages/Sessions'))
 const Deeper = lazy(() => import('./pages/Deeper'))
 const MapPage = lazy(() => import('./pages/MapPage'))
 const SpeedPage = lazy(() => import('./pages/SpeedPage'))
+const Products = lazy(() => import('./pages/Products'))
 const Prices = lazy(() => import('./pages/Prices'))
 const Events = lazy(() => import('./pages/Events'))
 const Logins = lazy(() => import('./pages/Logins'))
@@ -48,6 +49,7 @@ const NAV = [
   ['map', 'Map', 'map', 'Visits, checkouts started and orders on a map, by state, city and pincode', MapPage, 'Reports'],
   ['cohorts', 'Cohorts & geo', 'globe', 'Who your customers are and where from', Cohorts, 'Reports'],
   ['basket', 'Basket & AOV', 'basket', 'What people buy and how to raise order value', Basket, 'Reports'],
+  ['products', 'Products', 'tag', 'Roopsee catalog and offer prices', Products, 'Reports'],
   ['prices', 'Price intelligence', 'tag', 'Our prices against Nykaa, Tira and Purplle, and what to reprice', Prices, 'Reports'],
   ['loyalty', 'Retention & LTV', 'loop', 'Who comes back and what they are worth', Loyalty, 'Reports'],
   ['audiences', 'Audiences', 'target', 'Who you can reach, and with what', Audiences, 'Grow'],
@@ -182,12 +184,13 @@ export default function App() {
   const cur = [...NAV, ...EXTRA].find((n) => n[0] === tab) || NAV[0]
   const railActive = tab === 'person' ? 'users' : tab === 'session' ? 'sessions' : tab === 'order' ? 'orders' : tab
   const Page = cur[4]
+  const isProducts = tab === 'products'
   const dateless = tab === 'loyalty' || tab === 'audiences'
   // pages built on people or campaigns (not on visits) cannot be narrowed by device
   // the pages that show revenue and orders can count only paid sales
   const salesApplies = ['home', 'performance', 'orders', 'basket', 'funnel'].includes(tab)
-  const deviceApplies = !['campaigns', 'cohorts', 'users', 'audiences', 'loyalty', 'meta', 'exclusions', 'data', 'dictionary', 'person'].includes(tab)
-  const noDates = dateless || ['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab)
+  const deviceApplies = !isProducts && !['campaigns', 'cohorts', 'users', 'audiences', 'loyalty', 'meta', 'exclusions', 'data', 'dictionary', 'person'].includes(tab)
+  const noDates = isProducts || dateless || ['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab)
   const job = meta?.job
   const c = meta?.counts
   const tc = meta?.tracking_change
@@ -244,7 +247,7 @@ export default function App() {
             <div style={{ flex: 1 }} />
             {job?.running
               ? <span className="badge warn" role="status">Refreshing: {job.message || 'working'} · {Math.max(0, Math.round((Date.now() - new Date(job.started).getTime()) / 1000))}s</span>
-              : lastEvent && <span className={`badge ${freshTone}`} title={`Newest event ${lastEvent.toLocaleString('en-IN')}${meta?.last_transform ? ` · tables rebuilt ${new Date(meta.last_transform).toLocaleString('en-IN')}` : ''}. Press Refresh to pull newer data.`}>Data {ageText}</span>}
+              : !isProducts && lastEvent && <span className={`badge ${freshTone}`} title={`Newest event ${lastEvent.toLocaleString('en-IN')}${meta?.last_transform ? ` · tables rebuilt ${new Date(meta.last_transform).toLocaleString('en-IN')}` : ''}. Press Refresh to pull newer data.`}>Data {ageText}</span>}
             {doneMsg && <span className="badge good" role="status">{doneMsg}</span>}
             {job?.error && <span className="badge bad" title={job.error}>last refresh failed: {String(job.error).slice(0, 60)}</span>}
             {!noDates && (
@@ -255,7 +258,7 @@ export default function App() {
               <span className="badge info upgrade-chip" title={upgradeText}><Icon name="info" size={14} />Tracking changed {fmt(tc)}
                 <button type="button" className="chip-x" aria-label="Hide this note" title="Hide this note" onClick={() => { setHideUpgrade(true); try { localStorage.setItem('mi:hide-upgrade', tc) } catch { /* ignore */ } }}>×</button></span>
             )}
-            {!['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab) && (
+            {!isProducts && !['exclusions', 'data', 'dictionary', 'person', 'session', 'order'].includes(tab) && (
               <Popover align="right" width={320} trigger={({ open, toggle }) => (
                 <button type="button" className="pill-btn" aria-expanded={open} onClick={toggle} title="Hidden traffic, devices and which sales count">
                   <Icon name="sliders" size={17} />Filters{changed > 0 ? <span className="count-badge">{changed}</span> : <small>default</small>}<Icon name="chevron" size={16} />
@@ -297,11 +300,11 @@ export default function App() {
               <Icon name="refresh" size={18} />{job?.running ? 'Updating…' : 'Refresh'}
             </button>
           </header>
-          {freshTone === 'bad' && !job?.running && <div className="notice" role="note"><Icon name="info" size={18} />The data is {ageText} old, so recent activity is missing. Press Refresh to pull the latest events.</div>}
-          {deviceType && !deviceApplies && !['exclusions', 'data', 'dictionary'].includes(tab) && <div className="notice" role="note"><Icon name="info" size={18} />The device filter does not apply to this page: it is built on people or campaigns, not on single visits.</div>}
+          {!isProducts && freshTone === 'bad' && !job?.running && <div className="notice" role="note"><Icon name="info" size={18} />The data is {ageText} old, so recent activity is missing. Press Refresh to pull the latest events.</div>}
+          {!isProducts && deviceType && !deviceApplies && !['exclusions', 'data', 'dictionary'].includes(tab) && <div className="notice" role="note"><Icon name="info" size={18} />The device filter does not apply to this page: it is built on people or campaigns, not on single visits.</div>}
           {dateless && <div className="notice" role="note"><Icon name="info" size={18} />All-time view: the date range does not apply to this page.</div>}
           <main className="page" key={navKey}>
-            {meta && !meta.ready
+            {!isProducts && meta && !meta.ready
               ? <div className="banner err">No analytics tables yet. Run <span className="mono">python3 run.py</span> or press “Refresh”.</div>
               : <Suspense fallback={<div className="skeleton" style={{ height: 320 }} />}><Page /></Suspense>}
           </main>

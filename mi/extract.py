@@ -141,7 +141,14 @@ def extract_small(con, progress=None, only=None) -> None:
                 params = {"select": select_override or ",".join(schema), "limit": PAGE, "offset": off}
                 if "id" in schema:  # stable paging
                     params["order"] = "id.asc"
-                page = sb.select(src, params)
+                try:
+                    page = sb.select(src, params)
+                except RuntimeError as exc:
+                    if raw != "raw_chat_logs" or select_override or off or not any(code in str(exc) for code in ("42703", "PGRST204")):
+                        raise
+                    select_override = ",".join(column for column in schema if column not in {"outcome", "product_reference"})
+                    params["select"] = select_override
+                    page = sb.select(src, params)
                 rows.extend(page)
                 if len(page) < PAGE:
                     break

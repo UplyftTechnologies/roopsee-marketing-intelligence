@@ -63,6 +63,36 @@ def _top(counter, n):
     return [{"name": k, "count": v} for k, v in sorted(counter.items(), key=lambda kv: (-kv[1], str(kv[0])))[:n]]
 
 
+OUTCOMES = {
+    "quiz_started": "Quiz started",
+    "quiz_resumed": "Quiz resumed",
+    "awaiting_product_clarification": "Awaiting product clarification",
+    "assortment_gap": "Product answered / assortment gap",
+    "out_of_stock": "Product answered / out of stock",
+    "stock_alert_registered": "Stock alert registered",
+    "product_information_gap": "Product information gap",
+    "availability_unknown": "Availability unconfirmed",
+    "product_answered": "Product answered",
+}
+
+
+def _assortment_demand(rows):
+    products = {}
+    for row in rows:
+        if row.get("outcome") != "assortment_gap":
+            continue
+        product = row.get("product_reference") or {}
+        if isinstance(product, str):
+            product = json.loads(product) or {}
+        if not product.get("name"):
+            continue
+        key = product.get("source_url") or f"{product.get('brand') or ''} {product['name']}".lower()
+        entry = products.setdefault(key, {"name": key, "label": product["name"], "chats": set()})
+        entry["chats"].add(row["conversation"])
+    demand = [{"name": p["name"], "label": p["label"], "count": len(p["chats"])} for p in products.values()]
+    return sorted(demand, key=lambda p: (-p["count"], p["label"]))[:30]
+
+
 def _pct(part, whole) -> int:
     return round(part / whole * 100) if whole else 0
 
@@ -222,6 +252,7 @@ def chats(date_from: str | None = None, date_to: str | None = None, include_excl
             d += timedelta(days=1)
 
     answered = [r for r in rows if not r["error"]]
+    outcomes = Counter(r["outcome"] for r in answered if r.get("outcome") in OUTCOMES)
     every = sorted(convs.values(), key=lambda c: str(c["updated_at"]), reverse=True)
     shown = every[:CONVERSATIONS_SHOWN]
     sess = _sessions([s for c in every for s in c["sessions"]])
@@ -237,6 +268,8 @@ def chats(date_from: str | None = None, date_to: str | None = None, include_excl
     named = lambda items: [{**i, "label": _name(i["name"], names)} for i in items]  # noqa: E731
     data = {"ready": True, "totals": _totals(rows), "daily": sorted(days.values(), key=lambda x: x["day"]), "topics": _top(topics, 12), "top_questions": _top(questions, 12),
             "products_asked_about": named(_top(asked, 10)), "products_recommended": named(_top(rec, 10)), "failures": _top(fails, 6), "models": _top(models, 5),
+            "outcomes": [{**item, "label": OUTCOMES[item["name"]]} for item in _top(outcomes, len(OUTCOMES))],
+            "assortment_demand": _assortment_demand(answered),
             "disliked": [answer(r) for r in reversed([r for r in answered if r["rating"] == -1])][:20],
             "could_not_answer": [answer(r) for r in reversed([r for r in answered if r["could_not_answer"]])][:20],
             "conversations_total": len(convs), "conversations": shown,
@@ -268,6 +301,7 @@ def chat_conversation(key: str):
             "sessions": [{**sess[s], "messages": sum(1 for r in rows if r["session_id"] == s)} for s in order if s in sess],
             "turns": [{"id": r["id"], "at": r["ts_ist"], "question": r["question"], "reply": None if r["error"] else readable(r["reply"], names), "error": r["failure"] if r["error"] else None,
                        "rating": r["rating"], "latency_ms": r["latency_ms"], "tokens": (r["prompt_tokens"] or 0) + (r["completion_tokens"] or 0), "topic": r["topic"],
+                       "outcome": OUTCOMES.get(r.get("outcome")),
                        "products": [_name(p, names) for p in _ids(r["product_ids"]) if p != r["product_id"]], "session_id": r["session_id"], "session_link": r["session_link"]} for r in rows]}
 
 

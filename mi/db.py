@@ -50,6 +50,7 @@ RAW_SCHEMAS = {
         "id": "VARCHAR", "created_at": "TIMESTAMPTZ", "conversation_id": "VARCHAR", "user_id": "VARCHAR", "guest_session_id": "VARCHAR", "intent": "VARCHAR",
         "user_message": "VARCHAR", "reply": "VARCHAR", "product_ids": "JSON", "has_profile": "BOOLEAN", "model": "VARCHAR", "latency_ms": "INTEGER",
         "error": "VARCHAR", "rating": "INTEGER", "prompt_tokens": "INTEGER", "completion_tokens": "INTEGER", "product_id": "VARCHAR",
+        "outcome": "VARCHAR", "product_reference": "JSON",
     },
     "raw_meta_insights": {
         "account_id": "VARCHAR", "date": "DATE", "campaign_id": "VARCHAR", "campaign_name": "VARCHAR", "adset_id": "VARCHAR", "adset_name": "VARCHAR",

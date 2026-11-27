@@ -109,8 +109,15 @@ export default function Chats() {
             <RoopUsage compact title="Roop by campaign" />
 
             <div className="grid g2">
+              <Card title="Chat outcomes"><Bars items={d.outcomes || []} empty="No structured outcomes in this period." /></Card>
+              <Card title="Products customers wanted Roopsee to carry" sub="Verified products outside the catalogue, counted once per conversation">
+                <Bars items={d.assortment_demand || []} empty="No verified assortment gaps in this period." />
+              </Card>
+            </div>
+
+            <div className="grid g2">
               <Card title="Answers rated not helpful" sub="the clearest signal of what to improve. Click one to read the whole chat."><AnswerList items={d.disliked} onOpen={setOpen} empty="No answers were rated not helpful." /></Card>
-              <Card title="Questions Roop couldn't answer" sub={'replies like "we don\'t stock it" or "not sure": gaps in the shop or in Roop\'s information'}><AnswerList items={d.could_not_answer} onOpen={setOpen} empty="Roop answered everything it was asked." /></Card>
+              <Card title="Questions Roop couldn't answer" sub="Information gaps from new chats and reply-based classifications from older chats"><AnswerList items={d.could_not_answer} onOpen={setOpen} empty="Roop answered everything it was asked." /></Card>
             </div>
 
             <Conversations d={d} open={open} setOpen={setOpen} view={view} setView={setView} text={text} setText={setText} f={f} />
@@ -246,6 +253,7 @@ function Conversation({ chatKey, onClose, f }) {
                   : <div style={{ justifySelf: 'start', maxWidth: '92%', background: 'var(--surface-2)', borderRadius: 12, padding: '8px 12px', whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{t.reply}</div>}
                 <div className="muted" style={{ fontSize: 12 }}>
                   {dt(t.at)}{t.latency_ms ? ` · ${(t.latency_ms / 1000).toFixed(1)} sec` : ''}{t.tokens ? ` · ${num(t.tokens)} tokens` : ''}{` · ${t.topic}`}
+                  {t.outcome ? ` · ${t.outcome}` : ''}
                   {t.rating === 1 ? ' · 👍 helpful' : t.rating === -1 ? ' · 👎 not helpful' : ''}{t.products.length ? ` · showed: ${t.products.join(', ')}` : ''}
                   {t.session_id && c.sessions.length > 1 && <> · <a href={`#session/${encodeURIComponent(t.session_id)}`} onClick={(e) => { e.preventDefault(); f.go('session', { key: t.session_id }) }}>visit {short(t.session_id)}</a></>}
                 </div>

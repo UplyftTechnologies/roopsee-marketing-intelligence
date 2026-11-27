@@ -112,6 +112,15 @@ const SECTIONS = [
   ['Audiences', [
     ['Interest & behaviour groups', 'Every person can carry many labels: quiz users, makeup users, skincare users, price range (the median catalogue price of what they looked at: budget under ₹300, mid-range to ₹800, premium above), discount checkers (opened coupons, offers or the wallet), searchers, filter users, app users, skin concerns named in the quiz, and their journey stage. Counted for all time, like the other audience lists. Edit the rules in mi/deeper_defs.py.'],
   ]],
+  ['Products', [
+    ['MRP and Selling Price', 'The list price and selling price for each SKU in the Roopsee master product catalog. Refresh pulls the latest catalog.'],
+    ['% off MRP', '(MRP minus Selling Price) divided by MRP. The summary takes the average across matching products with both prices.'],
+    ['NEW15 Price', 'The Selling Price after the new-customer offer for a one-unit order that meets the minimum. The eligible count assumes a new customer who can use this offer.'],
+    ['Pay Online Price', 'The Selling Price after NEW15 when eligible, followed by the online payment discount.'],
+    ['App Price', 'The Selling Price after NEW15 when eligible, followed by the first-app-order discount and then the online payment discount.'],
+    ['Coupon discount columns', 'Rupees saved by each active coupon on a one-unit order for an eligible customer. NEW15, GLO10, GLO15, FLAT300 and FLAT500 are separate cart coupon options. Each brand coupon requires its own brand subtotal. APP10 shows the discount used in App Price.'],
+    ['Offer estimates', 'Each discount is rounded to the nearest whole rupee before the next one is applied. The stacked price columns exclude delivery fees, platform fees, and brand coupons. The Products page shows its offer rules’ effective date.'],
+  ]],
   ['Price intelligence', [
     ['Our price', 'The Selling Price and MRP of each product in the product sheet (master_products). The sheet is the only product list this tab uses. The competitor prices typed into the sheet by hand are not used.'],
     ['Competitor price', 'The REGULAR price on the product page of Nykaa, Tira or Purplle at the last refresh, whether or not the item is in stock there. If the latest read gave no price (for example a sold-out Tira page), the last price seen is shown with its date and still compared. Nykaa also shows an offer price for some customers (for example a first order): it is shown as a note, never compared.'],

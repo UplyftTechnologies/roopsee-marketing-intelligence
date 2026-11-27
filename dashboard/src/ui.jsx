@@ -386,9 +386,9 @@ export function Table({ cols, rows, onRow, empty = 'Nothing here for this select
 }
 
 /** Download the rows as CSV. fields = [[header, key | fn(row)], ...] */
-export function ExportBtn({ rows, fields: allFields, name }) {
+export function ExportBtn({ rows, fields: allFields, name, preferenceKey = 'mi.exportShown' }) {
   const ref = useRef(null)
-  const [follow, setFollow] = useState(() => store.get('mi.exportShown') === true)
+  const [follow, setFollow] = useState(() => store.get(preferenceKey) === true)
   if (!rows || !rows.length) return null
   const go = () => {
     let fields = allFields
@@ -410,7 +410,7 @@ export function ExportBtn({ rows, fields: allFields, name }) {
   return (
     <span className="export-grp" ref={ref}>
       <button className="btn small" onClick={go} title="Download the rows loaded on this screen as a CSV file">Export CSV ({rows.length.toLocaleString('en-IN')} rows)</button>
-      <label className="muted export-follow" title="When ticked, the CSV leaves out the columns you hid with the Columns button"><input type="checkbox" checked={follow} onChange={(e) => { setFollow(e.target.checked); store.set('mi.exportShown', e.target.checked) }} /> shown columns only</label>
+      <label className="muted export-follow" title="When ticked, the CSV leaves out the columns you hid with the Columns button"><input type="checkbox" checked={follow} onChange={(e) => { setFollow(e.target.checked); store.set(preferenceKey, e.target.checked) }} /> shown columns only</label>
     </span>
   )
 }
